@@ -1,0 +1,33 @@
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / config
+.env
+.env.*
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Test / tooling caches
+.mypy_cache/
+.pytest_cache/
+
+# Project dumps and other generated artifacts
+dumps/
+dist/
+build/
+*.log
+
+.gemini/
+dumps/

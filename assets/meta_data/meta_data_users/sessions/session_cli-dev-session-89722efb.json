@@ -1,0 +1,44 @@
+{
+  "session_id": "cli-dev-session-89722efb",
+  "user_id": null,
+  "locale": "en",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "fop",
+  "state": "built",
+  "party_fields": {
+    "name": {
+      "status": true,
+      "error": null
+    },
+    "address": {
+      "status": true,
+      "error": null
+    }
+  },
+  "contract_fields": {
+    "object_address": {
+      "status": true,
+      "error": null
+    },
+    "rent_price_month": {
+      "status": true,
+      "error": null
+    },
+    "start_date": {
+      "status": true,
+      "error": null
+    }
+  },
+  "can_build_contract": true,
+  "progress": {
+    "required_contract_fields_total": 3,
+    "required_contract_fields_ok": 3,
+    "required_party_fields_total": 0,
+    "required_party_fields_ok": 0,
+    "ready_for_invite": false,
+    "ready_for_sign": false
+  },
+  "routing": {}
+}

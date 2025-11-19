@@ -1,0 +1,75 @@
+{
+  "category_id": "lease_living",
+
+  "templates": [
+    {
+      "id": "lease_flat",
+      "name": "Договір оренди житла (квартира)",
+      "file": "lease_flat.docx"
+    }
+  ],
+
+  "roles": {
+    "lessor": {
+      "label": "Орендодавець",
+      "allowed_person_types": ["individual", "fop", "company"]
+    },
+    "lessee": {
+      "label": "Орендар",
+      "allowed_person_types": ["individual", "fop", "company"]
+    }
+  },
+
+  "party_modules": {
+    "individual": {
+      "label": "Фізична особа",
+      "fields": [
+        { "field": "name",    "label": "ПІБ",                               "required": true  },
+        { "field": "address", "label": "Адреса проживання/реєстрації",      "required": true  },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "id_code", "label": "РНОКПП",                            "required": false },
+        { "field": "iban",    "label": "IBAN рахунку (за наявності)",       "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "fop": {
+      "label": "ФОП",
+      "fields": [
+        { "field": "name",    "label": "ПІБ ФОП",                           "required": true  },
+        { "field": "address", "label": "Адреса реєстрації ФОП",             "required": true  },
+        { "field": "id_code", "label": "РНОКПП",                            "required": true  },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "iban",    "label": "IBAN рахунку",                      "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "company": {
+      "label": "Юридична особа",
+      "fields": [
+        { "field": "name",          "label": "Повна назва юр. особи",        "required": true  },
+        { "field": "address",       "label": "Юридична адреса",              "required": true  },
+        { "field": "id_code",       "label": "Код ЄДРПОУ",                   "required": true  },
+        { "field": "representative","label": "ПІБ директора / представника","required": false },
+        { "field": "id_doc",        "label": "Документ представника",        "required": false },
+        { "field": "iban",          "label": "IBAN рахунку",                 "required": false },
+        { "field": "phone",         "label": "Телефон",                      "required": false },
+        { "field": "email",         "label": "Email",                        "required": false }
+      ]
+    }
+  },
+
+  "contract_fields": [
+    { "field": "object_address",     "label": "Адреса житла (об'єкт оренди)",   "required": true  },
+    { "field": "object_description", "label": "Опис об'єкта",                   "required": false },
+    { "field": "area_sqm",           "label": "Площа (м²)",                     "required": false },
+    { "field": "rent_price_month",   "label": "Сума оренди за місяць (грн/міс)", "required": true },
+    { "field": "deposit_amount",     "label": "Сума завдатку (грн)",            "required": false },
+    { "field": "payment_due_day",    "label": "День місяця для оплати",         "required": false },
+    { "field": "start_date",         "label": "Дата початку оренди",            "required": true  },
+    { "field": "end_date",           "label": "Дата закінчення оренди",         "required": false }
+  ]
+}

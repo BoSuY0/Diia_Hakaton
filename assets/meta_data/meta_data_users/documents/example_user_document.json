@@ -1,0 +1,52 @@
+{
+  "document_id": "lease_doc_001",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "status": "awaiting_other_party",
+
+  "parties": {
+    "lessor": {
+      "person_type": "fop",
+      "source": "diia",
+      "data": {
+        "name": "ФОП Іванов Іван Іванович",
+        "address": "Київ, вул. ...",
+        "id_code": "1234567890",
+        "id_doc": "МК123456",
+        "iban": "UA123...",
+        "phone": "+380...",
+        "email": "ivanov@example.com"
+      }
+    },
+    "lessee": {
+      "person_type": "individual",
+      "source": null,
+      "data": {
+        "name": null,
+        "address": null,
+        "id_code": null,
+        "id_doc": null,
+        "iban": null,
+        "phone": null,
+        "email": null
+      }
+    }
+  },
+
+  "contract_fields": {
+    "object_address": "Київ, вул. ... (квартира)",
+    "object_description": "2-кімнатна квартира",
+    "area_sqm": 45,
+    "rent_price_month": 15000,
+    "deposit_amount": 15000,
+    "payment_due_day": 5,
+    "start_date": "2025-12-01",
+    "end_date": null
+  },
+
+  "signatures": {
+    "lessor": { "status": "pending", "signed_at": null },
+    "lessee": { "status": "pending", "signed_at": null }
+  }
+}
+

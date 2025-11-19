@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-docx
+pydantic
+litellm
+python-dotenv
+pathspec
+tenacity
+pytest
+httpx
+pytest-cov
