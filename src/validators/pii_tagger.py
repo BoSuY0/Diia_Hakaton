@@ -256,7 +256,12 @@ def _merge_typed(spans: List[Span]) -> List[Span]:
         if last_pos is not None and pos > last_pos and active:
             w = winner()
             if w:
-                result.append(Span(last_pos, pos, w.typ, w.prio))
+                # Якщо попередній спан закінчується тут і має той самий тип — об'єднуємо
+                if result and result[-1].end == last_pos and result[-1].typ == w.typ:
+                    prev = result.pop()
+                    result.append(Span(prev.start, pos, w.typ, w.prio))
+                else:
+                    result.append(Span(last_pos, pos, w.typ, w.prio))
         if kind == 1:
             active.append(sp)
         else:

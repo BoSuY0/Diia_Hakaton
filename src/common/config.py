@@ -55,6 +55,7 @@ class Settings:
         or "anthropic/claude-4.5-haiku"
     )
     llm_base_url: str | None = os.getenv("LLM_BASE_URL")
+    chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"
     # Формат обміну між туллами та LLM усередині tool-loop:
     # "JSON" (за замовчуванням) або "VSC" (value-separated columns).
     llm_wire_format: str = os.getenv("LLM_WIRE_FORMAT", "JSON")

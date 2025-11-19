@@ -1,0 +1,18 @@
+{
+  "session_id": "new_66803",
+  "user_id": null,
+  "locale": "en",
+  "category_id": "lease_living",
+  "template_id": null,
+  "role": null,
+  "person_type": null,
+  "party_types": {},
+  "state": "category_selected",
+  "party_fields": {},
+  "contract_fields": {},
+  "can_build_contract": false,
+  "is_signed": false,
+  "progress": {},
+  "routing": {},
+  "all_data": {}
+}

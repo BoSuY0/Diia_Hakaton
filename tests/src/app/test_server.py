@@ -5,6 +5,12 @@ from src.app.server import app
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def enable_chat(monkeypatch):
+    from src.common.config import settings
+    monkeypatch.setattr(settings, "chat_enabled", True)
+    yield
+
 @pytest.fixture
 def mock_llm_response():
     with patch("src.app.server.chat_with_tools") as mock:

@@ -51,6 +51,9 @@ class Session:
     # Чи вже можна будувати договір (всі required поля зі status=ok)
     can_build_contract: bool = False
 
+    # Чи підписано договір
+    is_signed: bool = False
+
     # Прогрес заповнення (агреговані лічильники/флаги)
     progress: Dict[str, Any] = field(default_factory=dict)
 

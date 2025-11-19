@@ -497,7 +497,7 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
                 tool_result = dispatch_tool(
                     tool_name,
                     tool_args,
-                    tags=getattr(conv, "last_tags", None),
+                    tags=getattr(conv, "tags", None),
                 )
 
                 if tool_name == "set_category":
@@ -995,12 +995,18 @@ def chat(req: ChatRequest) -> ChatResponse:
     PII-санітайзер: реальні значення (IBAN, картки, коди тощо) замінюються
     на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
     """
+    if not settings.chat_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Chat endpoint is disabled. Use session/category/template/fields APIs instead.",
+        )
+
     conv = conversation_store.get(req.session_id)
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
     session = get_or_create_session(req.session_id)
 
     sanitized = sanitize_typed(req.message)
-    conv.last_tags = sanitized["tags"]  # type: ignore[assignment]
+    conv.tags.update(sanitized["tags"])  # type: ignore[assignment]
     user_text = sanitized["sanitized_text"]  # type: ignore[assignment]
 
     # Зберігаємо останню мову користувача для i18n серверних відповідей
@@ -1065,3 +1071,92 @@ def chat(req: ChatRequest) -> ChatResponse:
     conv.messages = pruned_messages
     reply_text = _format_reply_from_messages(pruned_messages)
     return ChatResponse(session_id=req.session_id, reply=reply_text)
+
+
+@app.get("/sessions/{session_id}/contract")
+def get_contract_info(session_id: str) -> Dict[str, Any]:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "session_id": session.session_id,
+        "category_id": session.category_id,
+        "template_id": session.template_id,
+        "status": session.state.value,
+        "is_signed": session.is_signed,
+        "can_build_contract": session.can_build_contract,
+        "document_ready": session.state == "built"
+    }
+
+
+@app.get("/sessions/{session_id}/contract/preview")
+def preview_contract(session_id: str) -> FileResponse:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not session.template_id:
+         raise HTTPException(status_code=400, detail="Template not selected")
+    
+    from src.storage.fs import output_document_path
+    path = output_document_path(session.template_id, session_id, ext="docx")
+    
+    # Якщо файлу немає, але договір готовий до збірки — спробуємо зібрати
+    if not path.exists():
+         if session.can_build_contract:
+             tool_build_contract(session_id, session.template_id)
+         else:
+             raise HTTPException(status_code=404, detail="Contract not generated yet")
+             
+    return FileResponse(
+        path=str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="contract_preview.docx"
+    )
+
+
+@app.post("/sessions/{session_id}/contract/sign")
+def sign_contract(session_id: str) -> Dict[str, Any]:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not session.can_build_contract:
+        raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
+        
+    session.is_signed = True
+    save_session(session)
+    return {"ok": True, "is_signed": True}
+
+
+@app.get("/sessions/{session_id}/contract/download")
+def download_contract(session_id: str) -> FileResponse:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not session.is_signed:
+        raise HTTPException(status_code=403, detail="Contract must be signed before downloading")
+        
+    if not session.template_id:
+         raise HTTPException(status_code=400, detail="Template not selected")
+
+    from src.storage.fs import output_document_path
+    path = output_document_path(session.template_id, session_id, ext="docx")
+    
+    if not path.exists():
+        if session.can_build_contract:
+             tool_build_contract(session_id, session.template_id)
+        else:
+             raise HTTPException(status_code=404, detail="Contract file not found")
+
+    return FileResponse(
+        path=str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"contract_{session_id}.docx"
+    )
