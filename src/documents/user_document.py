@@ -35,36 +35,43 @@ def build_user_document(session: Session) -> Dict[str, Any]:
     parties: Dict[str, Any] = {}
     # Поля сторін (parties)
     parties: Dict[str, Any] = {}
-    # TODO: Load roles dynamically from category if possible, currently hardcoded for lease
-    # Or better: iterate over known roles in session.party_fields OR default to lessor/lessee
-    target_roles = ["lessor", "lessee"] 
+    
+    # Determine roles dynamically from session or fallback to default
+    target_roles = set(session.party_types.keys()) if session.party_types else set()
+    if not target_roles:
+        target_roles = {"lessor", "lessee"}
     
     for role_key in target_roles:
         # Logic: If we have data for this role in session.all_data (prefixed or not), use it.
-        # Previously we restricted by session.role. Now we want to show EVERYTHING we have.
         
         # Determine person_type for this role
-        # It might be stored in session.party_types (new way) or session.person_type (legacy single-user)
         person_type = (session.party_types or {}).get(role_key)
         
         # Fallback for legacy single-user sessions
         if not person_type and session.role == role_key:
             person_type = session.person_type
+            
+        # If still unknown, skip or default? Let's skip to avoid errors
+        if not person_type:
+             # Try to guess or default to individual?
+             # For user_document metadata it's better to be safe.
+             if role_key in ["lessor", "lessee"]:
+                 person_type = "individual"
+             else:
+                 continue
 
         data: Dict[str, Any] = {}
         has_data = False
         
         if category_id and person_type:
             for f in list_party_fields(category_id, person_type):
-                # Try specific key first (role_field), then generic (field) if it might be unique?
-                # In sync_session we store as "{role}_{field}" AND "{field}" (fallback).
-                # But here we need to be precise.
-                
-                # Try prefixed key first (created by sync_session)
-                prefixed_key = f"{role_key}_{f.field}"
+                # Try prefixed key first (created by upsert_field)
+                # Key format is "role.field"
+                prefixed_key = f"{role_key}.{f.field}"
                 val = (session.all_data or {}).get(prefixed_key)
                 
                 # If not found, and this is the "active" role, maybe it's under the raw key?
+                # (Legacy behavior)
                 if val is None and session.role == role_key:
                      val = (session.all_data or {}).get(f.field)
                 

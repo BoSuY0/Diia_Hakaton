@@ -108,10 +108,10 @@ def tool_set_template(session_id: str, template_id: str) -> Dict[str, Any]:
         return tool.execute({"session_id": session_id, "template_id": template_id}, {})
     return {}
 
-def tool_upsert_field(session_id: str, field: str, value: str, tags: Dict[str, str] | None = None) -> Dict[str, Any]:
+def tool_upsert_field(session_id: str, field: str, value: str, tags: Dict[str, str] | None = None, role: Optional[str] = None) -> Dict[str, Any]:
     tool = tool_registry.get("upsert_field")
     if tool:
-        return tool.execute({"session_id": session_id, "field": field, "value": value}, {"tags": tags})
+        return tool.execute({"session_id": session_id, "field": field, "value": value, "role": role}, {"tags": tags})
     return {}
 
 def tool_get_session_summary(session_id: str) -> Dict[str, Any]:

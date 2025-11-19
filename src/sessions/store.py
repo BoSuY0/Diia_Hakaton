@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Optional
+from datetime import datetime
+import random
+import string
 
 from src.common.errors import SessionNotFoundError
 from src.documents.user_document import save_user_document
 from src.sessions.models import FieldState, Session, SessionState
 from src.storage.fs import read_json, session_answers_path, write_json
 
-import random
-import string
 
 def generate_readable_id(prefix: str = "session") -> str:
     """
@@ -19,6 +20,7 @@ def generate_readable_id(prefix: str = "session") -> str:
     # 5 випадкових цифр
     suffix = "".join(random.choices(string.digits, k=5))
     return f"{prefix}_{suffix}"
+
 
 def _from_dict(data: dict) -> Session:
     # Відновлюємо вкладені FieldState (новий формат: party_fields[role][field])
@@ -63,9 +65,14 @@ def _from_dict(data: dict) -> Session:
             error=value.get("error"),
         )
 
+    # Deserialize updated_at
+    updated_at_str = data.get("updated_at")
+    updated_at = datetime.fromisoformat(updated_at_str) if updated_at_str else datetime.now()
+
     session = Session(
         session_id=data["session_id"],
         user_id=data.get("user_id"),
+        updated_at=updated_at,
         locale=data.get("locale", "uk"),
         category_id=data.get("category_id"),
         template_id=data.get("template_id"),
@@ -75,7 +82,9 @@ def _from_dict(data: dict) -> Session:
         party_fields=party_fields,
         contract_fields=contract_fields,
         can_build_contract=bool(data.get("can_build_contract", False)),
+        is_signed=bool(data.get("is_signed", False)),
         party_types=data.get("party_types") or {},
+        filling_mode=data.get("filling_mode", "partial"),
     )
     # Додаткові поля (routing, all_data, progress) — опційні, для зворотної сумісності
     routing = data.get("routing")
@@ -109,11 +118,17 @@ def load_session(session_id: str) -> Session:
 
 
 def save_session(session: Session) -> None:
+    # Update updated_at to now
+    session.updated_at = datetime.now()
+
     path = session_answers_path(session.session_id)
     data = asdict(session)
+    
+    # Serialize datetime
+    data["updated_at"] = session.updated_at.isoformat()
+
     # Enum to value
     data["state"] = session.state.value
-    # Зберігаємо статус полів як bool (True/False) для читабельного JSON.
     # Зберігаємо статус полів як bool (True/False) для читабельного JSON.
     # 1. Contract Fields (Flat)
     c_fields = data.get("contract_fields") or {}

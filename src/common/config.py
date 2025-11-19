@@ -33,7 +33,7 @@ class Settings:
     documents_files_root: Path = documents_root / "documents_files"
     filled_documents_root: Path = documents_files_root / "filled_documents"
     default_documents_root: Path = documents_files_root / "default_documents_files"
-    users_documents_root: Path = documents_files_root / "users_documents_files"
+
 
     # Сесії користувачів (стан заповнення полів) у meta_data_users/sessions
     sessions_root: Path = meta_users_root / "sessions"

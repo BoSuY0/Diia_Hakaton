@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 class Conversation:
     session_id: str
     messages: List[Dict[str, Any]] = field(default_factory=list)
-    # Мапа тегів PII → сире значення для останнього користувацького повідомлення
-    last_tags: Dict[str, str] = field(default_factory=dict)
+    # Мапа тегів PII → сире значення (накопичується за всю сесію)
+    tags: Dict[str, str] = field(default_factory=dict)
     # Чи вже був set_category у поточній розмові (для state-gating, незалежно від pruning)
     has_category_tool: bool = False
     # Остання мова користувача для серверних відповідей ("uk" або "en")

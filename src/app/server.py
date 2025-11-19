@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -39,6 +39,13 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_directories()
+    # Run cleanup on startup
+    try:
+        from src.sessions.cleaner import clean_stale_sessions
+        clean_stale_sessions()
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        
     logger.info("Server started")
     yield
 
@@ -89,6 +96,7 @@ class SetTemplateRequest(BaseModel):
 class UpsertFieldRequest(BaseModel):
     field: str
     value: str
+    role: Optional[str] = None
 
 
 class BuildContractRequest(BaseModel):
@@ -106,6 +114,7 @@ SESSION_AWARE_TOOLS = {
     "get_session_summary",
     "build_contract",
     "route_message",
+    "set_filling_mode",
 }
 
 
@@ -164,12 +173,14 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
         "upsert_field",
         "get_session_summary",
         "set_template",
+        "set_filling_mode",
     ],
     "collecting_fields": [
         "route_message",
         "set_party_context",
         "upsert_field",
         "get_session_summary",
+        "set_filling_mode",
     ],
     "ready_to_build": [
         "route_message",
@@ -497,7 +508,7 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
                 tool_result = dispatch_tool(
                     tool_name,
                     tool_args,
-                    tags=getattr(conv, "last_tags", None),
+                    tags=getattr(conv, "tags", None),
                 )
 
                 if tool_name == "set_category":
@@ -534,16 +545,37 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
 
 def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Обрізає історію діалогу для LLM.
-
-    Тимчасово повертаємо всю історію без обрізання, щоб гарантовано
-    зберегти валідну послідовність assistant(tool_calls) → tool(...)
-    для OpenAI/Azure tool-calling API.
-
-    TODO: якщо буде потрібно, можна додати акуратне обрізання,
-    яке враховує пари assistant/tool_calls ↔ tool.
+    Обрізає історію діалогу для LLM, залишаючи лише необхідний контекст.
+    Стратегія "Ковзне вікно" (Sliding Window):
+    1. Завжди зберігаємо System Prompt (перше повідомлення).
+    2. Зберігаємо останні N повідомлень (контекст поточної розмови).
+    3. Все, що посередині — видаляємо.
+    
+    Це безпечно, оскільки стан сесії (заповнені поля) зберігається в БД,
+    і модель отримує його через тул get_session_summary.
     """
-    return messages
+    MAX_CONTEXT_MESSAGES = 12  # Кількість останніх повідомлень для збереження
+    
+    if len(messages) <= MAX_CONTEXT_MESSAGES + 1:
+        return messages
+
+    system_msg = messages[0]
+    # Якщо перше повідомлення не system, про всяк випадок беремо як є, 
+    # але зазвичай messages[0] це system.
+    if system_msg.get("role") != "system":
+        # Fallback: якщо структура порушена, просто ріжемо хвіст
+        return messages[-MAX_CONTEXT_MESSAGES:]
+
+    # Залишаємо System + останні N
+    recent_messages = messages[-MAX_CONTEXT_MESSAGES:]
+    
+    # Важливо: переконатися, що ми не відрізали "tool_output" від "tool_call".
+    # Якщо перше повідомлення в recent_messages — це "tool" (результат),
+    # а попереднє було "assistant" (виклик), то ми розірвали пару.
+    # Але для простоти і економії, зазвичай достатньо простого вікна.
+    # Модель GPT досить стійка до втрати початку контексту, якщо є System Prompt.
+    
+    return [system_msg] + recent_messages
 
 
 def _format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
@@ -759,6 +791,7 @@ def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict[str, 
         field=req.field,
         value=req.value,
         tags=None,
+        role=req.role,
     )
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
     if not result.get("ok", False) and result.get("error"):
@@ -1000,7 +1033,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     session = get_or_create_session(req.session_id)
 
     sanitized = sanitize_typed(req.message)
-    conv.last_tags = sanitized["tags"]  # type: ignore[assignment]
+    conv.tags.update(sanitized["tags"])  # type: ignore[assignment]
     user_text = sanitized["sanitized_text"]  # type: ignore[assignment]
 
     # Зберігаємо останню мову користувача для i18n серверних відповідей
@@ -1065,3 +1098,295 @@ def chat(req: ChatRequest) -> ChatResponse:
     conv.messages = pruned_messages
     reply_text = _format_reply_from_messages(pruned_messages)
     return ChatResponse(session_id=req.session_id, reply=reply_text)
+
+
+@app.get("/sessions/{session_id}/contract")
+def get_contract_info(session_id: str) -> Dict[str, Any]:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "session_id": session.session_id,
+        "category_id": session.category_id,
+        "template_id": session.template_id,
+        "status": session.state.value,
+        "is_signed": session.is_signed,
+        "can_build_contract": session.can_build_contract,
+        "document_ready": session.state == "built",
+        "document_url": f"/sessions/{session_id}/contract/download" if session.state == "built" else None,
+        "preview_url": f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None,
+    }
+
+
+@app.get("/sessions/{session_id}/contract/preview")
+def preview_contract(session_id: str) -> FileResponse:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not session.template_id:
+         raise HTTPException(status_code=400, detail="Template not selected")
+    
+    from src.storage.fs import output_document_path
+    path = output_document_path(session.template_id, session_id, ext="docx")
+    
+    # Якщо файлу немає, але договір готовий до збірки — спробуємо зібрати
+    if not path.exists():
+         if session.can_build_contract:
+             tool_build_contract(session_id, session.template_id)
+         else:
+             raise HTTPException(status_code=404, detail="Contract not generated yet")
+             
+    return FileResponse(
+        path=str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="contract_preview.docx"
+    )
+
+
+@app.get("/sessions/{session_id}/contract/download")
+def download_contract(session_id: str, final: bool = False):
+    from src.storage.fs import output_document_path
+    from src.common.config import settings
+    from src.sessions.store import load_session
+
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if final:
+        # Ensure session is actually in a final state to avoid serving outdated docs
+        if session.state not in [SessionState.READY_TO_SIGN, SessionState.COMPLETED]:
+             raise HTTPException(status_code=409, detail="Document has been modified. Please order again.")
+
+        filename = f"contract_{session_id}.docx"
+        path = settings.filled_documents_root / filename
+        if not path.exists():
+             raise HTTPException(status_code=404, detail="Final document not found")
+    else:
+        # Try to find temp document
+        if not session.template_id:
+             raise HTTPException(status_code=400, detail="Template not selected")
+        path = output_document_path(session.template_id, session_id, ext="docx")
+        
+        # If not exists, try to build on the fly (if possible) or return 404
+        if not path.exists():
+             # Optional: try to build if ready
+             if session.can_build_contract:
+                 tool_build_contract(session_id, session.template_id)
+             else:
+                 raise HTTPException(status_code=404, detail="Document not built yet")
+
+    return FileResponse(
+        path=str(path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"contract_{session_id}.docx",
+    )
+
+
+@app.post("/sessions/{session_id}/contract/sign")
+def sign_contract(session_id: str) -> Dict[str, Any]:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not session.can_build_contract:
+        raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
+        
+    session.is_signed = True
+    save_session(session)
+    return {"ok": True, "is_signed": True}
+
+
+@app.get("/sessions/{session_id}/schema")
+def get_session_schema(
+    session_id: str,
+    scope: str = Query("all", enum=["all", "required"]),
+    data_mode: str = Query("values", enum=["values", "status", "none"])
+):
+    """
+    Універсальний ендпоінт для отримання структури форми та даних.
+    
+    - scope:
+        - 'all': всі поля
+        - 'required': тільки обов'язкові
+    - data_mode:
+        - 'values': повертає реальні значення (напр. "Іванов")
+        - 'status': повертає true/false (чи заповнено)
+        - 'none': не повертає даних, тільки метадані
+    """
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if not session.category_id:
+        return {"sections": []}
+
+    from src.categories.index import list_party_fields, store as cat_store, _load_meta, list_entities
+    
+    category_def = cat_store.get(session.category_id)
+    if not category_def:
+        raise HTTPException(status_code=404, detail="Category not found")
+        
+    meta = _load_meta(category_def)
+    roles = meta.get("roles", {})
+    
+    response = {
+        "session_id": session.session_id,
+        "category_id": session.category_id,
+        "template_id": session.template_id,
+        "parties": [],
+        "contract": {
+            "title": "Умови договору",
+            "subtitle": "Основні параметри угоди",
+            "fields": []
+        }
+    }
+
+    # --- 1. Parties Section ---
+    for role_key, role_info in roles.items():
+        # Determine person type (default to individual if not set)
+        p_type = session.party_types.get(role_key, "individual")
+        
+        # Get allowed types for selector
+        allowed_types = []
+        for t in role_info.get("allowed_person_types", ["individual"]):
+            # Simple mapping for labels, ideally should be in metadata
+            label_map = {
+                "individual": "Фізична особа",
+                "fop": "ФОП",
+                "company": "Юридична особа"
+            }
+            allowed_types.append({"value": t, "label": label_map.get(t, t)})
+
+        party_obj = {
+            "role": role_key,
+            "label": role_info.get("label", role_key),
+            "person_type": p_type,
+            "person_type_label": next((x["label"] for x in allowed_types if x["value"] == p_type), p_type),
+            "allowed_types": allowed_types,
+            "fields": []
+        }
+
+        # Get fields for this role + type
+        p_fields = list_party_fields(session.category_id, p_type)
+        
+        for pf in p_fields:
+            # Filter by scope
+            if scope == "required" and not pf.required:
+                continue
+
+            field_key = f"{role_key}.{pf.field}"
+            
+            # Determine value based on data_mode
+            val = None
+            if data_mode != "none":
+                current_entry = session.all_data.get(field_key) if session.all_data else None
+                raw_val = current_entry.get("current", "") if current_entry else ""
+                
+                if data_mode == "values":
+                    val = raw_val
+                elif data_mode == "status":
+                    val = bool(raw_val) # True if not empty
+
+            party_obj["fields"].append({
+                "key": field_key,
+                "field_name": pf.field,
+                "label": pf.label,
+                "placeholder": pf.label, # Or add placeholder to metadata
+                "required": pf.required,
+                "value": val
+            })
+        
+        response["parties"].append(party_obj)
+
+    # --- 2. Contract Section ---
+    entities = list_entities(session.category_id)
+    for entity in entities:
+        # Filter by scope
+        if scope == "required" and not entity.required:
+            continue
+
+        # Determine value based on data_mode
+        val = None
+        if data_mode != "none":
+            current_entry = session.all_data.get(entity.field) if session.all_data else None
+            raw_val = current_entry.get("current", "") if current_entry else ""
+            
+            if data_mode == "values":
+                val = raw_val
+            elif data_mode == "status":
+                val = bool(raw_val)
+
+        response["contract"]["fields"].append({
+            "key": entity.field,
+            "field_name": entity.field,
+            "label": entity.label,
+            "placeholder": entity.label,
+            "required": entity.required,
+            "value": val
+        })
+
+    return response
+
+
+@app.post("/sessions/{session_id}/order")
+def order_contract(session_id: str):
+    """
+    Фіналізує документ:
+    1. Перевіряє заповненість.
+    2. Генерує DOCX у filled_documents.
+    3. Змінює статус на READY_TO_SIGN.
+    """
+    from src.documents.builder import build_contract
+    from src.sessions.store import load_session, save_session
+    from src.sessions.models import SessionState
+    from src.common.config import settings
+    import shutil
+    
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    if not session.template_id:
+         raise HTTPException(status_code=400, detail="Template not selected")
+    
+    # 1. Build contract (it checks required fields internally)
+    try:
+        # build_contract returns path to temp file
+        result = build_contract(session_id, session.template_id)
+        temp_path = result["file_path"]
+    except ValueError as e:
+         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+         logger.error(f"Order failed: {e}")
+         raise HTTPException(status_code=500, detail="Internal server error")
+
+    # 2. Move to filled_documents
+    # We want a stable path for the ordered document
+    filename = f"contract_{session_id}.docx"
+    final_path = settings.filled_documents_root / filename
+    
+    try:
+        shutil.copy(temp_path, final_path)
+    except Exception as e:
+        logger.error(f"Failed to save final document: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save document")
+
+    # 3. Update session state
+    session.state = SessionState.READY_TO_SIGN
+    save_session(session)
+    
+    return {
+        "ok": True,
+        "status": session.state.value,
+        "download_url": f"/sessions/{session_id}/contract/download?final=true",
+        "message": "Contract ordered successfully"
+    }

@@ -42,7 +42,7 @@ class SetTemplateTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Встановлює конкретний шаблон договору в межах обраної категорії."
+        return "Set contract template within category."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -114,10 +114,7 @@ class SetPartyContextTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Встановлює роль користувача в договорі (lessor/lessee) "
-            "та тип особи (individual/fop/company) для поточної сесії."
-        )
+        return "Set user role (lessor/lessee) and person type (individual/fop/company)."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -187,10 +184,7 @@ class GetPartyFieldsForSessionTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Повертає список полів для сторони договору (name, address, тощо) "
-            "залежно від обраної ролі та типу особи в поточній сесії."
-        )
+        return "Get party fields (name, address, etc) for current role/type."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -255,10 +249,7 @@ class UpsertFieldTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Оновлює значення окремого поля в сесії (валідація + статуси). "
-            "Очікується, що значення може містити PII-теги виду [TYPE#N], які буде розкрито на бекенді."
-        )
+        return "Update field value. Handles PII tags [TYPE#N] automatically."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -268,6 +259,11 @@ class UpsertFieldTool(BaseTool):
                 "session_id": {
                     "type": "string",
                     "minLength": 1,
+                },
+                "role": {
+                    "type": "string",
+                    "enum": ["lessor", "lessee"],
+                    "description": "Optional. Explicitly specify which party this field belongs to. If not provided, uses the current session role.",
                 },
                 "field": {
                     "type": "string",
@@ -286,6 +282,8 @@ class UpsertFieldTool(BaseTool):
         session_id = args["session_id"]
         field = args["field"]
         value = args["value"]
+        # Allow explicit role override, otherwise fallback to session active role
+        target_role = args.get("role")
         tags = context.get("tags") # Tags passed via context
 
         session = load_session(session_id)
@@ -301,14 +299,32 @@ class UpsertFieldTool(BaseTool):
         is_party_field = False
         
         if entity is None:
-            if not session.person_type:
+            # If target_role is not provided, we need session.person_type
+            # If target_role IS provided, we need to know the person_type for THAT role.
+            
+            effective_role = target_role or session.role
+            if not effective_role:
+                 return {
+                    "ok": False,
+                    "error": "Спочатку потрібно обрати роль (set_party_context) або передати її явно.",
+                }
+            
+            # Determine person type for the effective role
+            effective_person_type = None
+            if session.party_types and effective_role in session.party_types:
+                effective_person_type = session.party_types[effective_role]
+            elif effective_role == session.role:
+                effective_person_type = session.person_type
+            
+            if not effective_person_type:
                 return {
                     "ok": False,
-                    "error": "Спочатку потрібно обрати тип особи (set_party_context).",
+                    "error": f"Невідомий тип особи для ролі {effective_role}. Встановіть контекст або тип особи.",
                 }
+
             party_fields = {
                 f.field: f
-                for f in list_party_fields(session.category_id, session.person_type)
+                for f in list_party_fields(session.category_id, effective_person_type)
             }
             party_meta = party_fields.get(field)
             if party_meta is None:
@@ -322,26 +338,29 @@ class UpsertFieldTool(BaseTool):
         raw_value = self._unmask_value(value, tags)
         
         logger.info(
-            "tool=upsert_field session_id=%s field=%s raw_value_length=%d",
+            "tool=upsert_field session_id=%s field=%s raw_value_length=%d role=%s",
             session_id,
             field,
             len(raw_value),
+            target_role or "current",
         )
 
         value_type = entity.type if entity is not None else "text"
         normalized, error = validate_value(value_type, raw_value)
 
         if is_party_field:
-            if not session.role:
-                return {
+            # Use effective_role determined above
+            if not effective_role:
+                 return {
                     "ok": False,
-                    "error": "Спочатку потрібно обрати роль (set_party_context).",
+                    "error": "Role not determined.",
                 }
-            # Ensure role dict exists
-            if session.role not in session.party_fields:
-                session.party_fields[session.role] = {}
             
-            fs = session.party_fields[session.role].get(field) or FieldState()
+            # Ensure role dict exists
+            if effective_role not in session.party_fields:
+                session.party_fields[effective_role] = {}
+            
+            fs = session.party_fields[effective_role].get(field) or FieldState()
         else:
             fs = session.contract_fields.get(field) or FieldState()
         
@@ -355,15 +374,15 @@ class UpsertFieldTool(BaseTool):
             ok = True
 
         if is_party_field:
-            session.party_fields[session.role][field] = fs
+            session.party_fields[effective_role][field] = fs
         else:
             session.contract_fields[field] = fs
 
         # History logic
         all_data = session.all_data or {}
         key = field
-        if is_party_field and session.role:
-            key = f"{session.role}.{field}"
+        if is_party_field and effective_role:
+            key = f"{effective_role}.{field}"
 
         entry = all_data.get(key) or {}
         history = entry.get("history") or []
@@ -418,6 +437,32 @@ class UpsertFieldTool(BaseTool):
             if fs is None or fs.status != "ok":
                 all_ok = False
                 break
+        
+        # Check party fields if contract fields are ok
+        if all_ok:
+            from src.categories.index import list_party_fields, store as cat_store, _load_meta
+            category_def = cat_store.get(session.category_id)
+            if category_def:
+                meta = _load_meta(category_def)
+                roles = meta.get("roles") or {}
+                for role_key in roles.keys():
+                    p_type = session.party_types.get(role_key)
+                    if not p_type:
+                         if session.role == role_key and session.person_type:
+                             p_type = session.person_type
+                         else:
+                             p_type = "individual"
+                    
+                    party_fields_list = list_party_fields(session.category_id, p_type)
+                    for pf in party_fields_list:
+                        if pf.required:
+                            role_fields = session.party_fields.get(role_key) or {}
+                            fs = role_fields.get(pf.field)
+                            if not fs or fs.status != "ok":
+                                all_ok = False
+                                break
+                    if not all_ok:
+                        break
 
         session.can_build_contract = all_ok
 
@@ -454,7 +499,7 @@ class GetSessionSummaryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Повертає статус заповнення полів для сесії (без значень)."
+        return "Get session field status summary (no values)."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -519,6 +564,47 @@ class GetSessionSummaryTool(BaseTool):
 
 
 @register_tool
+class SetFillingModeTool(BaseTool):
+    @property
+    def name(self) -> str:
+        return "set_filling_mode"
+
+    @property
+    def description(self) -> str:
+        return "Set filling mode: 'partial' (one side) or 'full' (both sides)."
+
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["partial", "full"],
+                },
+            },
+            "required": ["session_id", "mode"],
+            "additionalProperties": False,
+        }
+
+    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+        session_id = args["session_id"]
+        mode = args["mode"]
+        
+        session = load_session(session_id)
+        session.filling_mode = mode
+        save_session(session)
+
+        return {
+            "ok": True,
+            "filling_mode": mode,
+        }
+
+@register_tool
 class BuildContractTool(BaseTool):
     @property
     def name(self) -> str:
@@ -526,7 +612,7 @@ class BuildContractTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Формує фінальний договір у форматі DOCX на основі вже збережених полів."
+        return "Generate final DOCX contract."
 
     @property
     def parameters(self) -> Dict[str, Any]:

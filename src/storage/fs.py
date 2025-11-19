@@ -21,7 +21,7 @@ def ensure_directories() -> None:
     # Документи
     settings.documents_files_root.mkdir(parents=True, exist_ok=True)
     settings.default_documents_root.mkdir(parents=True, exist_ok=True)
-    settings.users_documents_root.mkdir(parents=True, exist_ok=True)
+
     settings.filled_documents_root.mkdir(parents=True, exist_ok=True)
 
 

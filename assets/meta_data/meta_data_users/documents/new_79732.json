@@ -1,0 +1,54 @@
+{
+  "document_id": "lease_flat_new_79732",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "status": "built",
+  "parties": {
+    "lessor": {
+      "person_type": "individual",
+      "source": "manual",
+      "data": {
+        "name": null,
+        "address": null,
+        "id_code": null,
+        "id_doc": null,
+        "iban": null,
+        "phone": null,
+        "email": null
+      }
+    },
+    "lessee": {
+      "person_type": null,
+      "source": "manual",
+      "data": {
+        "name": null,
+        "address": null,
+        "id_code": null,
+        "id_doc": null,
+        "iban": null,
+        "phone": null,
+        "email": null
+      }
+    }
+  },
+  "contract_fields": {
+    "object_address": "с. Дашава, вул. Шкілька, 76",
+    "object_description": null,
+    "area_sqm": null,
+    "rent_price_month": "15000",
+    "deposit_amount": null,
+    "payment_due_day": null,
+    "start_date": "19.11.2025",
+    "end_date": "20.11.2026"
+  },
+  "signatures": {
+    "lessor": {
+      "status": "pending",
+      "signed_at": null
+    },
+    "lessee": {
+      "status": "pending",
+      "signed_at": null
+    }
+  }
+}

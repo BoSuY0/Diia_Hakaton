@@ -59,6 +59,12 @@ def fill_docx_template(template_path: Path, field_values: Dict[str, str], output
             text = re.sub(r"тел\.\s*:\s*$", "", text)
             text = re.sub(r"e-mail:\s*,\s*", "", text)
             text = re.sub(r"e-mail:\s*$", "", text)
+            
+            # Clean up any remaining placeholders that weren't filled
+            # (e.g. fields from other person types)
+            text = re.sub(r"\{\{[^}]+\}\}", "", text)
+            text = re.sub(r"\[\[[^]]+\]\]", "", text)
+            
             paragraph.text = text
     else:
         # Fallback: simple document with fields

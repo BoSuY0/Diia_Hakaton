@@ -1,0 +1,345 @@
+{
+  "session_id": "new_79732",
+  "user_id": null,
+  "locale": "en",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual"
+  },
+  "state": "built",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      },
+      "id_doc": {
+        "status": true,
+        "error": null
+      },
+      "id_code": {
+        "status": true,
+        "error": null
+      },
+      "iban": {
+        "status": true,
+        "error": null
+      },
+      "email": {
+        "status": true,
+        "error": null
+      },
+      "phone": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {
+    "object_address": {
+      "status": true,
+      "error": null
+    },
+    "start_date": {
+      "status": true,
+      "error": null
+    },
+    "end_date": {
+      "status": true,
+      "error": null
+    },
+    "rent_price_month": {
+      "status": true,
+      "error": null
+    }
+  },
+  "can_build_contract": true,
+  "is_signed": false,
+  "progress": {},
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "Сербін Богдан Васильович",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "Сербін",
+          "normalized": "Сербін",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "Сербін Богдан Василь",
+          "normalized": "Сербін Богдан Василь",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "Сербін Богдан Васильович",
+          "normalized": "Сербін Богдан Васильович",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "вул. Шевченка, 34",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "Шевченка",
+          "normalized": "Шевченка",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "вул. Шевченка",
+          "normalized": "вул. Шевченка",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "вул. Шевченка, 34",
+          "normalized": "вул. Шевченка, 34",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.id_doc": {
+      "current": "48924324",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "4892",
+          "normalized": "4892",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "48924324",
+          "normalized": "48924324",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.id_code": {
+      "current": "3543512334235",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "3543512334235",
+          "normalized": "3543512334235",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.iban": {
+      "current": "UA96930263",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "UA96930263",
+          "normalized": "UA96930263",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.email": {
+      "current": "bodyserbin@gmail.com",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "bodyserbin@g",
+          "normalized": "bodyserbin@g",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "bodyserbin@gmail.com",
+          "normalized": "bodyserbin@gmail.com",
+          "valid": true
+        }
+      ]
+    },
+    "lessor.phone": {
+      "current": "+380000000000",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "_",
+          "normalized": "_",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "+",
+          "normalized": "+",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "+3800",
+          "normalized": "+3800",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "+38000",
+          "normalized": "+38000",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "+3800000",
+          "normalized": "+3800000",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "+380000000000",
+          "normalized": "+380000000000",
+          "valid": true
+        }
+      ]
+    },
+    "object_address": {
+      "current": "с. Дашава, вул. Шкілька, 76",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "с",
+          "normalized": "с",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Д",
+          "normalized": "с. Д",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава",
+          "normalized": "с. Дашава",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул",
+          "normalized": "с. Дашава, вул",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул.",
+          "normalized": "с. Дашава, вул.",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул. ",
+          "normalized": "с. Дашава, вул.",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул. Шкілька",
+          "normalized": "с. Дашава, вул. Шкілька",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул. Шкілька,",
+          "normalized": "с. Дашава, вул. Шкілька,",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул. Шкілька,76",
+          "normalized": "с. Дашава, вул. Шкілька,76",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "с. Дашава, вул. Шкілька, 76",
+          "normalized": "с. Дашава, вул. Шкілька, 76",
+          "valid": true
+        }
+      ]
+    },
+    "start_date": {
+      "current": "19.11.2025",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "19.11.2025",
+          "normalized": "19.11.2025",
+          "valid": true
+        }
+      ]
+    },
+    "end_date": {
+      "current": "20.11.2026",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "20.",
+          "normalized": "20.",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "20.11.2",
+          "normalized": "20.11.2",
+          "valid": true
+        },
+        {
+          "source": "chat",
+          "value": "20.11.2026",
+          "normalized": "20.11.2026",
+          "valid": true
+        }
+      ]
+    },
+    "rent_price_month": {
+      "current": "15000",
+      "validated": true,
+      "source": "chat",
+      "history": [
+        {
+          "source": "chat",
+          "value": "15000",
+          "normalized": "15000",
+          "valid": true
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

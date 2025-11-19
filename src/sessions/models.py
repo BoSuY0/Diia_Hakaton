@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
+from datetime import datetime
 
 class SessionState(str, Enum):
     IDLE = "idle"
@@ -12,6 +12,8 @@ class SessionState(str, Enum):
     COLLECTING_FIELDS = "collecting_fields"
     READY_TO_BUILD = "ready_to_build"
     BUILT = "built"
+    READY_TO_SIGN = "ready_to_sign"  # Документ сформовано і готово до підпису
+    COMPLETED = "completed"          # Документ підписано обома сторонами
 
 
 @dataclass
@@ -26,6 +28,9 @@ class FieldState:
 class Session:
     session_id: str
     user_id: Optional[str] = None
+    
+    # Час останнього оновлення (для очищення старих чернеток)
+    updated_at: datetime = field(default_factory=datetime.now)
 
     # Локаль користувача для серверних відповідей (uk/en/…)
     locale: str = "uk"
@@ -51,6 +56,9 @@ class Session:
     # Чи вже можна будувати договір (всі required поля зі status=ok)
     can_build_contract: bool = False
 
+    # Чи підписано договір
+    is_signed: bool = False
+
     # Прогрес заповнення (агреговані лічильники/флаги)
     progress: Dict[str, Any] = field(default_factory=dict)
 
@@ -59,3 +67,6 @@ class Session:
 
     # Агрегатор усіх даних по полях (chat/API) з історією
     all_data: Dict[str, Any] = field(default_factory=dict)
+
+    # Режим заповнення: partial (тільки своя роль) або full (заповнення за всіх)
+    filling_mode: str = "partial"

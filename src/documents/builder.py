@@ -57,6 +57,35 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
         and (e.field not in session.contract_fields
              or session.contract_fields[e.field].status != "ok")
     ]
+
+    # Check required party fields
+    if session.category_id:
+        from src.categories.index import list_party_fields, store as cat_store, _load_meta
+        
+        category_def = cat_store.get(session.category_id)
+        if category_def:
+            meta = _load_meta(category_def)
+            roles = meta.get("roles") or {}
+            for role_key in roles.keys():
+                # Determine person type
+                p_type = None
+                if session.party_types and role_key in session.party_types:
+                    p_type = session.party_types[role_key]
+                elif session.role == role_key and session.person_type:
+                    p_type = session.person_type
+                
+                if not p_type:
+                    p_type = "individual"
+
+                party_fields_list = list_party_fields(session.category_id, p_type)
+                for pf in party_fields_list:
+                    if pf.required:
+                        role_fields = session.party_fields.get(role_key) or {}
+                        field_state = role_fields.get(pf.field)
+                        # Check if field is filled (status ok)
+                        if not field_state or field_state.status != "ok":
+                            missing_required.append(f"{role_key}.{pf.field}")
+
     if missing_required:
         logger.warning(
             "builder=build_contract missing_required_fields session_id=%s "
@@ -99,7 +128,8 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
                         p_type = session.person_type
                     
                     if not p_type:
-                        continue
+                        # Fallback to individual if not set, to ensure fields are processed
+                        p_type = "individual"
 
                     # Get fields for this role+type
                     party_fields_list = list_party_fields(session.category_id, p_type)
