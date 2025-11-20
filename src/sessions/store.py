@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, Generator
 from datetime import datetime
 import random
 import string
+from contextlib import contextmanager
 
 from src.common.errors import SessionNotFoundError
 from src.documents.user_document import save_user_document
 from src.sessions.models import FieldState, Session, SessionState
-from src.storage.fs import read_json, session_answers_path, write_json
+from src.storage.fs import read_json, session_answers_path, write_json, FileLock
 
 
 def generate_readable_id(prefix: str = "session") -> str:
@@ -102,14 +103,24 @@ def _from_dict(data: dict) -> Session:
 def get_or_create_session(session_id: str, user_id: Optional[str] = None) -> Session:
     path = session_answers_path(session_id)
     if path.exists():
+        # READ-ONLY usage, so we don't lock strictly here,
+        # but ideally we should if we expect to modify immediately.
+        # For get_or_create usually it's fine to just read.
+        # However, to be safe, let's assume no lock needed for simple read.
         data = read_json(path)
         return _from_dict(data)
+
     session = Session(session_id=session_id, user_id=user_id)
+    # Initial creation -> write with lock
     save_session(session)
     return session
 
 
 def load_session(session_id: str) -> Session:
+    """
+    Loads session without locking. Use only for read-only operations.
+    For modifications, use transactional_session.
+    """
     path = session_answers_path(session_id)
     if not path.exists():
         raise SessionNotFoundError(f"Session '{session_id}' not found")
@@ -117,7 +128,11 @@ def load_session(session_id: str) -> Session:
     return _from_dict(data)
 
 
-def save_session(session: Session) -> None:
+def save_session(session: Session, locked_by_caller: bool = False) -> None:
+    """
+    Saves session.
+    If locked_by_caller=True, assumes file is already locked by context manager.
+    """
     # Update updated_at to now
     session.updated_at = datetime.now()
 
@@ -153,7 +168,7 @@ def save_session(session: Session) -> None:
             error = value.get("error")
             value["status"] = bool(status_str == "ok" and error is None)
 
-    write_json(path, data)
+    write_json(path, data, locked_by_caller=locked_by_caller)
     # Додатково синхронізуємо user-document у форматі example_user_document.json
     try:
         save_user_document(session)
@@ -161,3 +176,27 @@ def save_session(session: Session) -> None:
         # Не ламаємо основний шлях збереження сесії, якщо побудова
         # user-document тимчасово не вдалася.
         pass
+
+@contextmanager
+def transactional_session(session_id: str) -> Generator[Session, None, None]:
+    """
+    Context manager for atomic read-modify-write session operations.
+    Acquires a lock, loads the session, yields it, and saves it back upon exit.
+    """
+    path = session_answers_path(session_id)
+    # Ensure directory exists (for new sessions/files)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with FileLock(path):
+        # 1. Load
+        if not path.exists():
+             raise SessionNotFoundError(f"Session '{session_id}' not found")
+
+        data = read_json(path)
+        session = _from_dict(data)
+
+        # 2. Yield
+        yield session
+
+        # 3. Save (with locked_by_caller=True)
+        save_session(session, locked_by_caller=True)
