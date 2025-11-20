@@ -9,12 +9,11 @@ def test_validate_value_text():
     assert val == "Hello"
     assert err is None
 
-def test_validate_value_required():
-    # Assuming validate_value handles empty strings if logic dictates, 
-    # but currently validate_value is type-based. 
-    # Let's test empty input for text.
-    with pytest.raises(ValidationError):
-        validate_value("text", "")
+def test_validate_value_empty():
+    # validate_value explicitly allows empty strings
+    val, err = validate_value("text", "")
+    assert val == ""
+    assert err is None
 
     assert normalize_date("01.01.2023") == "01.01.2023"
     assert normalize_date("1/1/2023") == "01.01.2023"
