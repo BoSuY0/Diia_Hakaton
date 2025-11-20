@@ -72,19 +72,9 @@ class FindCategoryByQueryTool(BaseTool):
             category.id,
             category.label,
         )
-        
-        # Auto-set category if session_id is present (as per original logic)
-        session_id = args.get("session_id")
-        if session_id:
-             try:
-                from src.sessions.store import get_or_create_session
-                from src.sessions.actions import set_session_category
-                
-                session = get_or_create_session(session_id)
-                # Use shared action
-                set_session_category(session, category.id)
-             except Exception as e:
-                 logger.error(f"Failed to auto-set category: {e}")
+
+        # Removed auto-set logic. The tool should only return information.
+        # The user/agent must verify and explicitly call set_category.
 
         return {"category_id": category.id, "label": category.label}
 
@@ -125,7 +115,7 @@ class GetTemplatesForCategoryTool(BaseTool):
         category_id = args["category_id"]
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
-        
+
         # Auto-select if only one template (original logic)
         session_id = args.get("session_id")
         if session_id and len(templates) == 1:
@@ -186,7 +176,7 @@ class GetCategoryEntitiesTool(BaseTool):
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         category_id = args["category_id"]
         logger.info("tool=get_category_entities category_id=%s", category_id)
-        
+
         try:
             entities: List[Entity] = list_entities(category_id)
         except ValueError:
@@ -267,13 +257,13 @@ class SetCategoryTool(BaseTool):
         session_id = args["session_id"]
         category_id = args["category_id"]
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
-        
+
         from src.sessions.store import get_or_create_session
         from src.sessions.actions import set_session_category
 
         session = get_or_create_session(session_id)
         ok = set_session_category(session, category_id)
-        
+
         if not ok:
             return {
                 "ok": False,
