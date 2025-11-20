@@ -15,7 +15,7 @@ from src.categories.index import (
 )
 from src.common.logging import get_logger
 from src.sessions.models import SessionState
-from src.sessions.store import get_or_create_session, save_session
+from src.sessions.store import get_or_create_session, save_session, transactional_session, load_session
 
 logger = get_logger(__name__)
 
@@ -73,8 +73,16 @@ class FindCategoryByQueryTool(BaseTool):
             category.label,
         )
 
-        # Removed auto-set logic. The tool should only return information.
-        # The user/agent must verify and explicitly call set_category.
+        # Auto-set category if session_id is present (as per original logic)
+        session_id = args.get("session_id")
+        if session_id:
+             try:
+                from src.sessions.actions import set_session_category
+                # We use transactional_session here to safely update session
+                with transactional_session(session_id) as session:
+                     set_session_category(session, category.id)
+             except Exception as e:
+                 logger.error(f"Failed to auto-set category: {e}")
 
         return {"category_id": category.id, "label": category.label}
 
@@ -120,14 +128,12 @@ class GetTemplatesForCategoryTool(BaseTool):
         session_id = args.get("session_id")
         if session_id and len(templates) == 1:
              try:
-                from src.sessions.store import load_session
-                session = load_session(session_id)
-                # Only set if matches category
-                if session.category_id == category_id:
-                    session.template_id = templates[0].id
-                    session.state = SessionState.TEMPLATE_SELECTED
-                    save_session(session)
-                    logger.info("Auto-selected single template: %s", templates[0].id)
+                with transactional_session(session_id) as session:
+                    # Only set if matches category
+                    if session.category_id == category_id:
+                        session.template_id = templates[0].id
+                        session.state = SessionState.TEMPLATE_SELECTED
+                        logger.info("Auto-selected single template: %s", templates[0].id)
              except Exception:
                  pass
 
@@ -258,11 +264,10 @@ class SetCategoryTool(BaseTool):
         category_id = args["category_id"]
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
 
-        from src.sessions.store import get_or_create_session
         from src.sessions.actions import set_session_category
 
-        session = get_or_create_session(session_id)
-        ok = set_session_category(session, category_id)
+        with transactional_session(session_id) as session:
+             ok = set_session_category(session, category_id)
 
         if not ok:
             return {

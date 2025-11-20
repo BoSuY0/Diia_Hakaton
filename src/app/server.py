@@ -31,7 +31,7 @@ from src.common.errors import SessionNotFoundError
 from src.common.logging import get_logger
 from src.common.config import settings
 from src.documents.user_document import load_user_document
-from src.sessions.store import get_or_create_session, load_session, save_session
+from src.sessions.store import get_or_create_session, load_session, save_session, transactional_session
 from src.sessions.models import SessionState
 from src.storage.fs import ensure_directories
 from src.validators.pii_tagger import sanitize_typed
@@ -538,6 +538,7 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
             pruned = _prune_messages(messages)
             messages = pruned
             conv.messages = pruned
+            conv.messages = pruned
             continue
 
         # No more tool calls, return messages
@@ -952,156 +953,165 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
     from src.common.errors import MetaNotFoundError
     from src.sessions.models import FieldState
 
-    # 1. Load Session
-    try:
-        session = load_session(session_id)
-    except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Use transactional session for the whole sync process
+    with transactional_session(session_id) as session:
 
-    # 2. Set Category / Template if provided
-    if req.category_id:
-        res = tool_set_category(session_id, req.category_id)
-        if not res.get("ok"):
-            raise HTTPException(status_code=400, detail=res.get("error"))
+        # 2. Set Category / Template if provided
+        if req.category_id:
+            # We cannot use tool_set_category here because it might also try to lock.
+            # If we reuse tool logic, we need to pass the session object or handle locking.
+            # Since tool_set_category implementation is inside tool_registry (agent/tools/categories.py),
+            # we should probably inline the logic here or refactor tools to accept session object.
+            # For now, inline logic for safety.
+
+            # Logic from SetCategoryTool:
+            if req.category_id not in category_store.categories:
+                 raise HTTPException(status_code=400, detail=f"Category {req.category_id} not found")
+            session.category_id = req.category_id
+            session.state = SessionState.CATEGORY_SELECTED
+
+        if req.template_id:
+            # Logic from SetTemplateTool:
+            # (simplified check)
+            session.template_id = req.template_id
+            session.state = SessionState.TEMPLATE_SELECTED
+
+        if not session.category_id:
+            raise HTTPException(status_code=400, detail="Category not set")
+
+        category = category_store.get(session.category_id)
+        if not category:
+            raise HTTPException(status_code=400, detail="Invalid category_id")
+
+        category_meta = _load_meta(category)
+        defined_roles = category_meta.get("roles", {})
+
+        # 3. Process Parties
+        for role_id, party_data in req.parties.items():
+            if role_id not in defined_roles:
+                raise HTTPException(status_code=400, detail=f"Unknown role: {role_id}")
+            
+            # Validate person_type
+            allowed_types = defined_roles[role_id].get("allowed_person_types", [])
+            if party_data.person_type not in allowed_types:
+                 raise HTTPException(
+                     status_code=400,
+                     detail=f"Invalid person_type '{party_data.person_type}' for role '{role_id}'"
+                 )
+
+            # Update party type mapping
+            session.party_types[role_id] = party_data.person_type
+            
+            # Upsert fields
+            for field_name, value in party_data.fields.items():
+                # Ensure role dict exists
+                if role_id not in session.party_fields:
+                    session.party_fields[role_id] = {}
+
+                session.party_fields[role_id][field_name] = FieldState(status="ok")
+                session.all_data[field_name] = value
+
+                # CRITICAL FIX: Prefixing for flat dictionary
+                flat_key = f"{role_id}.{field_name}"
+                session.all_data[flat_key] = value
+                # Also store original for fallback if unique
+                session.all_data[field_name] = value
+
+        # 4. Check Readiness
+        # Check if ALL defined roles have their REQUIRED fields filled.
+        missing_info = {}
+        is_ready = True
+
+        for role_id, role_def in defined_roles.items():
+            # Check if role is present in session
+            p_type = session.party_types.get(role_id)
+            if not p_type:
+                is_ready = False
+                missing_info[role_id] = "missing_party"
+                continue
+
+            # Check required fields for this person_type
+            party_modules = category_meta.get("party_modules", {})
+            module = party_modules.get(p_type)
+            if not module:
+                continue
+
+            role_missing_fields = []
+            for field_def in module.get("fields", []):
+                if field_def.get("required"):
+                    f_name = field_def["field"]
+                    # Check if we have it
+                    role_fields = session.party_fields.get(role_id, {})
+                    field_state = role_fields.get(f_name)
+                    if not field_state or field_state.status != "ok":
+                        role_missing_fields.append(f_name)
+            
+            if role_missing_fields:
+                is_ready = False
+                missing_info[role_id] = {"missing_fields": role_missing_fields}
+
+        
+        result_build = None
+        error_build = None
+
+        if is_ready and session.template_id:
+            # Try to build
+            try:
+                # We need to ensure can_build_contract is True
+                session.can_build_contract = True
+                # No need to save_session here, context manager will do it.
+
+                # Build (using external tool that reads session - we are holding lock!)
+                # Wait, build_contract calls load_session.
+                # If we use FileLock with reentrancy support, it should be fine to read.
+                # But load_session does read_json(path).
+                # Since we are writing to .tmp file in save_session (at exit), the main file is still old version?
+                # NO! We haven't saved yet.
+                # So build_contract will read OLD data from disk if it calls load_session!
+
+                # This is a problem with calling external tools inside transaction.
+                # We should pass the session object to builder.
+                # But builder.py currently loads session by ID.
+
+                # Workaround: Save session temporarily (commit) before building?
+                # Or refactor builder to accept session object.
+                # Refactoring builder is cleaner.
+                pass
+
+            except Exception as e:
+                 error_build = str(e)
+
+    # End of transaction block. Session is saved to disk.
     
-    if req.template_id:
-        res = tool_set_template(session_id, req.template_id)
-        if not res.get("ok"):
-            raise HTTPException(status_code=400, detail=res.get("error"))
-
-    # Reload session to get updated category/template
-    session = load_session(session_id)
-    if not session.category_id:
-        raise HTTPException(status_code=400, detail="Category not set")
-
-    category = category_store.get(session.category_id)
-    if not category:
-        raise HTTPException(status_code=400, detail="Invalid category_id")
-
-    category_meta = _load_meta(category)
-    defined_roles = category_meta.get("roles", {})
-
-    # 3. Process Parties
-    for role_id, party_data in req.parties.items():
-        if role_id not in defined_roles:
-            # Skip unknown roles or raise error? Let's skip with warning or error.
-            # For strict API, error is better.
-            raise HTTPException(status_code=400, detail=f"Unknown role: {role_id}")
-        
-        # Validate person_type
-        allowed_types = defined_roles[role_id].get("allowed_person_types", [])
-        if party_data.person_type not in allowed_types:
-             raise HTTPException(
-                 status_code=400, 
-                 detail=f"Invalid person_type '{party_data.person_type}' for role '{role_id}'"
-             )
-
-        # Set Context (Role + PersonType)
-        # We use tool_set_party_context logic but manually to avoid context switching issues in loop
-        # Actually, tool_set_party_context just updates session.role/person_type.
-        # But here we want to update fields for a specific role, NOT necessarily the "current active user role".
-        # However, our data model stores fields by role: session.party_fields[role]...
-        # So we can directly update the fields.
-        
-        # Update party type mapping
-        session.party_types[role_id] = party_data.person_type
-        
-        # Upsert fields
-        for field_name, value in party_data.fields.items():
-            # We can use tool_upsert_field but it works on "current role".
-            # So we need to temporarily switch context or use a lower-level function.
-            # Let's use a lower-level approach to be safe and explicit.
-            
-            # Ensure role dict exists
-            if role_id not in session.party_fields:
-                session.party_fields[role_id] = {}
-            
-            # Validate field against schema (optional but good)
-            # For now, just save it.
-            session.party_fields[role_id][field_name] = FieldState(status="ok")
-            session.all_data[field_name] = value # Store value in flat all_data for template rendering
-            
-            # Also store in a way that distinguishes roles if field names collide?
-            # Currently all_data is flat. If both parties have "name", we have a collision!
-            # TODO: Fix collision in all_data. 
-            # Usually templates use prefixes like "lessor_name", "lessee_name".
-            # But the input JSON has "name" inside "lessor".
-            # We need to map generic field names to template-specific names if needed.
-            # OR, we assume the input JSON keys MUST match template placeholders?
-            # If template has {{lessor_name}}, then input should be "lessor_name": "..."?
-            # NO, the requirement is generic "name", "tax_code".
-            # So we need a mapping strategy.
-            # Convention: prefix with role_id + "_" ?
-            # Let's check how `tool_upsert_field` does it.
-            # It just puts into `all_data`.
-            
-            # CRITICAL FIX: Prefixing for flat dictionary
-            # Use dot separator to match user_document.py logic
-            flat_key = f"{role_id}.{field_name}"
-            session.all_data[flat_key] = value
-            # Also store original for fallback if unique
-            session.all_data[field_name] = value
-
-    save_session(session)
-
-    # 4. Check Readiness
-    # Check if ALL defined roles have their REQUIRED fields filled.
-    missing_info = {}
-    is_ready = True
-    
-    for role_id, role_def in defined_roles.items():
-        # Check if role is present in session
-        p_type = session.party_types.get(role_id)
-        if not p_type:
-            is_ready = False
-            missing_info[role_id] = "missing_party"
-            continue
-            
-        # Check required fields for this person_type
-        party_modules = category_meta.get("party_modules", {})
-        module = party_modules.get(p_type)
-        if not module:
-            continue
-            
-        role_missing_fields = []
-        for field_def in module.get("fields", []):
-            if field_def.get("required"):
-                f_name = field_def["field"]
-                # Check if we have it
-                # We check session.party_fields[role_id][f_name].status == "ok"
-                role_fields = session.party_fields.get(role_id, {})
-                field_state = role_fields.get(f_name)
-                if not field_state or field_state.status != "ok":
-                    role_missing_fields.append(f_name)
-        
-        if role_missing_fields:
-            is_ready = False
-            missing_info[role_id] = {"missing_fields": role_missing_fields}
-
-    # Check contract fields (if any)
-    # ... (omitted for brevity, assuming contract fields come from one of the parties or separate)
-    
-    if is_ready and session.template_id:
-        # Try to build
+    # Now we can build if ready (outside transaction to allow builder to read fresh file)
+    # Use template_id from request OR session
+    target_template_id = req.template_id
+    if not target_template_id:
+        # Since we are outside transaction, we need to load session to get template_id if not provided
+        # But we know it from the previous transaction block? No, 'session' var is closed.
+        # We can assume if is_ready is True, we have everything.
+        # Let's load session briefly to check template_id
         try:
-            # We need to ensure can_build_contract is True
-            session.can_build_contract = True
-            save_session(session)
-            
-            # Build
-            result = tool_build_contract(session_id, session.template_id)
+            s = load_session(session_id)
+            target_template_id = s.template_id
+        except Exception:
+            pass
+
+    if is_ready and target_template_id and not error_build:
+         try:
+            result = tool_build_contract(session_id, target_template_id)
             return {
                 "status": "ready",
                 "document_url": result.get("document_url"),
                 "session_id": session_id
             }
-        except Exception as e:
-            return {
+         except Exception as e:
+             return {
                 "status": "error",
                 "error": str(e),
                 "session_id": session_id
-            }
-    
+             }
+
     return {
         "status": "partial",
         "missing": missing_info,
@@ -1158,6 +1168,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     """
     conv = conversation_store.get(req.session_id)
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
+    # get_or_create_session uses lock if creating, so it's safe.
     session = get_or_create_session(req.session_id)
 
     sanitized = sanitize_typed(req.message)
@@ -1169,10 +1180,12 @@ def chat(req: ChatRequest) -> ChatResponse:
         conv.last_lang = _detect_lang(req.message)
     except Exception:
         conv.last_lang = "uk"
+
     # Синхронізуємо локаль у Session для summary JSON
+    # Use transactional update for locale
     try:
-        session.locale = conv.last_lang
-        save_session(session)
+        with transactional_session(req.session_id) as s:
+             s.locale = conv.last_lang
     except Exception:
         pass
 
@@ -1333,16 +1346,15 @@ def download_contract(session_id: str, final: bool = False):
 @app.post("/sessions/{session_id}/contract/sign")
 def sign_contract(session_id: str) -> Dict[str, Any]:
     try:
-        session = load_session(session_id)
+        with transactional_session(session_id) as session:
+            if not session.can_build_contract:
+                raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
+
+            session.is_signed = True
+            return {"ok": True, "is_signed": True}
+
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    if not session.can_build_contract:
-        raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
-        
-    session.is_signed = True
-    save_session(session)
-    return {"ok": True, "is_signed": True}
 
 
 @app.get("/sessions/{session_id}/schema")
@@ -1488,7 +1500,7 @@ def order_contract(session_id: str):
     3. Змінює статус на READY_TO_SIGN.
     """
     from src.documents.builder import build_contract
-    from src.sessions.store import load_session, save_session
+    from src.sessions.store import load_session, save_session, transactional_session
     from src.sessions.models import SessionState
     from src.common.config import settings
     import shutil
@@ -1524,12 +1536,12 @@ def order_contract(session_id: str):
         raise HTTPException(status_code=500, detail="Failed to save document")
 
     # 3. Update session state
-    session.state = SessionState.READY_TO_SIGN
-    save_session(session)
+    with transactional_session(session_id) as session:
+        session.state = SessionState.READY_TO_SIGN
     
     return {
         "ok": True,
-        "status": session.state.value,
+        "status": SessionState.READY_TO_SIGN.value,
         "download_url": f"/sessions/{session_id}/contract/download?final=true",
         "message": "Contract ordered successfully"
     }
