@@ -14,9 +14,10 @@ from src.storage.fs import output_document_path
 logger = get_logger(__name__)
 
 
-def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
+def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
     logger.info(
-        "builder=build_contract session_id=%s template_id=%s", session_id, template_id
+        "builder=build_contract session_id=%s template_id=%s partial=%s", 
+        session_id, template_id, partial
     )
     try:
         session = load_session(session_id)
@@ -57,7 +58,36 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
         and (e.field not in session.contract_fields
              or session.contract_fields[e.field].status != "ok")
     ]
-    if missing_required:
+
+    # Check required party fields
+    if session.category_id:
+        from src.categories.index import list_party_fields, store as cat_store, _load_meta
+        
+        category_def = cat_store.get(session.category_id)
+        if category_def:
+            meta = _load_meta(category_def)
+            roles = meta.get("roles") or {}
+            for role_key in roles.keys():
+                # Determine person type
+                p_type = None
+                if session.party_types and role_key in session.party_types:
+                    p_type = session.party_types[role_key]
+                elif session.role == role_key and session.person_type:
+                    p_type = session.person_type
+                
+                if not p_type:
+                    p_type = "individual"
+
+                party_fields_list = list_party_fields(session.category_id, p_type)
+                for pf in party_fields_list:
+                    if pf.required:
+                        role_fields = session.party_fields.get(role_key) or {}
+                        field_state = role_fields.get(pf.field)
+                        # Check if field is filled (status ok)
+                        if not field_state or field_state.status != "ok":
+                            missing_required.append(f"{role_key}.{pf.field}")
+
+    if missing_required and not partial:
         logger.warning(
             "builder=build_contract missing_required_fields session_id=%s "
             "category_id=%s template_id=%s missing=%s",
@@ -69,18 +99,20 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
         raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
 
     field_values: Dict[str, str] = {}
+    PLACEHOLDER = "(____________)"
+
     # 1) Поля договору (contract_fields)
     for entity in entities:
         # Значення беремо з агрегатора all_data (current), а не з FieldState
         entry = (session.all_data or {}).get(entity.field) or {}
         value = entry.get("current")
-        field_values[entity.field] = "" if value is None else str(value)
+        
+        if value is None or str(value).strip() == "":
+            field_values[entity.field] = PLACEHOLDER if partial else ""
+        else:
+            field_values[entity.field] = str(value)
 
     # 2) Поля сторони договору (party_fields).
-    #    Ми проходимо по всіх ролях, визначених у категорії (roles).
-    #    Для кожної ролі визначаємо person_type (з session.party_types або fallback).
-    #    Потім беремо поля для цього типу і шукаємо значення в all_data.
-    
     if session.category_id:
         from src.categories.index import list_party_fields, get_roles
         

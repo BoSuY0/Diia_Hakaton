@@ -57,7 +57,8 @@ def validate_value(field_type: str, value: str) -> ValidatorResult:
     """
     Public API for validation, delegating to the registry.
     """
+    # Allow empty values (user might be clearing a field)
     if not value.strip():
-         raise ValidationError("Значення не може бути порожнім")
+         return "", None
          
     return validator_registry.validate(field_type, value)

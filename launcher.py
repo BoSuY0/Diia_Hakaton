@@ -16,6 +16,55 @@ from src.common.logging import get_logger, setup_logging
 logger = get_logger(__name__)
 
 
+def kill_process_on_port(port: int) -> None:
+    """
+    Знаходить і завершує процес, який слухає на вказаному порту.
+    Корисно для автоматичного перезапуску сервера в режимі розробки.
+    """
+    import signal
+    import subprocess
+    
+    try:
+        # Знайти PID процесу на порту
+        result = subprocess.run(
+            ["lsof", "-t", f"-i:{port}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            pid = int(result.stdout.strip().split()[0])
+            logger.info(f"Found process {pid} on port {port}, terminating...")
+            
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.info(f"Process {pid} terminated successfully")
+                # Дати ОС час звільнити порт
+                import time
+                time.sleep(1)
+            except ProcessLookupError:
+                logger.warning(f"Process {pid} already dead")
+            except PermissionError:
+                logger.error(f"No permission to kill process {pid}")
+                
+    except FileNotFoundError:
+        # lsof не встановлено, пробуємо fuser
+        try:
+            result = subprocess.run(
+                ["fuser", "-k", f"{port}/tcp"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                logger.info(f"Killed process on port {port} using fuser")
+        except FileNotFoundError:
+            logger.warning("Neither lsof nor fuser available, cannot auto-kill old server")
+    except Exception as e:
+        logger.warning(f"Could not kill process on port {port}: {e}")
+
+
 def run_app(
     host: str = "0.0.0.0",
     port: int = 8000,
@@ -30,12 +79,17 @@ def run_app(
     # Єдине налаштування логування для всієї системи
     setup_logging()
 
+    # Автоматично завершити старий процес на цьому порту (якщо є)
+    kill_process_on_port(port)
+
     logger.info("Starting API server on %s:%d", host, port)
     uvicorn.run(
         "src.app.server:app",
         host=host,
         port=port,
         reload=reload,
+        reload_dirs=[os.path.join(os.getcwd(), "src")],
+        reload_excludes=["venv", ".venv", "client", "node_modules", ".git", "__pycache__", "site-packages"],
         # Використовуємо наше глобальне налаштування logging,
         # uvicorn не перестворює власні хендлери/форматери
         log_config=None,
@@ -104,7 +158,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument(
         "--reload",
         action="store_true",
-        default=os.getenv("APP_RELOAD", "true").lower() == "true",
+        default=os.getenv("APP_RELOAD", "false").lower() == "true",
         help="Увімкнути авто-перезапуск uvicorn (тільки для девелопмента).",
     )
     parser.add_argument(

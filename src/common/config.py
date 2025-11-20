@@ -33,7 +33,7 @@ class Settings:
     documents_files_root: Path = documents_root / "documents_files"
     filled_documents_root: Path = documents_files_root / "filled_documents"
     default_documents_root: Path = documents_files_root / "default_documents_files"
-    users_documents_root: Path = documents_files_root / "users_documents_files"
+
 
     # Сесії користувачів (стан заповнення полів) у meta_data_users/sessions
     sessions_root: Path = meta_users_root / "sessions"
@@ -55,6 +55,7 @@ class Settings:
         or "anthropic/claude-4.5-haiku"
     )
     llm_base_url: str | None = os.getenv("LLM_BASE_URL")
+    chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"
     # Формат обміну між туллами та LLM усередині tool-loop:
     # "JSON" (за замовчуванням) або "VSC" (value-separated columns).
     llm_wire_format: str = os.getenv("LLM_WIRE_FORMAT", "JSON")
@@ -72,7 +73,13 @@ class Settings:
             if origin.strip()
         ]
     else:
-        cors_origins: list[str] = ["*"]
+        cors_origins: list[str] = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "*"
+        ]
 
 
 settings = Settings()
