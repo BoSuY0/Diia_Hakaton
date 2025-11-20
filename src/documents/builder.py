@@ -104,8 +104,12 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
     # 1) Поля договору (contract_fields)
     for entity in entities:
         # Значення беремо з агрегатора all_data (current), а не з FieldState
-        entry = (session.all_data or {}).get(entity.field) or {}
-        value = entry.get("current")
+        entry = (session.all_data or {}).get(entity.field)
+        value = None
+        if isinstance(entry, dict):
+            value = entry.get("current")
+        else:
+            value = entry
         
         if value is None or str(value).strip() == "":
             field_values[entity.field] = PLACEHOLDER if partial else ""
@@ -142,8 +146,12 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
                     for pf in party_fields_list:
                         # Key format: "role.field" (e.g. "lessor.name")
                         key = f"{role_prefix}.{pf.field}"
-                        entry = (session.all_data or {}).get(key) or {}
-                        value = entry.get("current")
+                        entry = (session.all_data or {}).get(key)
+                        value = None
+                        if isinstance(entry, dict):
+                            value = entry.get("current")
+                        else:
+                            value = entry
                         
                         if value is None or str(value).strip() == "":
                             field_values[key] = PLACEHOLDER if partial else ""

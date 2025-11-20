@@ -10,11 +10,14 @@ def test_validate_value_text():
     assert err is None
 
 def test_validate_value_empty():
-    # validate_value explicitly allows empty strings
+    # validate_value handles empty strings by returning them as-is (trimmed)
+    # It does NOT raise ValidationError itself (it returns err string).
+    # And for "text" (unknown type), it just returns the value.
     val, err = validate_value("text", "")
     assert val == ""
     assert err is None
 
+def test_normalize_date_valid():
     assert normalize_date("01.01.2023") == "01.01.2023"
     assert normalize_date("1/1/2023") == "01.01.2023"
 

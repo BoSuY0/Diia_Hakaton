@@ -21,13 +21,12 @@ def ready_session(mock_settings, mock_categories_data):
     s.party_fields["lessor"] = {"name": FieldState(status="ok")}
     s.all_data["lessor.name"] = {"current": "Lessor Name"}
 
+    s.party_fields["lessee"] = {"name": FieldState(status="ok")}
+    s.all_data["lessee.name"] = {"current": "Lessee Name"}
+
     # Set party types
     s.party_types["lessor"] = "individual"
     s.party_types["lessee"] = "individual"
-
-    # Set lessee fields
-    s.party_fields["lessee"] = {"name": FieldState(status="ok")}
-    s.all_data["lessee.name"] = {"current": "Lessee Name"}
 
     save_session(s)
     return session_id

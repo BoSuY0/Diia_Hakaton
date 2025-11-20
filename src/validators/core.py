@@ -57,8 +57,9 @@ def validate_value(field_type: str, value: str) -> ValidatorResult:
     """
     Public API for validation, delegating to the registry.
     """
-    # Allow empty values (user might be clearing a field)
-    if not value.strip():
-         return "", None
-         
+    # We do NOT return early for empty values here, because specific validators
+    # (like date, iban) should decide if an empty string is valid.
+    # For example, an empty date string is NOT a valid date.
+    # If a field is optional, that check should happen before calling validate_value.
+
     return validator_registry.validate(field_type, value)
