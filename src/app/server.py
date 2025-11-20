@@ -1036,7 +1036,7 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
             # It just puts into `all_data`.
             
             # CRITICAL FIX: Prefixing for flat dictionary
-            flat_key = f"{role_id}_{field_name}"
+            flat_key = f"{role_id}.{field_name}"
             session.all_data[flat_key] = value
             # Also store original for fallback if unique
             session.all_data[field_name] = value
@@ -1279,27 +1279,6 @@ def preview_contract(session_id: str) -> FileResponse:
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_content)
-    if not path.exists():
-         # Try to build if missing
-         from src.documents.builder import build_contract as build_contract_direct
-         try:
-            build_contract_direct(session_id, session.template_id, partial=False)
-         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Build failed: {e}")
-
-    # Convert to PDF
-    from src.documents.converter import convert_to_pdf
-    try:
-        pdf_path = await convert_to_pdf(path, path.parent)
-    except Exception as e:
-        logger.error(f"PDF conversion failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate PDF")
-
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename="contract.pdf"
-    )
 
 
 @app.get("/sessions/{session_id}/contract/download")

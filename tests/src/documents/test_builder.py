@@ -12,18 +12,23 @@ def ready_session(mock_settings, mock_categories_data):
     s.template_id = "t1"
     s.role = "lessor"
     s.person_type = "individual"
-    
+
     # Set contract fields
     s.contract_fields["cf1"] = FieldState(status="ok")
     s.all_data["cf1"] = {"current": "Contract Val"}
-    
+
     # Set party fields
     s.party_fields["lessor"] = {"name": FieldState(status="ok")}
     s.all_data["lessor.name"] = {"current": "Lessor Name"}
-    
+
     # Set party types
     s.party_types["lessor"] = "individual"
-    
+    s.party_types["lessee"] = "individual"
+
+    # Set lessee fields
+    s.party_fields["lessee"] = {"name": FieldState(status="ok")}
+    s.all_data["lessee.name"] = {"current": "Lessee Name"}
+
     save_session(s)
     return session_id
 
@@ -37,16 +42,16 @@ def test_build_contract_success(ready_session, mock_settings):
         template_path = mock_settings.default_documents_root / "test_cat" / "f1.docx"
         template_path.parent.mkdir(parents=True, exist_ok=True)
         template_path.touch()
-        
+
         res = build_contract(ready_session, "t1")
-        
+
         assert res["filename"].endswith(".docx")
         assert "application/vnd.openxmlformats" in res["mime"]
-        
+
         # Verify arguments passed to filler
         args, _ = mock_fill.call_args
         template_arg, values_arg, output_arg = args
-        
+
         assert str(template_arg) == str(template_path)
         assert values_arg["cf1"] == "Contract Val"
         assert values_arg["lessor.name"] == "Lessor Name"
@@ -57,7 +62,7 @@ def test_build_contract_missing_field(ready_session):
     s = load_session(ready_session)
     s.contract_fields["cf1"].status = "empty"
     save_session(s)
-    
+
     with pytest.raises(ValueError, match="Missing required fields"):
         build_contract(ready_session, "t1")
 
