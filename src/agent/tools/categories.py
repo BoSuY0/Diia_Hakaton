@@ -77,22 +77,12 @@ class FindCategoryByQueryTool(BaseTool):
         session_id = args.get("session_id")
         if session_id:
              try:
-                # We can call the set_category logic directly or via the tool.
-                # Here we duplicate the logic slightly to avoid circular dependency or complex dispatch.
-                # Or better: we just return the result and let the LLM/Router handle it?
-                # The original code had a side-effect in dispatch_tool. 
-                # For now, let's keep it pure here and handle side-effects in the router or a "post-execute" hook?
-                # Actually, the original code did: "if category found, auto set_category".
-                # Let's replicate that side effect here for now.
+                from src.sessions.store import get_or_create_session
+                from src.sessions.actions import set_session_category
+                
                 session = get_or_create_session(session_id)
-                session.category_id = category.id
-                session.template_id = None
-                session.state = SessionState.CATEGORY_SELECTED
-                session.party_fields.clear()
-                session.contract_fields.clear()
-                session.can_build_contract = False
-                session.progress = {}
-                save_session(session)
+                # Use shared action
+                set_session_category(session, category.id)
              except Exception as e:
                  logger.error(f"Failed to auto-set category: {e}")
 
@@ -278,23 +268,17 @@ class SetCategoryTool(BaseTool):
         category_id = args["category_id"]
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
         
+        from src.sessions.store import get_or_create_session
+        from src.sessions.actions import set_session_category
+
         session = get_or_create_session(session_id)
-        category: Optional[Category] = category_store.get(category_id)
+        ok = set_session_category(session, category_id)
         
-        if not category:
+        if not ok:
             return {
                 "ok": False,
                 "error": "Невідома категорія договорів.",
             }
-
-        session.category_id = category_id
-        session.template_id = None
-        session.state = SessionState.CATEGORY_SELECTED
-        session.party_fields.clear()
-        session.contract_fields.clear()
-        session.can_build_contract = False
-        session.progress = {}
-        save_session(session)
 
         return {
             "ok": True,

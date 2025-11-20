@@ -33,25 +33,8 @@ def dispatch_tool(
     args = json.loads(arguments_json or "{}")
     logger.info("dispatch_tool name=%s", name)
 
-    # Special handling for find_category_by_query to support "upsert via query" heuristic
-    # This is a legacy behavior we might want to keep or refactor later.
-    # For now, we keep it here as a "pre-dispatch" hook.
-    if name == "find_category_by_query":
-        query = args.get("query", "") or ""
-        session_id = args.get("session_id")
-        
-        m = re.match(r"\s*([a-zA-Z0-9_]+)\s*=(.+)", query)
-        if session_id and m:
-            field = m.group(1)
-            value = m.group(2).strip()
-            logger.info(
-                "dispatch_tool: treating fc as upsert_field session_id=%s field=%s",
-                session_id,
-                field,
-            )
-            # Redirect to upsert_field
-            name = "upsert_field"
-            args = {"session_id": session_id, "field": field, "value": value}
+    # Special handling for find_category_by_query was removed.
+    # The tool should handle its own logic or the LLM should use the correct tool.
 
     tool = tool_registry.get(name)
     if not tool:
@@ -128,6 +111,9 @@ def tool_build_contract(session_id: str, template_id: str) -> Dict[str, Any]:
 
 def tool_set_party_context(session_id: str, role: str, person_type: str) -> Dict[str, Any]:
     tool = tool_registry.get("set_party_context")
-    if tool:
-        return tool.execute({"session_id": session_id, "role": role, "person_type": person_type}, {})
-    return {}
+    if not tool:
+        logger.error("tool_set_party_context: Tool 'set_party_context' not found in registry!")
+        return {"ok": False, "error": "Tool set_party_context not found"}
+    
+    logger.info("tool_set_party_context: Executing for session_id=%s", session_id)
+    return tool.execute({"session_id": session_id, "role": role, "person_type": person_type}, {})

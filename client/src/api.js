@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = `http://${window.location.hostname}:8000`;
 
 export const api = {
     API_URL,
@@ -18,21 +18,19 @@ export const api = {
     },
 
     async setPartyContext(sessionId, role, personType) {
-        // Since there is no direct endpoint for set_party_context, we use the chat endpoint
-        // or we rely on the fact that upsert_field might work if we set the role explicitly?
-        // No, upsert_field needs the party type to be set to validate fields.
-        // We need to simulate the tool call or use the chat endpoint.
-        // Using chat endpoint is safer.
-        return axios.post(`${API_URL}/chat`, {
-            session_id: sessionId,
-            message: `set role to ${role} and person type to ${personType}`
+        return axios.post(`${API_URL}/sessions/${sessionId}/party-context`, {
+            role: role,
+            person_type: personType
         });
     },
 
-    async upsertField(sessionId, field, value, role = null) {
+    async upsertField(sessionId, field, value, role = null, clientId = null) {
         const payload = { field, value };
         if (role) {
             payload.role = role;
+        }
+        if (clientId) {
+            payload.client_id = clientId;
         }
         return axios.post(`${API_URL}/sessions/${sessionId}/fields`, payload);
     },
@@ -42,9 +40,11 @@ export const api = {
     },
 
     async getPreview(sessionId) {
-        return axios.get(`${API_URL}/sessions/${sessionId}/contract/preview`, {
-            responseType: 'blob'
-        });
+        return axios.get(`${API_URL}/sessions/${sessionId}/contract/preview`);
+    },
+
+    getDownloadUrl(sessionId) {
+        return `${API_URL}/sessions/${sessionId}/contract/download`;
     },
 
     async getSchema(sessionId, scope = 'all', dataMode = 'values') {
@@ -56,6 +56,16 @@ export const api = {
 
     async orderContract(sessionId) {
         const res = await axios.post(`${API_URL}/sessions/${sessionId}/order`);
+        return res.data;
+    },
+
+    async getCategories() {
+        const res = await axios.get(`${API_URL}/categories`);
+        return res.data;
+    },
+
+    async getTemplates(categoryId) {
+        const res = await axios.get(`${API_URL}/categories/${categoryId}/templates`);
         return res.data;
     }
 };

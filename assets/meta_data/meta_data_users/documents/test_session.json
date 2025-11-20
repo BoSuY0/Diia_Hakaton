@@ -1,24 +1,11 @@
 {
-  "document_id": "new_31656",
+  "document_id": "test_session",
   "category_id": "lease_living",
   "template_id": null,
   "status": "draft",
   "parties": {
-    "lessor": {
-      "person_type": null,
-      "source": "manual",
-      "data": {
-        "name": null,
-        "address": null,
-        "id_code": null,
-        "id_doc": null,
-        "iban": null,
-        "phone": null,
-        "email": null
-      }
-    },
     "lessee": {
-      "person_type": null,
+      "person_type": "individual",
       "source": "manual",
       "data": {
         "name": null,

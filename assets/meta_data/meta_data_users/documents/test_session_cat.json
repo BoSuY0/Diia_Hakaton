@@ -1,11 +1,11 @@
 {
-  "document_id": "new_26389",
+  "document_id": "test_session_cat",
   "category_id": "lease_living",
   "template_id": null,
   "status": "draft",
   "parties": {
     "lessor": {
-      "person_type": null,
+      "person_type": "individual",
       "source": "manual",
       "data": {
         "name": null,
@@ -18,7 +18,7 @@
       }
     },
     "lessee": {
-      "person_type": null,
+      "person_type": "individual",
       "source": "manual",
       "data": {
         "name": null,

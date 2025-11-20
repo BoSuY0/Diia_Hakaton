@@ -1,7 +1,8 @@
 {
-  "session_id": "new_66803",
+  "session_id": "test_session_val",
   "user_id": null,
-  "locale": "en",
+  "updated_at": "2025-11-20T22:14:57.193572",
+  "locale": "uk",
   "category_id": "lease_living",
   "template_id": null,
   "role": null,
@@ -14,5 +15,6 @@
   "is_signed": false,
   "progress": {},
   "routing": {},
-  "all_data": {}
+  "all_data": {},
+  "filling_mode": "partial"
 }

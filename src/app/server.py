@@ -32,6 +32,7 @@ from src.common.logging import get_logger
 from src.common.config import settings
 from src.documents.user_document import load_user_document
 from src.sessions.store import get_or_create_session, load_session, save_session
+from src.sessions.models import SessionState
 from src.storage.fs import ensure_directories
 from src.validators.pii_tagger import sanitize_typed
 
@@ -91,19 +92,13 @@ class SetCategoryRequest(BaseModel):
     category_id: str
 
 
-class SetTemplateRequest(BaseModel):
-    template_id: str
 
 
 class UpsertFieldRequest(BaseModel):
     field: str
-    value: str
+    value: Any
     role: Optional[str] = None
-
-
-class SetPartyContextRequest(BaseModel):
-    role: str
-    person_type: str
+    client_id: Optional[str] = None
 
 
 class BuildContractRequest(BaseModel):
@@ -743,6 +738,23 @@ def get_session_party_fields(session_id: str) -> Dict[str, Any]:
     return result
 
 
+class SetPartyContextRequest(BaseModel):
+    role: str
+    person_type: str
+
+
+@app.post("/sessions/{session_id}/party-context")
+def set_session_party_context(session_id: str, req: SetPartyContextRequest) -> Dict[str, Any]:
+    result = tool_set_party_context(
+        session_id=session_id,
+        role=req.role,
+        person_type=req.person_type,
+    )
+    if not result.get("ok", False):
+        raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
+    return result
+
+
 @app.post("/sessions", response_model=CreateSessionResponse)
 def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     from src.sessions.store import get_or_create_session, generate_readable_id
@@ -791,8 +803,73 @@ def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, 
     return result
 
 
+from fastapi.responses import StreamingResponse
+import asyncio
+from collections import defaultdict
+
+class StreamManager:
+    def __init__(self):
+        self.connections: Dict[str, List[asyncio.Queue]] = defaultdict(list)
+
+    async def connect(self, session_id: str) -> asyncio.Queue:
+        queue = asyncio.Queue(maxsize=100)
+        self.connections[session_id].append(queue)
+        return queue
+
+    def disconnect(self, session_id: str, queue: asyncio.Queue):
+        if session_id in self.connections:
+            self.connections[session_id].remove(queue)
+            if not self.connections[session_id]:
+                del self.connections[session_id]
+
+    async def broadcast(self, session_id: str, message: dict):
+        if session_id not in self.connections:
+            return
+        
+        # Create SSE formatted message
+        data = json.dumps(message)
+        msg = f"data: {data}\n\n"
+        
+        to_remove = []
+        for queue in self.connections[session_id]:
+            try:
+                # Use put_nowait to avoid blocking if queue is full (though unlikely with infinite queue)
+                # But more importantly, if we want to detect closed loops, we rely on client disconnecting.
+                # Here we just put. If loop is closed, it might raise.
+                queue.put_nowait(msg)
+            except Exception:
+                to_remove.append(queue)
+        
+        for queue in to_remove:
+            self.disconnect(session_id, queue)
+
+stream_manager = StreamManager()
+
+@app.get("/sessions/{session_id}/stream")
+async def stream_session_events(session_id: str):
+    """
+    Server-Sent Events endpoint for real-time session updates.
+    """
+    queue = await stream_manager.connect(session_id)
+    
+    async def event_generator():
+        try:
+            while True:
+                # Wait for new messages
+                msg = await queue.get()
+                yield msg
+        except asyncio.CancelledError:
+            stream_manager.disconnect(session_id, queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 @app.post("/sessions/{session_id}/fields")
-def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict[str, Any]:
+async def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict[str, Any]:
+    # Validation Logic
+    # Validation Logic moved to tool_upsert_field
+
+
     result = tool_upsert_field(
         session_id=session_id,
         field=req.field,
@@ -800,6 +877,17 @@ def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict[str, 
         tags=None,
         role=req.role,
     )
+    
+    if result.get("ok", False):
+        # Broadcast update to all listeners
+        await stream_manager.broadcast(session_id, {
+            "type": "field_update",
+            "field": req.field,
+            "value": req.value,
+            "role": req.role,
+            "client_id": req.client_id
+        })
+
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
     if not result.get("ok", False) and result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
@@ -1026,6 +1114,38 @@ def _load_meta(category) -> dict:
     with category.meta_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+
+@app.get("/categories")
+def get_categories():
+    """
+    Повертає список всіх доступних категорій договорів.
+    """
+    from src.categories.index import store as category_store
+    categories = []
+    for cat_id, cat in category_store.categories.items():
+        categories.append({
+            "id": cat.id,
+            "label": cat.label,
+            # "description": cat.description # Category object has no description
+        })
+    return categories
+
+
+@app.get("/categories/{category_id}/templates")
+def get_category_templates(category_id: str):
+    """
+    Повертає список шаблонів для вказаної категорії.
+    """
+    from src.categories.index import list_templates
+    try:
+        templates = list_templates(category_id)
+        return [
+            {"id": t.id, "name": t.name} # TemplateInfo object has no description
+            for t in templates
+        ]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     """
@@ -1140,17 +1260,45 @@ def preview_contract(session_id: str) -> FileResponse:
     from src.storage.fs import output_document_path
     path = output_document_path(session.template_id, session_id, ext="docx")
     
-    # Якщо файлу немає, але договір готовий до збірки — спробуємо зібрати
-    if not path.exists():
-         if session.can_build_contract:
-             tool_build_contract(session_id, session.template_id)
-         else:
-             raise HTTPException(status_code=404, detail="Contract not generated yet")
+    # Always try to build with partial=True for preview
+    # We import build_contract directly to bypass LLM tool wrapper and use partial arg
+    from src.documents.builder import build_contract as build_contract_direct
+    try:
+        build_contract_direct(session_id, session.template_id, partial=True)
+    except Exception as e:
+        logger.error(f"Preview build failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
              
+    # HTML Preview (Fast, Cross-Platform)
+    from src.documents.converter import convert_to_html
+    try:
+        html_content = convert_to_html(path)
+    except Exception as e:
+        logger.error(f"HTML conversion failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate preview")
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_content)
+    if not path.exists():
+         # Try to build if missing
+         from src.documents.builder import build_contract as build_contract_direct
+         try:
+            build_contract_direct(session_id, session.template_id, partial=False)
+         except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Build failed: {e}")
+
+    # Convert to PDF
+    from src.documents.converter import convert_to_pdf
+    try:
+        pdf_path = await convert_to_pdf(path, path.parent)
+    except Exception as e:
+        logger.error(f"PDF conversion failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
+
     return FileResponse(
-        path=str(path),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="contract_preview.docx"
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename="contract.pdf"
     )
 
 
@@ -1259,7 +1407,8 @@ def get_session_schema(
     # --- 1. Parties Section ---
     for role_key, role_info in roles.items():
         # Determine person type (default to individual if not set)
-        p_type = session.party_types.get(role_key, "individual")
+        party_types = session.party_types or {}
+        p_type = party_types.get(role_key, "individual")
         
         # Get allowed types for selector
         allowed_types = []

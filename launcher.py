@@ -88,6 +88,8 @@ def run_app(
         host=host,
         port=port,
         reload=reload,
+        reload_dirs=[os.path.join(os.getcwd(), "src")],
+        reload_excludes=["venv", ".venv", "client", "node_modules", ".git", "__pycache__", "site-packages"],
         # Використовуємо наше глобальне налаштування logging,
         # uvicorn не перестворює власні хендлери/форматери
         log_config=None,
@@ -156,7 +158,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument(
         "--reload",
         action="store_true",
-        default=os.getenv("APP_RELOAD", "true").lower() == "true",
+        default=os.getenv("APP_RELOAD", "false").lower() == "true",
         help="Увімкнути авто-перезапуск uvicorn (тільки для девелопмента).",
     )
     parser.add_argument(

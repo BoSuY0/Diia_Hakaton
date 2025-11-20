@@ -293,15 +293,19 @@ class UpsertFieldTool(BaseTool):
                 "error": "Спочатку потрібно обрати категорію (set_category).",
             }
 
-        # Logic copied from original tool_upsert_field
+        # Unmask first
+        raw_value = self._unmask_value(value, tags)
+
+        # Centralized validation for all field types
+        from src.validators.core import validate_value
+        from src.categories.index import list_entities, list_party_fields
+        from src.sessions.models import FieldState
+        
         entities = {e.field: e for e in list_entities(session.category_id)}
         entity = entities.get(field)
         is_party_field = False
         
         if entity is None:
-            # If target_role is not provided, we need session.person_type
-            # If target_role IS provided, we need to know the person_type for THAT role.
-            
             effective_role = target_role or session.role
             if not effective_role:
                  return {
@@ -309,7 +313,6 @@ class UpsertFieldTool(BaseTool):
                     "error": "Спочатку потрібно обрати роль (set_party_context) або передати її явно.",
                 }
             
-            # Determine person type for the effective role
             effective_person_type = None
             if session.party_types and effective_role in session.party_types:
                 effective_person_type = session.party_types[effective_role]
@@ -333,10 +336,10 @@ class UpsertFieldTool(BaseTool):
                     "error": "Поле не належить до обраної категорії.",
                 }
             is_party_field = True
+        else:
+            # Contract field
+            effective_role = None # Not needed for contract fields
 
-        # Unmask
-        raw_value = self._unmask_value(value, tags)
-        
         logger.info(
             "tool=upsert_field session_id=%s field=%s raw_value_length=%d role=%s",
             session_id,
@@ -344,19 +347,32 @@ class UpsertFieldTool(BaseTool):
             len(raw_value),
             target_role or "current",
         )
-
-        value_type = entity.type if entity is not None else "text"
+        
+        value_type = "text"
+        if entity:
+            value_type = entity.type
+        elif is_party_field:
+             # Heuristic mapping for party fields
+             if "rnokpp" in field or "tax_id" in field:
+                 value_type = "rnokpp"
+             elif "edrpou" in field:
+                 value_type = "edrpou"
+             elif "iban" in field:
+                 value_type = "iban"
+             elif "date" in field:
+                 value_type = "date"
+             elif "email" in field:
+                 value_type = "email"
+        
         normalized, error = validate_value(value_type, raw_value)
 
         if is_party_field:
-            # Use effective_role determined above
             if not effective_role:
                  return {
                     "ok": False,
                     "error": "Role not determined.",
                 }
             
-            # Ensure role dict exists
             if effective_role not in session.party_fields:
                 session.party_fields[effective_role] = {}
             

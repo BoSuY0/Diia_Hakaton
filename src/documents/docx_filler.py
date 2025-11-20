@@ -51,14 +51,17 @@ def fill_docx_template(template_path: Path, field_values: Dict[str, str], output
             #   паспорт: , РНОКПП:      ->  "" (порожній рядок)
             #   тел.: , e-mail: test    ->  e-mail: test
             #   тел.: , e-mail:         ->  "" (порожній рядок)
-            text = re.sub(r"паспорт:\s*,\s*", "", text)
-            text = re.sub(r"паспорт:\s*$", "", text)
-            text = re.sub(r"РНОКПП:\s*,\s*", "", text)
-            text = re.sub(r"РНОКПП:\s*$", "", text)
-            text = re.sub(r"тел\.\s*:\s*,\s*", "", text)
-            text = re.sub(r"тел\.\s*:\s*$", "", text)
-            text = re.sub(r"e-mail:\s*,\s*", "", text)
-            text = re.sub(r"e-mail:\s*$", "", text)
+            # Cleanup empty labels
+            # Define labels to clean up if they are empty (followed by comma or end of line)
+            labels_to_clean = ["паспорт", "РНОКПП", "тел.", "e-mail"]
+            
+            for label in labels_to_clean:
+                # Escape label for regex
+                safe_label = re.escape(label)
+                # Case 1: Label followed by comma (and whitespace) -> remove
+                text = re.sub(rf"{safe_label}:\s*,\s*", "", text)
+                # Case 2: Label at end of string (or followed by whitespace only) -> remove
+                text = re.sub(rf"{safe_label}:\s*$", "", text)
             
             # Clean up any remaining placeholders that weren't filled
             # (e.g. fields from other person types)

@@ -1,51 +1,80 @@
-import React, { useEffect, useState } from 'react';
-import mammoth from 'mammoth';
+import { useState, useEffect } from 'react';
+import { X, Download } from 'lucide-react';
+import { api } from '../api';
 
-export const PreviewDrawer = ({ isOpen, onClose, docBlob }) => {
-    const [htmlContent, setHtmlContent] = useState('');
+export default function PreviewDrawer({ isOpen, onClose, sessionId }) {
+    const [htmlContent, setHtmlContent] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (isOpen && docBlob) {
-            setLoading(true);
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                try {
-                    const arrayBuffer = event.target.result;
-                    const result = await mammoth.convertToHtml({ arrayBuffer });
-                    setHtmlContent(result.value);
-                } catch (e) {
-                    console.error("Mammoth conversion failed", e);
-                    setHtmlContent('<p style="color:red">Не вдалося відобразити документ.</p>');
-                } finally {
-                    setLoading(false);
-                }
-            };
-            reader.readAsArrayBuffer(docBlob);
+        if (isOpen && sessionId) {
+            fetchPreview();
         }
-    }, [isOpen, docBlob]);
+    }, [isOpen, sessionId]);
+
+    const fetchPreview = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            // Use api.API_URL to ensure correct host (e.g. when accessing from mobile via IP)
+            const response = await fetch(`${api.API_URL}/sessions/${sessionId}/contract/preview`);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Preview failed');
+            }
+            const html = await response.text();
+            setHtmlContent(html);
+        } catch (err) {
+            console.error('Preview error:', err);
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDownload = () => {
+        window.open(api.getDownloadUrl(sessionId), '_blank');
+    };
 
     if (!isOpen) return null;
 
     return (
-        <>
-            <div className="drawer-overlay" onClick={onClose} />
-            <div className={`preview-drawer ${isOpen ? 'open' : ''}`}>
+        <div className="drawer-overlay" onClick={onClose}>
+            <div className="drawer-container" onClick={e => e.stopPropagation()}>
                 <div className="drawer-header">
-                    <div className="drawer-title">Попередній перегляд</div>
-                    <button className="close-btn" onClick={onClose}>&times;</button>
+                    <h2>Попередній перегляд</h2>
+                    <button className="close-btn" onClick={onClose}>
+                        <X size={24} />
+                    </button>
                 </div>
+
                 <div className="drawer-content">
                     {loading ? (
-                        <div style={{ textAlign: 'center', padding: 20 }}>Завантаження документу...</div>
+                        <div className="loading-state">Завантаження документа...</div>
+                    ) : error ? (
+                        <div className="error-state">
+                            <p>Помилка: {error}</p>
+                            <button onClick={fetchPreview}>Спробувати знову</button>
+                        </div>
                     ) : (
-                        <div
-                            className="document-paper"
-                            dangerouslySetInnerHTML={{ __html: htmlContent }}
-                        />
+                        <div className="html-preview-container">
+                            <iframe
+                                srcDoc={htmlContent}
+                                title="Document Preview"
+                                style={{ width: '100%', height: '100%', border: 'none', background: 'white' }}
+                            />
+                        </div>
                     )}
                 </div>
+
+                <div className="drawer-footer">
+                    <button className="download-btn" onClick={handleDownload} disabled={loading || error}>
+                        <Download size={20} style={{ marginRight: '8px' }} />
+                        Завантажити PDF (Оригінал)
+                    </button>
+                </div>
             </div>
-        </>
+        </div>
     );
-};
+}

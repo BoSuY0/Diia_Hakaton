@@ -31,3 +31,4 @@ build/
 
 .gemini/
 dumps/
+node_modules/

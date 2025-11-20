@@ -1,15 +1,13 @@
 {
-  "session_id": "new_00630",
+  "session_id": "new_58890",
   "user_id": null,
-  "locale": "en",
+  "updated_at": "2025-11-20T16:21:18.245436",
+  "locale": "uk",
   "category_id": "lease_living",
   "template_id": "lease_flat",
-  "role": "lessee",
-  "person_type": "individual",
-  "party_types": {
-    "lessor": "individual",
-    "lessee": "individual"
-  },
+  "role": null,
+  "person_type": null,
+  "party_types": {},
   "state": "template_selected",
   "party_fields": {},
   "contract_fields": {},

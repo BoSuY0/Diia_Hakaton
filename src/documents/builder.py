@@ -14,9 +14,10 @@ from src.storage.fs import output_document_path
 logger = get_logger(__name__)
 
 
-def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
+def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
     logger.info(
-        "builder=build_contract session_id=%s template_id=%s", session_id, template_id
+        "builder=build_contract session_id=%s template_id=%s partial=%s", 
+        session_id, template_id, partial
     )
     try:
         session = load_session(session_id)
@@ -86,7 +87,7 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
                         if not field_state or field_state.status != "ok":
                             missing_required.append(f"{role_key}.{pf.field}")
 
-    if missing_required:
+    if missing_required and not partial:
         logger.warning(
             "builder=build_contract missing_required_fields session_id=%s "
             "category_id=%s template_id=%s missing=%s",
@@ -98,18 +99,20 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
         raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
 
     field_values: Dict[str, str] = {}
+    PLACEHOLDER = "(____________)"
+
     # 1) Поля договору (contract_fields)
     for entity in entities:
         # Значення беремо з агрегатора all_data (current), а не з FieldState
         entry = (session.all_data or {}).get(entity.field) or {}
         value = entry.get("current")
-        field_values[entity.field] = "" if value is None else str(value)
+        
+        if value is None or str(value).strip() == "":
+            field_values[entity.field] = PLACEHOLDER if partial else ""
+        else:
+            field_values[entity.field] = str(value)
 
     # 2) Поля сторони договору (party_fields).
-    #    Ми проходимо по всіх ролях, визначених у категорії (roles).
-    #    Для кожної ролі визначаємо person_type (з session.party_types або fallback).
-    #    Потім беремо поля для цього типу і шукаємо значення в all_data.
-    
     if session.category_id:
         from src.categories.index import list_party_fields, store as cat_store, _load_meta
         
@@ -141,7 +144,11 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
                         key = f"{role_prefix}.{pf.field}"
                         entry = (session.all_data or {}).get(key) or {}
                         value = entry.get("current")
-                        field_values[key] = "" if value is None else str(value)
+                        
+                        if value is None or str(value).strip() == "":
+                            field_values[key] = PLACEHOLDER if partial else ""
+                        else:
+                            field_values[key] = str(value)
 
     output_path = output_document_path(template.id, session_id, ext="docx")
     # Основний шлях до шаблону:
