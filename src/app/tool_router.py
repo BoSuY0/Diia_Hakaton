@@ -125,3 +125,9 @@ def tool_build_contract(session_id: str, template_id: str) -> Dict[str, Any]:
     if tool:
         return tool.execute({"session_id": session_id, "template_id": template_id}, {})
     return {}
+
+def tool_set_party_context(session_id: str, role: str, person_type: str) -> Dict[str, Any]:
+    tool = tool_registry.get("set_party_context")
+    if tool:
+        return tool.execute({"session_id": session_id, "role": role, "person_type": person_type}, {})
+    return {}

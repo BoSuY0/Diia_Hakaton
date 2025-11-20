@@ -23,7 +23,9 @@ from src.app.tool_router import (
     tool_get_templates_for_category,
     tool_set_category,
     tool_set_template,
+    tool_set_template,
     tool_upsert_field,
+    tool_set_party_context,
 )
 from src.common.errors import SessionNotFoundError
 from src.common.logging import get_logger
@@ -97,6 +99,11 @@ class UpsertFieldRequest(BaseModel):
     field: str
     value: str
     role: Optional[str] = None
+
+
+class SetPartyContextRequest(BaseModel):
+    role: str
+    person_type: str
 
 
 class BuildContractRequest(BaseModel):
