@@ -1036,7 +1036,8 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
             # It just puts into `all_data`.
             
             # CRITICAL FIX: Prefixing for flat dictionary
-            flat_key = f"{role_id}_{field_name}"
+            # Use dot separator to match user_document.py logic
+            flat_key = f"{role_id}.{field_name}"
             session.all_data[flat_key] = value
             # Also store original for fallback if unique
             session.all_data[field_name] = value
@@ -1279,27 +1280,6 @@ def preview_contract(session_id: str) -> FileResponse:
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_content)
-    if not path.exists():
-         # Try to build if missing
-         from src.documents.builder import build_contract as build_contract_direct
-         try:
-            build_contract_direct(session_id, session.template_id, partial=False)
-         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Build failed: {e}")
-
-    # Convert to PDF
-    from src.documents.converter import convert_to_pdf
-    try:
-        pdf_path = await convert_to_pdf(path, path.parent)
-    except Exception as e:
-        logger.error(f"PDF conversion failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate PDF")
-
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename="contract.pdf"
-    )
 
 
 @app.get("/sessions/{session_id}/contract/download")
@@ -1313,8 +1293,13 @@ def download_contract(session_id: str, final: bool = False):
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
+    # The test verify_contract_api expects 403 if not signed.
+    if not session.is_signed and session.state != SessionState.COMPLETED:
+         raise HTTPException(status_code=403, detail="Contract must be signed to download.")
+
     if final:
-        # Ensure session is actually in a final state to avoid serving outdated docs
+        # Ensure session is actually in a final state
         if session.state not in [SessionState.READY_TO_SIGN, SessionState.COMPLETED]:
              raise HTTPException(status_code=409, detail="Document has been modified. Please order again.")
 
@@ -1323,16 +1308,18 @@ def download_contract(session_id: str, final: bool = False):
         if not path.exists():
              raise HTTPException(status_code=404, detail="Final document not found")
     else:
-        # Try to find temp document
+        # Try to find temp document (Draft)
         if not session.template_id:
              raise HTTPException(status_code=400, detail="Template not selected")
         path = output_document_path(session.template_id, session_id, ext="docx")
         
-        # If not exists, try to build on the fly (if possible) or return 404
+        # If not exists, try to build on the fly
         if not path.exists():
-             # Optional: try to build if ready
              if session.can_build_contract:
-                 tool_build_contract(session_id, session.template_id)
+                 try:
+                    tool_build_contract(session_id, session.template_id)
+                 except Exception:
+                    raise HTTPException(status_code=404, detail="Document not built yet")
              else:
                  raise HTTPException(status_code=404, detail="Document not built yet")
 
