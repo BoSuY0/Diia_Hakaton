@@ -31,3 +31,6 @@ build/
 
 .gemini/
 dumps/
+.DS_Store
+
+folder_name/*

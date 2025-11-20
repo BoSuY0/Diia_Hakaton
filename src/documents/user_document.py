@@ -7,6 +7,7 @@ from src.categories.index import list_entities, list_party_fields
 from src.common.config import settings
 from src.sessions.models import Session, SessionState
 from src.storage.fs import read_json, write_json
+from src.categories.index import get_roles
 
 
 def build_user_document(session: Session) -> Dict[str, Any]:
@@ -33,11 +34,11 @@ def build_user_document(session: Session) -> Dict[str, Any]:
 
     # Поля сторін (parties)
     parties: Dict[str, Any] = {}
-    # Поля сторін (parties)
-    parties: Dict[str, Any] = {}
-    # TODO: Load roles dynamically from category if possible, currently hardcoded for lease
-    # Or better: iterate over known roles in session.party_fields OR default to lessor/lessee
-    target_roles = ["lessor", "lessee"] 
+    # Динамічне визначення ролей з метаданих категорії
+    if category_id:
+        target_roles = get_roles(category_id)
+    else:
+        target_roles = []  # Порожній список, якщо категорія не обрана
     
     for role_key in target_roles:
         # Logic: If we have data for this role in session.all_data (prefixed or not), use it.

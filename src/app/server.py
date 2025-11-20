@@ -14,6 +14,7 @@ from src.agent.llm_client import chat_with_tools, load_system_prompt
 from src.app.state import Conversation, conversation_store
 from src.app.tool_router import (
     TOOL_DEFINITIONS,
+    TOOL_CANON_BY_ALIAS,
     dispatch_tool,
     tool_build_contract,
     tool_find_category_by_query,
@@ -152,6 +153,7 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     ],
     "category_selected": [
         "route_message",
+        "get_category_roles",
         "get_templates_for_category",
         "get_category_entities",
         "set_template",
@@ -398,6 +400,60 @@ def _filter_tools_for_session(
 
 
 
+
+def _validate_message_sequence(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Validates and fixes message sequence to ensure tool messages follow tool_calls.
+    OpenAI API requires: assistant message with tool_calls → tool messages for each tool_call_id
+    """
+    validated = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        role = msg.get("role")
+        
+        # System and user messages are always valid
+        if role in ("system", "user"):
+            validated.append(msg)
+            i += 1
+            continue
+        
+        # Assistant message
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                # This assistant message has tool_calls, collect following tool messages
+                validated.append(msg)
+                expected_ids = {tc.get("id") if isinstance(tc, dict) else tc.id for tc in tool_calls}
+                i += 1
+                
+                # Collect all immediately following tool messages
+                while i < len(messages) and messages[i].get("role") == "tool":
+                    tool_msg = messages[i]
+                    tool_call_id = tool_msg.get("tool_call_id")
+                    if tool_call_id in expected_ids:
+                        validated.append(tool_msg)
+                        expected_ids.discard(tool_call_id)
+                    i += 1
+            else:
+                # Regular assistant message without tool_calls
+                validated.append(msg)
+                i += 1
+            continue
+        
+        # Tool message without preceding assistant tool_calls - skip it
+        if role == "tool":
+            logger.warning("Skipping orphaned tool message at index %d", i)
+            i += 1
+            continue
+        
+        # Unknown role - keep it
+        validated.append(msg)
+        i += 1
+    
+    return validated
+
+
 def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[str, Any]]:
     """
     Tool-loop: виклик LLM, виконання тулів, захист від петель та мінімізація контексту.
@@ -427,6 +483,9 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
         # перелічити шаблони/поля та дати пояснення.
         # Idle: коротка відповідь-вступ, інші стани — детальні пояснення.
         max_tokens = 96 if state == "idle" else 256
+
+        # Validate message sequence to ensure tool messages follow tool_calls
+        messages = _validate_message_sequence(messages)
 
         try:
             response = chat_with_tools(

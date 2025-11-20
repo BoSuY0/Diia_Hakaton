@@ -82,36 +82,33 @@ def build_contract(session_id: str, template_id: str) -> Dict[str, str]:
     #    Потім беремо поля для цього типу і шукаємо значення в all_data.
     
     if session.category_id:
-        from src.categories.index import list_party_fields, store as cat_store, _load_meta
+        from src.categories.index import list_party_fields, get_roles
         
-        category_def = cat_store.get(session.category_id)
-        if category_def:
-            meta = _load_meta(category_def)
-            roles = meta.get("roles")
-            if roles:
-                for role_key in roles.keys():
-                    # Determine person type for this role
-                    p_type = None
-                    if session.party_types and role_key in session.party_types:
-                        p_type = session.party_types[role_key]
-                    elif session.role == role_key and session.person_type:
-                        # Fallback: if this is the current user's role, use their type
-                        p_type = session.person_type
-                    
-                    if not p_type:
-                        continue
+        role_keys = get_roles(session.category_id)
+        
+        for role_key in role_keys:
+            # Determine person type for this role
+            p_type = None
+            if session.party_types and role_key in session.party_types:
+                p_type = session.party_types[role_key]
+            elif session.role == role_key and session.person_type:
+                # Fallback: if this is the current user's role, use their type
+                p_type = session.person_type
+            
+            if not p_type:
+                continue
 
-                    # Get fields for this role+type
-                    party_fields_list = list_party_fields(session.category_id, p_type)
-                    
-                    # Fill values
-                    role_prefix = role_key.strip().lower()
-                    for pf in party_fields_list:
-                        # Key format: "role.field" (e.g. "lessor.name")
-                        key = f"{role_prefix}.{pf.field}"
-                        entry = (session.all_data or {}).get(key) or {}
-                        value = entry.get("current")
-                        field_values[key] = "" if value is None else str(value)
+            # Get fields for this role+type
+            party_fields_list = list_party_fields(session.category_id, p_type)
+            
+            # Fill values
+            role_prefix = role_key.strip().lower()
+            for pf in party_fields_list:
+                # Key format: "role.field" (e.g. "lessor.name")
+                key = f"{role_prefix}.{pf.field}"
+                entry = (session.all_data or {}).get(key) or {}
+                value = entry.get("current")
+                field_values[key] = "" if value is None else str(value)
 
     output_path = output_document_path(template.id, session_id, ext="docx")
     # Основний шлях до шаблону:

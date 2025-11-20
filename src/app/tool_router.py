@@ -6,8 +6,18 @@ import time
 from typing import Any, Dict, List, Optional
 
 # Import tools to register them
-import src.agent.tools.categories
-import src.agent.tools.session
+# Import tools to register them
+import src.agent.tools.find_category_by_query_tool
+import src.agent.tools.get_templates_for_category_tool
+import src.agent.tools.get_category_entities_tool
+import src.agent.tools.set_category_tool
+import src.agent.tools.get_category_roles_tool
+import src.agent.tools.set_template_tool
+import src.agent.tools.set_party_context_tool
+import src.agent.tools.get_party_fields_for_session_tool
+import src.agent.tools.upsert_field_tool
+import src.agent.tools.get_session_summary_tool
+import src.agent.tools.build_contract_tool
 from src.agent.tools.registry import tool_registry
 from src.common.config import settings
 from src.common.logging import get_logger
@@ -19,6 +29,12 @@ logger = get_logger(__name__)
 
 # Generate tool definitions dynamically from the registry
 TOOL_DEFINITIONS = tool_registry.get_definitions()
+
+# Map aliases to canonical names for deduplication
+TOOL_CANON_BY_ALIAS = {
+    t.alias: t.name 
+    for t in tool_registry._registry.values()
+}
 
 
 def dispatch_tool(

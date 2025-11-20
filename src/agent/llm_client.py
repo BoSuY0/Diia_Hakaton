@@ -37,8 +37,7 @@ def _ensure_api_key() -> None:
             os.environ["ANTHROPIC_API_KEY"] = api_key
     else:
         # За замовчуванням підставляємо в OPENAI_API_KEY (для openai-сумісних моделей)
-        if not os.getenv("OPENAI_API_KEY"):
-            os.environ["OPENAI_API_KEY"] = api_key
+        os.environ["OPENAI_API_KEY"] = api_key
 
 
 def chat_with_tools(
@@ -84,8 +83,10 @@ def chat_with_tools(
         top_p=1,
         presence_penalty=0,
         frequency_penalty=0,
+        drop_params=True,
         timeout=30,
         num_retries=2,
+        api_key=settings.llm_api_key,
         **kwargs,
     )
     duration_ms = (time.perf_counter() - started) * 1000

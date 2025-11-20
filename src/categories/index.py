@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 class Category:
     id: str
     label: str
+    description: str
     meta_path: Path  # шлях до JSON-файлу категорії всередині meta_data_categories
 
 
@@ -62,6 +63,7 @@ class CategoryStore:
             self._categories[raw["id"]] = Category(
                 id=raw["id"],
                 label=raw["label"],
+                description=raw.get("description", ""),
                 meta_path=meta_path,
             )
 
@@ -159,20 +161,79 @@ def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
     return fields
 
 
+
+
+def _ngrams(text: str, n: int = 3) -> set:
+    """Generate character n-grams from text."""
+    text = text.lower()
+    return {text[i:i+n] for i in range(len(text) - n + 1)}
+
+
+def _similarity(text1: str, text2: str, n: int = 3) -> float:
+    """Calculate Jaccard similarity between two texts using character n-grams."""
+    ngrams1 = _ngrams(text1, n)
+    ngrams2 = _ngrams(text2, n)
+    
+    if not ngrams1 or not ngrams2:
+        return 0.0
+    
+    intersection = len(ngrams1 & ngrams2)
+    union = len(ngrams1 | ngrams2)
+    
+    return intersection / union if union > 0 else 0.0
+
+
 def find_category_by_query(query: str) -> Optional[Category]:
     """
-    Дуже проста евристика пошуку категорії по тексту:
-    рахуємо кількість спільних слів між запитом і label.
+    Пошук категорії по тексту з використанням n-gram схожості.
+    Рахуємо схожість між запитом і label + description.
     """
-    query_terms = {t.lower() for t in query.split() if t.strip()}
+    if not query.strip():
+        return None
+    
     best: Optional[Category] = None
-    best_score = 0
+    best_score = 0.0
 
     for category in store.categories.values():
-        label_terms = {t.lower() for t in category.label.split() if t.strip()}
-        score = len(query_terms & label_terms)
+        # Combine label and description for matching
+        category_text = f"{category.label} {category.description}"
+        
+        # Calculate similarity
+        score = _similarity(query, category_text, n=3)
+        
         if score > best_score:
             best_score = score
             best = category
 
-    return best
+    # Only return if similarity is above threshold
+    return best if best_score > 0.1 else None
+
+
+def get_roles(category_id: str) -> List[str]:
+    """
+    Повертає список ролей для категорії (lessor, lessee, ...).
+    Читає з метаданих категорії (roles).
+    """
+    category = store.get(category_id)
+    if not category:
+        return []
+    meta = _load_meta(category)
+    roles = meta.get("roles", {})
+    return list(roles.keys())
+
+
+def get_role_info(category_id: str, role: str) -> Dict[str, Any]:
+    """
+    Повертає інформацію про роль (label, allowed_person_types).
+    Приклад: {"label": "Орендодавець", "allowed_person_types": ["individual", "fop", "company"]}
+    """
+    category = store.get(category_id)
+    if not category:
+        return {}
+    meta = _load_meta(category)
+    roles = meta.get("roles", {})
+    return roles.get(role, {})
+
+
+
+

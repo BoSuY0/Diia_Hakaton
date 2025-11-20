@@ -3,9 +3,14 @@
 
   "templates": [
     {
-      "id": "lease_flat",
-      "name": "Договір оренди житла (квартира)",
-      "file": "lease_flat.docx"
+      "id": "act_transfer",
+      "name": "Акт приймання‑передачі нерухомого майна",
+      "file": "Акт Приймання-передачі нерухомого майна додаток до договору.docx"
+    },
+    {
+      "id": "lease_example",
+      "name": "Договір оренди (приклад)",
+      "file": "Договір оренди приклад.docx"
     }
   ],
 
@@ -33,7 +38,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "fop": {
       "label": "ФОП",
       "fields": [
@@ -46,7 +50,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "company": {
       "label": "Юридична особа",
       "fields": [
@@ -63,13 +66,30 @@
   },
 
   "contract_fields": [
-    { "field": "object_address",     "label": "Адреса житла (об'єкт оренди)",   "required": true  },
-    { "field": "object_description", "label": "Опис об'єкта",                   "required": false },
-    { "field": "area_sqm",           "label": "Площа (м²)",                     "required": false },
-    { "field": "rent_price_month",   "label": "Сума оренди за місяць (грн/міс)", "required": true },
-    { "field": "deposit_amount",     "label": "Сума завдатку (грн)",            "required": false },
-    { "field": "payment_due_day",    "label": "День місяця для оплати",         "required": false },
-    { "field": "start_date",         "label": "Дата початку оренди",            "required": true  },
-    { "field": "end_date",           "label": "Дата закінчення оренди",         "required": false }
+    { "field": "object_address",     "label": "Адреса об'єкта оренди",           "required": true  },
+    { "field": "area_sqm",           "label": "Площа (м²)",                       "required": false },
+    { "field": "rent_price_month",   "label": "Сума оренди за місяць (грн)",      "required": true  },
+    { "field": "start_date",         "label": "Дата початку оренди",              "required": true  },
+    { "field": "end_date",           "label": "Дата закінчення оренди",           "required": false },
+    { "field": "payment_due_day",    "label": "День місяця для оплати",           "required": false },
+    { "field": "city",               "label": "Місто укладення договору",         "required": true  },
+    { "field": "contract_date",      "label": "Дата укладення договору",          "required": true  },
+    { "field": "document_number",    "label": "Номер договору",                   "required": false },
+    { "field": "purpose",            "label": "Цільове призначення приміщення",   "required": false },
+    { "field": "total_area_sqm",     "label": "Загальна площа (м²)",              "required": false },
+    { "field": "payment_currency",   "label": "Валюта оплати",                    "required": false },
+    { "field": "payment_form",       "label": "Форма оплати",                     "required": false },
+    { "field": "first_payment_date", "label": "Дата першого платежу",             "required": false },
+    { "field": "ownership_type",     "label": "Тип власності",                    "required": false },
+    { "field": "handover_period",    "label": "Термін передачі приміщення",       "required": false },
+    { "field": "act_signing_period", "label": "Термін підписання акту",           "required": false },
+    { "field": "access_schedule",    "label": "Графік доступу до приміщення",     "required": false },
+    { "field": "notice_period_days", "label": "Термін повідомлення (днів)",       "required": false },
+    { "field": "repair_notice_days", "label": "Повідомлення про ремонт (днів)",   "required": false },
+    { "field": "premises_return_deadline", "label": "Термін повернення приміщення", "required": false },
+    { "field": "lock_change_notice", "label": "Повідомлення про зміну замків",    "required": false },
+    { "field": "improvement_consent_type", "label": "Згода на поліпшення",        "required": false },
+    { "field": "sublease_consent_type", "label": "Згода на суборенду",            "required": false },
+    { "field": "term_change_consent", "label": "Згода на зміну терміну",          "required": false }
   ]
 }
