@@ -1,0 +1,129 @@
+{
+  "session_id": "de6e16b9-94ef-4d40-9972-d902fa8b86d8",
+  "user_id": null,
+  "updated_at": "2025-11-21T22:27:56.984484",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual",
+    "lessee": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    },
+    "lessee": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessor": "j0p95d",
+    "lessee": "4gjkql"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 2
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "2222222222222222",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "2222222222222222",
+          "normalized": "2222222222222222",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "11111111111111111111",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "11111111111111111111",
+          "normalized": "11111111111111111111",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "11111111111111111111",
+          "normalized": "11111111111111111111",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.name": {
+      "current": "333333333333",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "333333333333",
+          "normalized": "333333333333",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.address": {
+      "current": "444444444444",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "444444444444",
+          "normalized": "444444444444",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "444444444444",
+          "normalized": "444444444444",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "444444444444",
+          "normalized": "444444444444",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

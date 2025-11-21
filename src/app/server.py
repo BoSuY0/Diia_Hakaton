@@ -31,7 +31,7 @@ from src.common.logging import get_logger
 from src.common.config import settings
 from src.documents.user_document import load_user_document
 from src.sessions.store import get_or_create_session, load_session, save_session, transactional_session
-from src.sessions.models import SessionState
+from src.sessions.models import Session, SessionState
 from src.storage.fs import ensure_directories
 from src.validators.pii_tagger import sanitize_typed
 
@@ -48,29 +48,37 @@ async def lifespan(app: FastAPI):
     stop_event = asyncio.Event()
 
     async def cleanup_loop():
-        # Give server a moment to start up fully
-        await asyncio.sleep(5)
-        
-        while not stop_event.is_set():
+        try:
+            # Give server a moment to start up fully, but exit early on shutdown
             try:
-                # Import stream_manager here to avoid circular/early import issues
-                # (It is defined in this file but later)
-                from src.app.server import stream_manager
-                
-                active_ids = set(stream_manager.connections.keys())
-                
-                # Run cleanup
-                clean_abandoned_sessions(active_ids, grace_period_minutes=5)
-                clean_stale_sessions()
-                
-            except Exception as e:
-                logger.error(f"Background cleanup error: {e}")
-            
-            # Wait for 60 seconds or until stop signal
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=60)
+                await asyncio.wait_for(stop_event.wait(), timeout=5)
+                return
             except asyncio.TimeoutError:
                 pass
+
+            while not stop_event.is_set():
+                try:
+                    # Import stream_manager here to avoid circular/early import issues
+                    # (It is defined in this file but later)
+                    from src.app.server import stream_manager
+                    
+                    active_ids = set(stream_manager.connections.keys())
+                    
+                    # Run cleanup
+                    clean_abandoned_sessions(active_ids, grace_period_minutes=5)
+                    clean_stale_sessions()
+                    
+                except Exception as e:
+                    logger.error(f"Background cleanup error: {e}")
+                
+                # Wait for 60 seconds or until stop signal
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=60)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            # Graceful exit on cancellation
+            return
 
     cleanup_task = asyncio.create_task(cleanup_loop())
         
@@ -84,7 +92,14 @@ async def lifespan(app: FastAPI):
     try:
         # Give cleanup task a moment to exit gracefully
         await asyncio.wait_for(cleanup_task, timeout=2.0)
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except asyncio.TimeoutError:
+        # Force cancel if it hangs (e.g., during initial sleep)
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    except asyncio.CancelledError:
         pass
     except Exception as e:
         logger.error(f"Error waiting for cleanup task: {e}")
@@ -218,15 +233,19 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     "idle": [
         "route_message",
         "find_category_by_query",
+        "set_category",
     ],
     "category_selected": [
         "route_message",
+        "find_category_by_query",
         "get_templates_for_category",
         "get_category_entities",
         "set_template",
     ],
     "template_selected": [
         "route_message",
+        "find_category_by_query",
+        "get_templates_for_category",
         "get_category_entities",
         "get_party_fields_for_session",
         "set_party_context",
@@ -237,6 +256,8 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     ],
     "collecting_fields": [
         "route_message",
+        "find_category_by_query",
+        "get_templates_for_category",
         "set_party_context",
         "upsert_field",
         "get_session_summary",
@@ -325,6 +346,48 @@ def _build_initial_messages(user_message: str, session_id: str) -> List[Dict[str
         {"role": "user", "content": user_message},
     ]
     return messages
+
+
+def _initial_session_summary_text(session: Session) -> str:
+    """
+    Короткий знімок для першого відповіді: категорія/шаблон + наступний крок.
+    """
+    lines: List[str] = []
+    try:
+        from src.categories.index import store as category_store, list_templates
+        cat_label = None
+        tmpl_name = None
+
+        if session.category_id:
+            cat = category_store.get(session.category_id)
+            cat_label = cat.label if cat else session.category_id
+
+        if session.template_id and session.category_id:
+            try:
+                templates = list_templates(session.category_id)
+                for t in templates:
+                    if t.id == session.template_id:
+                        tmpl_name = t.name
+                        break
+            except Exception:
+                tmpl_name = session.template_id
+        elif session.template_id:
+            tmpl_name = session.template_id
+
+        if cat_label:
+            lines.append(f"Поточна категорія: {cat_label}")
+        if tmpl_name:
+            lines.append(f"Обраний шаблон: {tmpl_name}")
+
+        if not lines:
+            return ""
+
+        # Підказка наступного кроку
+        lines.append("Далі: вкажіть роль (Орендодавець / Орендар) та тип особи (фізична особа / ФОП / компанія).")
+    except Exception:
+        return ""
+
+    return "\n".join(line for line in lines if line)
 
 
 def _last_user_message_text(messages: List[Dict[str, Any]]) -> str:
@@ -441,13 +504,20 @@ def _as_compact_text(tool_name: str, result_text: str) -> str:
 
 
 
-def _get_effective_state(session_id: str, messages: List[Dict[str, Any]]) -> str:
+def _get_effective_state(
+    session_id: str,
+    messages: List[Dict[str, Any]],
+    *,
+    has_category_tool: bool = False,
+) -> str:
     """
     Визначає поточний стан сесії для state-gating.
 
     До першого set_category в поточній розмові вважаємо станом "idle",
     навіть якщо у збереженій сесії він був інший.
     """
+    if not has_category_tool:
+        return "idle"
     try:
         session = load_session(session_id)
         return session.state.value
@@ -457,13 +527,20 @@ def _get_effective_state(session_id: str, messages: List[Dict[str, Any]]) -> str
 
 
 def _filter_tools_for_session(
-    session_id: str, messages: List[Dict[str, Any]]
+    session_id: str,
+    messages: List[Dict[str, Any]],
+    *,
+    has_category_tool: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Формує підмножину TOOL_DEFINITIONS, дозволену на поточному етапі сесії.
     Використовує ToolRegistry для отримання визначень.
     """
-    state = _get_effective_state(session_id, messages)
+    state = _get_effective_state(
+        session_id,
+        messages,
+        has_category_tool=has_category_tool,
+    )
     allowed = set(ALLOWED_TOOLS_BY_STATE.get(state, []))
     
     # Get all definitions from registry (minified by default)
@@ -497,7 +574,11 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
     last_tool_signature: Optional[str] = None
 
     for _ in range(max_iterations):
-        tools = _filter_tools_for_session(conv.session_id, messages)
+        tools = _filter_tools_for_session(
+            conv.session_id,
+            messages,
+            has_category_tool=conv.has_category_tool,
+        )
         try:
             tool_names = [
                 t.get("function", {}).get("name", "<unknown>") for t in tools
@@ -510,7 +591,11 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
                 len(tools),
             )
 
-        state = _get_effective_state(conv.session_id, messages)
+        state = _get_effective_state(
+            conv.session_id,
+            messages,
+            has_category_tool=conv.has_category_tool,
+        )
         # Не форсимо tools навіть на idle — модель сама вирішує,
         # чи відповідати текстом (OTHER), чи викликати тулли.
         require_tools = False
@@ -627,18 +712,48 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
 def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Обрізає історію діалогу для LLM, залишаючи лише необхідний контекст.
+    Важливо: зберігаємо лише узгоджені пари assistant tool_calls ↔ tool responses,
+    щоб уникнути orphaned tool messages після обрізки.
     """
     MAX_CONTEXT_MESSAGES = 12
     
     if len(messages) <= MAX_CONTEXT_MESSAGES + 1:
-        return messages
+        return _strip_orphan_tools(messages)
 
     system_msg = messages[0]
     if system_msg.get("role") != "system":
-        return messages[-MAX_CONTEXT_MESSAGES:]
+        return _strip_orphan_tools(messages[-MAX_CONTEXT_MESSAGES:])
 
     recent_messages = messages[-MAX_CONTEXT_MESSAGES:]
-    return [system_msg] + recent_messages
+    return [system_msg] + _strip_orphan_tools(recent_messages)
+
+
+def _strip_orphan_tools(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Видаляє tool-повідомлення, якщо для них немає відповідного assistant.tool_call у вікні.
+    Це запобігає втраті контексту в chat_with_tools, який відкидає orphaned tool responses.
+    """
+    # Збираємо всі tool_call_id з assistant-повідомлень у вікні
+    allowed_ids = set()
+    for m in msgs:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                try:
+                    allowed_ids.add(tc.get("id"))
+                except Exception:
+                    pass
+
+    # Фільтруємо tool-повідомлення без відповідних id
+    filtered: List[Dict[str, Any]] = []
+    for m in msgs:
+        if m.get("role") == "tool":
+            tc_id = m.get("tool_call_id")
+            if tc_id and tc_id in allowed_ids:
+                filtered.append(m)
+            # orphan is dropped
+        else:
+            filtered.append(m)
+    return filtered
 
 
 def _format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
@@ -1297,6 +1412,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
     """
     conv = conversation_store.get(req.session_id)
+    is_first_turn = not conv.messages
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
     # get_or_create_session uses lock if creating, so it's safe.
     session = get_or_create_session(req.session_id)
@@ -1368,6 +1484,18 @@ def chat(req: ChatRequest) -> ChatResponse:
     pruned_messages = _prune_messages(final_messages)
     conv.messages = pruned_messages
     reply_text = _format_reply_from_messages(pruned_messages)
+
+    # Додаємо стислий знімок сесії у першому повідомленні розмови
+    if is_first_turn:
+        try:
+            session = load_session(req.session_id)
+        except Exception:
+            session = None
+        if session:
+            intro = _initial_session_summary_text(session)
+            if intro:
+                reply_text = f"{intro}\n{reply_text}" if reply_text else intro
+
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
 

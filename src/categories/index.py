@@ -178,7 +178,8 @@ def find_category_by_query(query: str) -> Optional[Category]:
     """
     Search category by keywords overlap + label overlap.
     """
-    query_terms = {t.lower() for t in query.split() if t.strip()}
+    query_norm = query.lower()
+    query_terms = {t for t in query_norm.split() if t.strip()}
     best: Optional[Category] = None
     best_score = 0
 
@@ -187,15 +188,26 @@ def find_category_by_query(query: str) -> Optional[Category]:
         keywords = {k.lower() for k in (category.keywords or [])}
         label_terms = {t.lower() for t in category.label.split() if t.strip()}
         
-        # Keywords match gives higher score (e.g. 2 points)
+        # Keywords/label exact term overlap
         kw_score = len(query_terms & keywords) * 2
-        # Label match gives 1 point
         label_score = len(query_terms & label_terms)
+
+        # Substring bonuses (simple stemming-like)
+        for kw in keywords:
+            if kw and kw in query_norm:
+                kw_score += 1
+        for lt in label_terms:
+            if lt and lt in query_norm:
+                label_score += 0.5
         
         total_score = kw_score + label_score
         
         if total_score > best_score:
             best_score = total_score
             best = category
+
+    if best and best.id == "custom":
+        # Категорія 'custom' вимкнена
+        return None
 
     return best

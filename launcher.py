@@ -93,7 +93,7 @@ def kill_process_on_port(port: int) -> None:
 def run_app(
     host: str = "0.0.0.0",
     port: int = 8000,
-    reload: bool = True,
+    reload: bool = False,
 ) -> None:
     """
     Головна точка входу для запуску всієї аппки.
@@ -108,19 +108,35 @@ def run_app(
     kill_process_on_port(port)
 
     logger.info("Starting API server on %s:%d", host, port)
-    uvicorn.run(
-        "src.app.server:app",
-        host=host,
-        port=port,
-        reload=reload,
-        reload_dirs=[os.path.join(os.getcwd(), "src")],
-        reload_excludes=["venv", ".venv", "client", "node_modules", ".git", "__pycache__", "site-packages"],
+    uvicorn_kwargs = {
+        "app": "src.app.server:app",
+        "host": host,
+        "port": port,
         # Використовуємо наше глобальне налаштування logging,
         # uvicorn не перестворює власні хендлери/форматери
-        log_config=None,
-        timeout_keep_alive=5,
-        timeout_graceful_shutdown=3,
-    )
+        "log_config": None,
+        "timeout_keep_alive": 5,
+        "timeout_graceful_shutdown": 3,
+    }
+
+    if reload:
+        uvicorn_kwargs.update(
+            {
+                "reload": True,
+                "reload_dirs": [os.path.join(os.getcwd(), "src")],
+                "reload_excludes": [
+                    "venv",
+                    ".venv",
+                    "client",
+                    "node_modules",
+                    ".git",
+                    "__pycache__",
+                    "site-packages",
+                ],
+            }
+        )
+
+    uvicorn.run(**uvicorn_kwargs)
 
 
 def run_cli_chat(session_id: Optional[str] = None) -> None:
@@ -129,10 +145,11 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
 
     Використовує ті самі handler-и, що й HTTP /chat, але без підняття uvicorn.
     """
-    from src.app.server import ChatRequest, chat, on_startup  # type: ignore[import]
+    from src.app.server import ChatRequest, chat  # type: ignore[import]
+    from src.storage.fs import ensure_directories
 
     setup_logging()
-    on_startup()
+    ensure_directories()
 
     if not session_id:
         session_id = f"cli-dev-session-{uuid4().hex[:8]}"

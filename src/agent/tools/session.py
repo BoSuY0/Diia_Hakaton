@@ -10,6 +10,7 @@ from src.categories.index import (
     list_entities,
     list_party_fields,
     list_templates,
+    store as category_store,
 )
 from src.common.enums import ContractRole, PersonType, FillingMode
 from src.common.logging import get_logger
@@ -247,11 +248,31 @@ class GetPartyFieldsForSessionTool(BaseTool):
             session.category_id,
             current_person_type,
         )
+
+        # Human labels for role/person_type
+        role_label = None
+        person_type_label = None
+        try:
+            cat = category_store.get(session.category_id)
+            if cat:
+                import json
+                meta = json.loads(cat.meta_path.read_text(encoding="utf-8"))
+                role_label = meta.get("roles", {}).get(session.role, {}).get("label")
+                person_type_label = (
+                    meta.get("party_modules", {})
+                    .get(current_person_type, {})
+                    .get("label")
+                )
+        except Exception:
+            pass
+
         return {
             "ok": True,
             "session_id": session_id,
             "role": session.role,
             "person_type": session.person_type,
+            "role_label": role_label,
+            "person_type_label": person_type_label,
             "fields": [
                 {
                     "field": f.field,

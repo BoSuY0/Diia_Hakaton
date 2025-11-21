@@ -1,0 +1,30 @@
+import pytest
+
+from src.services.session import set_party_type
+from src.sessions.store import get_or_create_session, save_session
+from src.sessions.models import FieldState, SessionState
+
+
+def test_set_party_type_invalidates_signature(mock_settings, mock_categories_data):
+    session = get_or_create_session("sig_reset")
+    session.category_id = "test_cat"
+
+    # Початковий тип та заповнені поля для ролі, підпис уже виставлено
+    session.party_types["lessor"] = "individual"
+    session.party_fields["lessor"] = {"name": FieldState(status="ok")}
+    session.all_data["lessor.name"] = {"current": "John Doe"}
+    session.signatures["lessor"] = True
+    session.state = SessionState.READY_TO_SIGN
+    save_session(session)
+
+    # Змінюємо тип особи
+    set_party_type(session, "lessor", "company")
+
+    assert session.party_types["lessor"] == "company"
+    assert session.party_fields["lessor"] == {}
+    assert "lessor.name" not in session.all_data
+    assert session.signatures.get("lessor") is False
+
+    # Після зміни типу дані не валідні, сесія має втратити готовність
+    assert session.can_build_contract is False
+    assert session.state in {SessionState.COLLECTING_FIELDS, SessionState.READY_TO_BUILD}

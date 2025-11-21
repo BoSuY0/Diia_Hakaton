@@ -37,7 +37,7 @@ class FindCategoryByQueryTool(BaseTool):
     def description(self) -> str:
         return (
             "ОБОВ'ЯЗКОВО використовуйте цей інструмент ПЕРШИМ кроком для пошуку категорії договору. "
-            "Він знайде правильну категорію (наприклад 'custom' для спадщини) за запитом користувача."
+            "Він підбирає категорію за запитом користувача."
         )
 
     @property
@@ -63,6 +63,10 @@ class FindCategoryByQueryTool(BaseTool):
 
         category: Optional[Category] = find_category_by_query(query)
 
+        if category and category.id == "custom":
+            logger.info("tool=find_category_by_query matched disabled category=custom; ignoring")
+            return {"category_id": None}
+
         if not category:
             logger.info("tool=find_category_by_query no_match")
             return {"category_id": None}
@@ -72,17 +76,6 @@ class FindCategoryByQueryTool(BaseTool):
             category.id,
             category.label,
         )
-
-        # Auto-set category if session_id is present (as per original logic)
-        session_id = args.get("session_id")
-        if session_id:
-             try:
-                from src.sessions.actions import set_session_category
-                # We use transactional_session here to safely update session
-                with transactional_session(session_id) as session:
-                     set_session_category(session, category.id)
-             except Exception as e:
-                 logger.error(f"Failed to auto-set category: {e}")
 
         return {"category_id": category.id, "label": category.label}
 
@@ -96,8 +89,7 @@ class GetTemplatesForCategoryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Повертає список доступних шаблонів для обраної категорії. "
-            "Використовуйте 'custom' для створення будь-яких інших договорів (спадщина, дарування, послуги тощо)."
+            "Повертає список доступних шаблонів для обраної категорії."
         )
 
     @property
@@ -124,6 +116,13 @@ class GetTemplatesForCategoryTool(BaseTool):
 
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         category_id = args["category_id"]
+        if category_id == "custom":
+            logger.info("tool=get_templates_for_category blocked disabled category=custom")
+            return {
+                "category_id": category_id,
+                "templates": [],
+                "error": "Категорія 'custom' вимкнена.",
+            }
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
 
@@ -234,7 +233,7 @@ class SetCategoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Встановлює для сесії обрану категорію договорів. Використовуйте 'custom' для нестандартних договорів."
+        return "Встановлює для сесії обрану категорію договорів."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -265,6 +264,12 @@ class SetCategoryTool(BaseTool):
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         category_id = args["category_id"]
+
+        if category_id == "custom":
+            return {
+                "ok": False,
+                "error": "Категорія 'custom' вимкнена.",
+            }
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
 
         from src.sessions.actions import set_session_category

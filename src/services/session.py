@@ -252,6 +252,11 @@ def set_party_type(session: Session, role: str, person_type: str) -> None:
         keys_to_remove = [k for k in session.all_data.keys() if k.startswith(prefix)]
         for k in keys_to_remove:
             del session.all_data[k]
+
+        # Invalidate signatures for this role (and re-evaluate state)
+        if role in session.signatures:
+            logger.info("set_party_type: Invalidating signature for role=%s due to type change", role)
+            session.signatures[role] = False
             
         # Re-calculate readiness
         is_ready = validate_session_readiness(session)

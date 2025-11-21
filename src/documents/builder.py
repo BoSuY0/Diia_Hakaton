@@ -106,7 +106,8 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
 
     # 2. Collect values for template
     field_values: Dict[str, str] = {}
-    PLACEHOLDER = "(____________)"
+    # Видимий плейсхолдер для превʼю (не видаляється в docx_filler з keep_placeholders=True)
+    PLACEHOLDER = "(                 )"
 
     from src.categories.index import list_entities, list_party_fields, _load_meta, store as cat_store, Entity, PartyField
 
@@ -200,7 +201,12 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             if fallback.exists():
                 template_path = fallback
 
-    fill_docx_template(template_path, field_values, output_path)
+    fill_docx_template(
+        template_path,
+        field_values,
+        output_path,
+        keep_placeholders=partial,
+    )
     logger.info(
         "builder=build_contract success session_id=%s template_id=%s file_path=%s",
         session_id,

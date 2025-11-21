@@ -183,12 +183,15 @@ function App() {
 
         if (data.type === 'field_update') {
           // Ignore my own updates to prevent cursor jumping
-          if (data.client_id === clientId) return;
+          if (data.client_id && data.client_id === clientId) return;
+
+          const incomingKey = data.field_key || (data.role ? `${data.role}.${data.field}` : data.field);
+          if (!incomingKey) return;
 
           // Update form value
           setFormValues(prev => ({
             ...prev,
-            [data.field]: data.value
+            [incomingKey]: data.value
           }));
         } else if (data.type === 'schema_update') {
           fetchSchema(sessionId);
@@ -413,7 +416,7 @@ function App() {
     if (!sessionId) return;
     try {
       setIsLoading(true);
-      await api.setPartyContext(sessionId, role, newType);
+      await api.setPartyContext(sessionId, role, newType, clientId);
       await fetchSchema(sessionId);
     } catch (e) {
       console.error("Failed to change party type", e);
@@ -602,6 +605,7 @@ function App() {
             takenRoles={takenRoles}
             myRoles={myRoles}
             isFullMode={selectedMode === 'full'}
+            parties={schema?.parties || []}
           />
         );
       case 'form':
@@ -610,9 +614,9 @@ function App() {
         return (
           <div className="success-screen">
             <h2>Договір успішно створено!</h2>
-            <p>Ви можете завантажити його або переглянути в панелі керування.</p>
-            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId), '_blank')}>
-              Завантажити DOCX
+            <p>Чернетку можна переглянути зараз, а завантаження оригіналу стане доступним після підпису всіх сторін.</p>
+            <button className="btn-primary" onClick={() => window.open(`${api.API_URL}/sessions/${sessionId}/contract/preview`, '_blank')}>
+              👁️ Переглянути чернетку
             </button>
             <button className="btn-secondary" onClick={() => {
               setStep('dashboard');

@@ -1,0 +1,187 @@
+{
+  "session_id": "e3c5a7ef-2c9e-4629-a880-fc04274f757a",
+  "user_id": null,
+  "updated_at": "2025-11-22T00:07:56.425907",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessee": "individual",
+    "lessor": "individual"
+  },
+  "state": "completed",
+  "party_fields": {
+    "lessee": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    },
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {
+    "object_address": {
+      "status": true,
+      "error": null
+    },
+    "rent_price_month": {
+      "status": true,
+      "error": null
+    },
+    "start_date": {
+      "status": true,
+      "error": null
+    }
+  },
+  "can_build_contract": true,
+  "signatures": {
+    "lessor": true,
+    "lessee": true
+  },
+  "party_users": {
+    "lessee": "4gjkql",
+    "lessor": "etoqan"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 5
+  },
+  "routing": {},
+  "all_data": {
+    "lessee.name": {
+      "current": "1111111111111111111",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "1111111111111111111",
+          "normalized": "1111111111111111111",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.address": {
+      "current": "2222222222222222222222",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "2222222222222222222222",
+          "normalized": "2222222222222222222222",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "2222222222222222222222",
+          "normalized": "2222222222222222222222",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "object_address": {
+      "current": "33333333333333333",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "33333333333333333",
+          "normalized": "33333333333333333",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "rent_price_month": {
+      "current": "4444444444444444",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4444444444444444",
+          "normalized": "4444444444444444",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "start_date": {
+      "current": "55555555555555",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "55555555555555",
+          "normalized": "55555555555555",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "55555555555555",
+          "normalized": "55555555555555",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.name": {
+      "current": "222222222222222",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "222222222222222",
+          "normalized": "222222222222222",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "333333333333333",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "333333333333333",
+          "normalized": "333333333333333",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "333333333333333",
+          "normalized": "333333333333333",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

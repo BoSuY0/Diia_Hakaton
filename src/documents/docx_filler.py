@@ -17,7 +17,13 @@ def _iter_paragraphs(doc: Document):
                     yield p
 
 
-def fill_docx_template(template_path: Path, field_values: Dict[str, str], output_path: Path) -> Path:
+def fill_docx_template(
+    template_path: Path,
+    field_values: Dict[str, str],
+    output_path: Path,
+    *,
+    keep_placeholders: bool = False,
+) -> Path:
     if template_path.exists():
         # Розширюємо словник полів синонімами для деяких party-полів,
         # щоб підтримати існуючі плейсхолдери у DOCX:
@@ -37,37 +43,34 @@ def fill_docx_template(template_path: Path, field_values: Dict[str, str], output
             text = paragraph.text
             for field_id, value in values.items():
                 # Підтримуємо два формати плейсхолдерів:
-                # {{field}} та [[field]]
-                placeholder_curly = f"{{{{{field_id}}}}}"
-                placeholder_square = f"[[{field_id}]]"
-                if placeholder_curly in text:
-                    text = text.replace(placeholder_curly, value)
-                if placeholder_square in text:
-                    text = text.replace(placeholder_square, value)
-            # Якщо плейсхолдер був порожній, після заміни можуть лишитися
-            # "паспорт: ,", "РНОКПП:", "тел.: ," або "e-mail:" без значення.
-            # Приберемо такі блоки:
-            #   паспорт: , РНОКПП: 123  ->  РНОКПП: 123
-            #   паспорт: , РНОКПП:      ->  "" (порожній рядок)
-            #   тел.: , e-mail: test    ->  e-mail: test
-            #   тел.: , e-mail:         ->  "" (порожній рядок)
-            # Cleanup empty labels
-            # Define labels to clean up if they are empty (followed by comma or end of line)
-            labels_to_clean = ["паспорт", "РНОКПП", "тел.", "e-mail"]
-            
-            for label in labels_to_clean:
-                # Escape label for regex
-                safe_label = re.escape(label)
-                # Case 1: Label followed by comma (and whitespace) -> remove
-                text = re.sub(rf"{safe_label}:\s*,\s*", "", text)
-                # Case 2: Label at end of string (or followed by whitespace only) -> remove
-                text = re.sub(rf"{safe_label}:\s*$", "", text)
-            
-            # Clean up any remaining placeholders that weren't filled
-            # (e.g. fields from other person types)
-            text = re.sub(r"\{\{[^}]+\}\}", "", text)
-            text = re.sub(r"\[\[[^]]+\]\]", "", text)
-            
+                # {{field}} та [[field]] (зі/без пропусків усередині)
+                patterns = [
+                    rf"{{{{\s*{re.escape(field_id)}\s*}}}}",
+                    rf"\[\[\s*{re.escape(field_id)}\s*\]\]",
+                ]
+                for pattern in patterns:
+                    text = re.sub(pattern, lambda _: value, text)
+
+            if not keep_placeholders:
+                # Якщо плейсхолдер був порожній, після заміни можуть лишитися
+                # "паспорт: ,", "РНОКПП:", "тел.: ," або "e-mail:" без значення.
+                # Приберемо такі блоки.
+                labels_to_clean = ["паспорт", "РНОКПП", "тел.", "e-mail"]
+
+                for label in labels_to_clean:
+                    safe_label = re.escape(label)
+                    text = re.sub(rf"{safe_label}:\s*,\s*", "", text)
+                    text = re.sub(rf"{safe_label}:\s*$", "", text)
+
+                # Clean up any remaining placeholders that weren't filled
+                # (e.g. fields from other person types)
+                text = re.sub(r"\{\{[^}]+\}\}", "", text)
+                text = re.sub(r"\[\[[^]]]+\]\]", "", text)
+
+                # Drop порожні дужки та зайві пробіли, що лишилися від плейсхолдерів
+                text = re.sub(r"\s*\(\s*[_\-\.,]*\s*\)\s*", " ", text)
+                text = re.sub(r"\s{2,}", " ", text).strip()
+
             paragraph.text = text
     else:
         # Fallback: simple document with fields

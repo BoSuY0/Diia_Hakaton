@@ -1,0 +1,126 @@
+{
+  "session_id": "59dfb369-ed80-4127-baf5-8b14b8a53b9f",
+  "user_id": null,
+  "updated_at": "2025-11-21T23:57:13.193125",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {
+    "object_address": {
+      "status": true,
+      "error": null
+    },
+    "rent_price_month": {
+      "status": true,
+      "error": null
+    }
+  },
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessor": "4gjkql"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 4
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "11111111111",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "11111111111",
+          "normalized": "11111111111",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "2222222222",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "2222222222",
+          "normalized": "2222222222",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "2222222222",
+          "normalized": "2222222222",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "object_address": {
+      "current": "333333333333",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "333333333333",
+          "normalized": "333333333333",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "333333333333",
+          "normalized": "333333333333",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "rent_price_month": {
+      "current": "44444444444",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "44444444444",
+          "normalized": "44444444444",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "44444444444",
+          "normalized": "44444444444",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}
