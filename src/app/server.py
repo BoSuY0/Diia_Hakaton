@@ -165,6 +165,7 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     "category_selected": [
         "route_message",
         "get_category_roles",
+        "set_party_context",
         "get_templates_for_category",
         "get_category_entities",
         "set_template",
@@ -436,18 +437,39 @@ def _validate_message_sequence(messages: List[Dict[str, Any]]) -> List[Dict[str,
             tool_calls = msg.get("tool_calls")
             if tool_calls:
                 # This assistant message has tool_calls, collect following tool messages
-                validated.append(msg)
                 expected_ids = {tc.get("id") if isinstance(tc, dict) else tc.id for tc in tool_calls}
-                i += 1
                 
-                # Collect all immediately following tool messages
-                while i < len(messages) and messages[i].get("role") == "tool":
-                    tool_msg = messages[i]
+                # Look ahead to find tool messages
+                tool_msgs = []
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    tool_msg = messages[j]
                     tool_call_id = tool_msg.get("tool_call_id")
                     if tool_call_id in expected_ids:
-                        validated.append(tool_msg)
+                        tool_msgs.append(tool_msg)
                         expected_ids.discard(tool_call_id)
+                    j += 1
+                
+                if not expected_ids:
+                    # All tool calls have responses - valid sequence
+                    validated.append(msg)
+                    validated.extend(tool_msgs)
+                    i = j
+                else:
+                    # Missing responses for some tool calls - drop the assistant message and partial tool messages
+                    logger.warning(
+                        "Dropping assistant message with missing tool responses. Missing IDs: %s",
+                        expected_ids
+                    )
+                    # Skip the assistant message
                     i += 1
+                    # Also skip the partial tool messages we found (since we are dropping the parent)
+                    # The main loop will encounter them next, but since they are 'tool' role without 'assistant',
+                    # the existing logic at line 458 (orphaned tool check) would handle them.
+                    # However, since we advanced 'j', we can just set i=j to skip them efficiently?
+                    # Wait, if we set i=j, we skip them. If we set i+=1, the main loop will process them as orphans.
+                    # Let's set i=j to skip them explicitly as we know they belong to this dropped turn.
+                    i = j
             else:
                 # Regular assistant message without tool_calls
                 validated.append(msg)
@@ -541,6 +563,9 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
                 signature_parts.append(f"{canon_name}:{tc.function.arguments}")
             signature = "|".join(signature_parts)
             if signature and signature == last_tool_signature:
+                # Remove the assistant message with tool_calls since we won't provide tool outputs
+                messages.pop()
+                
                 messages.append(
                     {
                         "role": "assistant",
@@ -1338,27 +1363,7 @@ def preview_contract(session_id: str) -> FileResponse:
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_content)
-    if not path.exists():
-         # Try to build if missing
-         from src.documents.builder import build_contract as build_contract_direct
-         try:
-            build_contract_direct(session_id, session.template_id, partial=False)
-         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Build failed: {e}")
 
-    # Convert to PDF
-    from src.documents.converter import convert_to_pdf
-    try:
-        pdf_path = await convert_to_pdf(path, path.parent)
-    except Exception as e:
-        logger.error(f"PDF conversion failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate PDF")
-
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename="contract.pdf"
-    )
 
 
 @app.get("/sessions/{session_id}/contract/download")

@@ -4,6 +4,7 @@ from src.agent.tools.registry import tool
 from src.common.logging import get_logger
 from src.common.vsc import vsc_summary
 from src.sessions.store import load_session
+from src.categories.index import list_entities, list_party_fields
 
 logger = get_logger(__name__)
 
@@ -35,16 +36,36 @@ def get_session_summary_tool(args: Dict[str, Any], context: Dict[str, Any]) -> A
         session.state.value,
     )
 
-    fields_summary: List[Dict[str, Any]] = []
-    for field_name, fs in session.contract_fields.items():
-        fields_summary.append(
-            {
-                "field": field_name,
-                "filled": fs.status == "ok",
-                "status": fs.status,
-                "error": fs.error,
-            }
-        )
+    # Load all possible fields for the category/role to show missing ones
+    all_contract_fields = {}
+    if session.category_id:
+        for e in list_entities(session.category_id):
+            all_contract_fields[e.field] = e
+
+    all_party_fields = {}
+    if session.category_id and session.person_type:
+        for f in list_party_fields(session.category_id, session.person_type):
+            all_party_fields[f.field] = f
+            
+    # Build contract fields summary (merging session state with definition)
+    contract_summary = {}
+    for field_name, entity in all_contract_fields.items():
+        fs = session.contract_fields.get(field_name)
+        status = fs.status if fs else "empty"
+        error = fs.error if fs else None
+        contract_summary[field_name] = {"status": status, "error": error, "required": entity.required, "label": entity.label}
+
+    # Build party fields summary
+    party_summary = {}
+    # We focus on the current role/person_type context
+    current_role = session.role
+    if current_role:
+        role_fields_state = session.party_fields.get(current_role) or {}
+        for field_name, field_def in all_party_fields.items():
+            fs = role_fields_state.get(field_name)
+            status = fs.status if fs else "empty"
+            error = fs.error if fs else None
+            party_summary[field_name] = {"status": status, "error": error, "required": field_def.required, "label": field_def.label}
 
     return {
         "session_id": session_id,
@@ -52,17 +73,7 @@ def get_session_summary_tool(args: Dict[str, Any], context: Dict[str, Any]) -> A
         "template_id": session.template_id,
         "state": session.state.value,
         "can_build_contract": session.can_build_contract,
-        "fields": fields_summary,
-        "party_fields": {
-            role: {
-                name: {"status": fs.status, "error": fs.error}
-                for name, fs in fields.items()
-            }
-            for role, fields in session.party_fields.items()
-        },
-        "contract_fields": {
-            name: {"status": fs.status, "error": fs.error}
-            for name, fs in session.contract_fields.items()
-        },
+        "contract_fields": contract_summary,
+        "party_fields": {current_role: party_summary} if current_role else {},
         "progress": session.progress,
     }

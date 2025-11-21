@@ -54,6 +54,15 @@ def find_category_by_query_tool(args: Dict[str, Any], context: Dict[str, Any]) -
     if session_id:
         try:
             session = get_or_create_session(session_id)
+            
+            # Check if already selected to prevent loops
+            if session.category_id == category.id and session.state != SessionState.IDLE:
+                 return {
+                     "category_id": category.id,
+                     "label": category.label,
+                     "info": "Category already selected. Please proceed to get_category_roles."
+                 }
+
             session.category_id = category.id
             session.template_id = None
             session.state = SessionState.CATEGORY_SELECTED
