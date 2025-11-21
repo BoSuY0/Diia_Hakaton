@@ -23,7 +23,6 @@ from src.app.tool_router import (
     tool_get_templates_for_category,
     tool_set_category,
     tool_set_template,
-    tool_set_template,
     tool_upsert_field,
     tool_set_party_context,
 )
@@ -800,11 +799,6 @@ def get_session_party_fields(session_id: str) -> Dict[str, Any]:
     return result
 
 
-class SetPartyContextRequest(BaseModel):
-    role: str
-    person_type: str
-
-
 @app.post("/sessions/{session_id}/party-context")
 async def set_session_party_context(
     session_id: str, 
@@ -932,26 +926,6 @@ def set_session_category(session_id: str, req: SetCategoryRequest) -> Dict[str, 
 @app.post("/sessions/{session_id}/template")
 def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, Any]:
     result = tool_set_template(session_id=session_id, template_id=req.template_id)
-    if not result.get("ok", False):
-        raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
-    return result
-
-
-@app.post("/sessions/{session_id}/party-context")
-def set_session_party_context(
-    session_id: str, 
-    req: SetPartyContextRequest,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
-) -> Dict[str, Any]:
-    from src.app.tool_router import tool_registry
-    tool = tool_registry.get("set_party_context")
-    if not tool:
-        raise HTTPException(status_code=500, detail="Tool not found")
-    
-    result = tool.execute(
-        {"session_id": session_id, "role": req.role, "person_type": req.person_type}, 
-        {"client_id": x_client_id}
-    )
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
     return result
@@ -1300,37 +1274,6 @@ def _load_meta(category) -> dict:
         return json.load(f)
 
 
-@app.get("/categories")
-def get_categories():
-    """
-    Повертає список всіх доступних категорій договорів.
-    """
-    from src.categories.index import store as category_store
-    categories = []
-    for cat_id, cat in category_store.categories.items():
-        categories.append({
-            "id": cat.id,
-            "label": cat.label,
-            # "description": cat.description # Category object has no description
-        })
-    return categories
-
-
-@app.get("/categories/{category_id}/templates")
-def get_category_templates(category_id: str):
-    """
-    Повертає список шаблонів для вказаної категорії.
-    """
-    from src.categories.index import list_templates
-    try:
-        templates = list_templates(category_id)
-        return [
-            {"id": t.id, "name": t.name} # TemplateInfo object has no description
-            for t in templates
-        ]
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     """
@@ -1455,6 +1398,12 @@ def get_contract_info(session_id: str) -> Dict[str, Any]:
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
+    document_url = (
+        f"/sessions/{session_id}/contract/download" 
+        if session.state in {SessionState.BUILT, SessionState.COMPLETED, SessionState.READY_TO_SIGN}
+        else None
+    )
     return {
         "session_id": session.session_id,
         "category_id": session.category_id,
@@ -1464,8 +1413,8 @@ def get_contract_info(session_id: str) -> Dict[str, Any]:
         "signatures": session.signatures,
         "party_users": session.party_users,
         "can_build_contract": session.can_build_contract,
-        "document_ready": session.state == "built" or session.state == "completed",
-        "document_url": f"/sessions/{session_id}/contract/download" if session.state in ["built", "completed", "ready_to_sign"] else None,
+        "document_ready": document_ready,
+        "document_url": document_url,
         "preview_url": f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None,
     }
 

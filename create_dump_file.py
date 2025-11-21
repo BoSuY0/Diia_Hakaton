@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -42,14 +43,15 @@ def create_dump_file(
     return file_path
 
 
-def _load_gitignore_patterns(base_dir: Path) -> list[str]:
+def _load_gitignore_patterns(base_dir: Path) -> tuple[list[str], object | None]:
     """
-    Читає .gitignore в корені проєкту та повертає список шаблонів.
-    Підтримує базові патерни (*, суфікси, префікси, директорії).
+    Читає .gitignore в корені проєкту і повертає
+    - список сирих патернів
+    - скомпільований PathSpec (якщо модуль pathspec доступний).
     """
     gitignore_path = base_dir / ".gitignore"
     if not gitignore_path.exists():
-        return []
+        return [], None
     lines = gitignore_path.read_text(encoding="utf-8").splitlines()
     patterns: list[str] = []
     for line in lines:
@@ -57,18 +59,32 @@ def _load_gitignore_patterns(base_dir: Path) -> list[str]:
         if not line or line.startswith("#"):
             continue
         patterns.append(line)
-    return patterns
+    try:
+        from pathspec import PathSpec  # type: ignore
+    except ModuleNotFoundError:
+        return patterns, None
+    return patterns, PathSpec.from_lines("gitwildmatch", patterns)
 
 
 def collect_project_files() -> list[Path]:
     """
     Повертає список файлів проєкту, відфільтрованих згідно з .gitignore.
-    Реалізовано спрощену підтримку патернів (достатньо для поточного .gitignore).
+    Використовує pathspec для точного застосування .gitignore (якщо доступний),
+    і простий fallback у разі відсутності залежності.
     """
-    patterns = _load_gitignore_patterns(BASE_DIR)
+    patterns, gitignore_spec = _load_gitignore_patterns(BASE_DIR)
 
-    def is_ignored(rel: Path) -> bool:
-        rel_str = str(rel).replace("\\", "/")
+    def is_ignored(rel: Path, *, is_dir: bool = False) -> bool:
+        rel_str = rel.as_posix()
+        candidates = [rel_str]
+        if is_dir and not rel_str.endswith("/"):
+            candidates.append(rel_str + "/")
+
+        if gitignore_spec:
+            for candidate in candidates:
+                if gitignore_spec.match_file(candidate):
+                    return True
+
         for pat in patterns:
             # Директорія: 'dir/' → будь-що всередині
             if pat.endswith("/"):
@@ -81,16 +97,28 @@ def collect_project_files() -> list[Path]:
         return False
 
     all_paths: list[Path] = []
-    for path in BASE_DIR.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(BASE_DIR)
-        # Не включаємо файли у dumps, навіть якщо не прописані в .gitignore
-        if str(rel).startswith("dumps/"):
-            continue
-        if is_ignored(rel):
-            continue
-        all_paths.append(rel)
+    for root, dirs, files in os.walk(BASE_DIR):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(BASE_DIR)
+
+        # Не заходимо в директорії, які ігноруються .gitignore
+        dirs[:] = [d for d in dirs if not is_ignored(rel_root / d, is_dir=True)]
+
+        for file_name in files:
+            rel = rel_root / file_name
+            # Не включаємо файли у dumps, навіть якщо не прописані в .gitignore
+            if str(rel).startswith("dumps/"):
+                continue
+            if is_ignored(rel):
+                continue
+            file_path = BASE_DIR / rel
+            try:
+                if not file_path.is_file():
+                    continue
+            except OSError:
+                # Пропускаємо файли/лінки, які неможливо прочитати (наприклад, lib64 у venv на Windows)
+                continue
+            all_paths.append(rel)
     return sorted(all_paths)
 
 
@@ -107,7 +135,12 @@ def create_full_project_dump(file_name: Optional[str] = None) -> Path:
     parts: list[str] = []
     for rel in files:
         parts.append(f"===== FILE: {rel} =====")
-        parts.append((BASE_DIR / rel).read_text(encoding="utf-8", errors="replace"))
+        try:
+            parts.append(
+                (BASE_DIR / rel).read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError as exc:
+            parts.append(f"<<unable to read file: {exc}>>")
         parts.append("")  # порожній рядок між файлами
 
     content = "\n".join(parts)

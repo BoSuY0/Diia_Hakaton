@@ -1,0 +1,100 @@
+{
+  "session_id": "c430cb09-3bf0-4560-aa8b-d8629a808223",
+  "user_id": null,
+  "updated_at": "2025-11-21T16:15:58.903388",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "individual",
+  "party_types": {
+    "lessee": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessee": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      },
+      "phone": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessee": "anon_c430cb09-3bf0-4560-aa8b-d8629a808223"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 2
+  },
+  "routing": {},
+  "all_data": {
+    "lessee.name": {
+      "current": "сербін святослав васильович",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "[NAME#1]",
+          "normalized": "[NAME#1]",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "сербін святослав васильович",
+          "normalized": "сербін святослав васильович",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.address": {
+      "current": "вул. Шевченка 34",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "[ADDRESS#1]",
+          "normalized": "[ADDRESS#1]",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "вул. Шевченка 34",
+          "normalized": "вул. Шевченка 34",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.phone": {
+      "current": "[PHONE#1]",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "[PHONE#1]",
+          "normalized": "[PHONE#1]",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

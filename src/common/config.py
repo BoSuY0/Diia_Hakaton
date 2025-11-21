@@ -16,6 +16,8 @@ load_dotenv(BASE_DIR / ".env")
 class Settings:
     # Усі артефакти (meta + документи) лежать під assets/
     documents_root: Path = BASE_DIR / "assets"
+    # Аліас для сумісності з кодом динамічних шаблонів
+    assets_dir: Path = documents_root
     # Структура всередині /assets:
     # /meta_data/
     #   /meta_data_categories_documents/
