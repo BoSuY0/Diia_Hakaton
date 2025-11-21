@@ -470,6 +470,22 @@ function App() {
     // If full mode, always mandatory.
     const isContractOptional = isSingleMode && !areAllOtherRolesTaken;
 
+    const canSubmit = () => {
+      if (!schema) return false;
+      for (const party of schema.parties) {
+        if (selectedMode === 'single' && party.role !== selectedRole) continue;
+        for (const field of party.fields) {
+          if (field.required && !formValues[field.key]) return false;
+        }
+      }
+      if (!isContractOptional) {
+        for (const field of schema.contract.fields) {
+          if (field.required && !formValues[field.key]) return false;
+        }
+      }
+      return true;
+    };
+
     return (
       <>
         {schema.parties.map(party => {
@@ -543,29 +559,15 @@ function App() {
               Завантажити DOCX
             </button>
           ) : (
-            <button
-              className="btn-primary"
-              onClick={() => handleOrder(isContractOptional)}
-              disabled={!isOnline || !(() => {
-                if (!schema) return false;
-                for (const party of schema.parties) {
-                  if (selectedMode === 'single' && party.role !== selectedRole) continue;
-                  for (const field of party.fields) {
-                    if (field.required && !formValues[field.key]) return false;
-                  }
-                }
-                if (!isContractOptional) {
-                  for (const field of schema.contract.fields) {
-                    if (field.required && !formValues[field.key]) return false;
-                  }
-                }
-                return true;
-              })()}
-              title={!isOnline ? "Немає зв'язку" : "Заповніть всі обов'язкові поля"}
-            >
-              {isContractOptional ? 'Зберегти та продовжити' : 'Замовити договір'}
-            </button>
-          )}
+          <button
+            className="btn-primary"
+            onClick={() => handleOrder(isContractOptional)}
+            disabled={!isOnline || !canSubmit()}
+            title={!isOnline ? "Немає зв'язку" : "Заповніть всі обов'язкові поля"}
+          >
+            {isContractOptional ? 'Зберегти та продовжити' : 'Замовити договір'}
+          </button>
+        )}
           <button className="btn-secondary" onClick={handlePreview}>
             Попередній перегляд
           </button>
