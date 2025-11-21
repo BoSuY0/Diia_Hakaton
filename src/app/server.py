@@ -959,6 +959,16 @@ from fastapi.responses import StreamingResponse
 import asyncio
 from collections import defaultdict
 
+# Custom StreamingResponse that swallows cancellation during shutdown
+class SafeStreamingResponse(StreamingResponse):
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        except asyncio.CancelledError:
+            logger.info("StreamingResponse cancelled (shutdown/disconnect); closing gracefully")
+            # Swallow cancellation to avoid noisy shutdown trace
+            return
+
 class StreamManager:
     def __init__(self):
         self.connections: Dict[str, List[asyncio.Queue]] = defaultdict(list)
@@ -1036,7 +1046,7 @@ async def stream_session_events(session_id: str):
         finally:
              stream_manager.disconnect(session_id, queue)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return SafeStreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/sessions/{session_id}/fields")
@@ -1059,13 +1069,16 @@ async def upsert_session_field(
     )
     
     if result.get("ok", False):
+        sender_id = x_client_id or req.client_id
+        field_key = f"{req.role}.{req.field}" if req.role else req.field
         # Broadcast update to all listeners
         await stream_manager.broadcast(session_id, {
             "type": "field_update",
             "field": req.field,
+            "field_key": field_key,
             "value": req.value,
             "role": req.role,
-            "client_id": req.client_id
+            "client_id": sender_id
         })
 
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
