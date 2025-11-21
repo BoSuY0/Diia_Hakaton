@@ -52,8 +52,14 @@ class Settings:
     llm_model: str = (
         os.getenv("LLM_MODEL")
         or os.getenv("OPENAI_MODEL")
-        or "anthropic/claude-4.5-haiku"
+        or "gpt-4o-mini"
     )
+
+    # Sanitize model name if it's a known hallucination/typo
+    if llm_model == "gpt-5-mini-2025-08-7":
+        llm_model = "gpt-5-mini-2025-08-07"
+    # elif llm_model == "anthropic/claude-4.5-haiku":
+    #     llm_model = "anthropic/claude-3-5-sonnet-20240620"
     llm_base_url: str | None = os.getenv("LLM_BASE_URL")
     chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"
     # Формат обміну між туллами та LLM усередині tool-loop:

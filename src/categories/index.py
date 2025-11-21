@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.common.config import BASE_DIR, settings
 from src.common.logging import get_logger
@@ -16,7 +16,8 @@ logger = get_logger(__name__)
 class Category:
     id: str
     label: str
-    meta_path: Path  # шлях до JSON-файлу категорії всередині meta_data_categories
+    meta_path: Path
+    keywords: List[str] = None
 
 
 @dataclass
@@ -63,6 +64,7 @@ class CategoryStore:
                 id=raw["id"],
                 label=raw["label"],
                 meta_path=meta_path,
+                keywords=raw.get("keywords", [])
             )
 
     @property
@@ -80,6 +82,19 @@ store = CategoryStore()
 
 def _load_meta(category: Category) -> dict:
     with category.meta_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_dynamic_template_meta(template_id: str) -> Dict[str, Any]:
+    """
+    Loads metadata for a dynamic template created on the fly.
+    """
+    path = settings.assets_dir / "meta_data" / "dynamic" / f"{template_id}.json"
+    if not path.exists():
+        logger.warning(f"Dynamic template meta not found: {path}")
+        return {}
+    
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -161,18 +176,26 @@ def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
 
 def find_category_by_query(query: str) -> Optional[Category]:
     """
-    Дуже проста евристика пошуку категорії по тексту:
-    рахуємо кількість спільних слів між запитом і label.
+    Search category by keywords overlap + label overlap.
     """
     query_terms = {t.lower() for t in query.split() if t.strip()}
     best: Optional[Category] = None
     best_score = 0
 
     for category in store.categories.values():
+        # Check keywords
+        keywords = {k.lower() for k in (category.keywords or [])}
         label_terms = {t.lower() for t in category.label.split() if t.strip()}
-        score = len(query_terms & label_terms)
-        if score > best_score:
-            best_score = score
+        
+        # Keywords match gives higher score (e.g. 2 points)
+        kw_score = len(query_terms & keywords) * 2
+        # Label match gives 1 point
+        label_score = len(query_terms & label_terms)
+        
+        total_score = kw_score + label_score
+        
+        if total_score > best_score:
+            best_score = total_score
             best = category
 
     return best

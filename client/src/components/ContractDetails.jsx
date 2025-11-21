@@ -104,9 +104,21 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
                     )}
 
                     {!mySignature && myRole && (
-                        <button className="btn-primary" onClick={handleSign} disabled={isSigning}>
-                            {isSigning ? "Підписання..." : "✍️ Підписати (КЕП/Дія.Підпис)"}
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <button
+                                className="btn-primary"
+                                onClick={handleSign}
+                                disabled={isSigning || (!info.can_build_contract && !info.document_ready)}
+                                title={(!info.can_build_contract && !info.document_ready) ? "Договір ще не готовий (очікується заповнення всіх полів)" : ""}
+                            >
+                                {isSigning ? "Підписання..." : "✍️ Підписати (КЕП/Дія.Підпис)"}
+                            </button>
+                            {(!info.can_build_contract && !info.document_ready) && (
+                                <p className="info-text" style={{ color: '#F59E0B', fontSize: '0.85em', textAlign: 'center' }}>
+                                    ⚠️ Підписання стане доступним після заповнення всіх полів усіма сторонами.
+                                </p>
+                            )}
+                        </div>
                     )}
 
                     {isFullySigned && info.document_url && (

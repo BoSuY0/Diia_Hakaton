@@ -25,8 +25,22 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
 
     result: List[FieldSchema] = []
 
+    # Dynamic Template Handling
+    is_dynamic = session.template_id and session.template_id.startswith("dynamic_")
+    dynamic_meta = {}
+    if is_dynamic:
+        from src.categories.index import get_dynamic_template_meta
+        dynamic_meta = get_dynamic_template_meta(session.template_id)
+
     # 1. Contract Fields
-    entities = list_entities(session.category_id)
+    if is_dynamic:
+        from src.categories.index import Entity
+        entities = []
+        for raw in dynamic_meta.get("contract_fields", []):
+             entities.append(Entity(field=raw["field"], type="text", label=raw["label"], required=raw.get("required", True)))
+    else:
+        entities = list_entities(session.category_id)
+
     for e in entities:
         if e.required:
             result.append(FieldSchema(
@@ -39,44 +53,62 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
             ))
 
     # 2. Party Fields
-    category_def = cat_store.get(session.category_id)
-    if category_def:
-        meta = _load_meta(category_def)
-        roles = meta.get("roles") or {}
+    if is_dynamic:
+        roles = dynamic_meta.get("roles") or {}
+        modules = dynamic_meta.get("party_modules") or {}
+    else:
+        category_def = cat_store.get(session.category_id)
+        if category_def:
+            meta = _load_meta(category_def)
+            roles = meta.get("roles") or {}
+            modules = meta.get("party_modules") or {}
+        else:
+            roles = {}
+            modules = {}
 
-        # Filter roles if filling_mode is partial
-        target_roles = list(roles.keys())
-        if session.filling_mode == "partial" and session.role:
-             # In partial mode, we only require fields for the CURRENT role.
-             # Unless the role is not in the category (which shouldn't happen if validated).
-             if session.role in roles:
-                 target_roles = [session.role]
+    # Filter roles if filling_mode is partial
+    target_roles = list(roles.keys())
+    if session.filling_mode == "partial" and session.role:
+            # In partial mode, we only require fields for the CURRENT role.
+            # Unless the role is not in the category (which shouldn't happen if validated).
+            if session.role in roles:
+                target_roles = [session.role]
 
-        for role_key in target_roles:
-            # Determine person type
-            p_type = None
-            if session.party_types and role_key in session.party_types:
-                p_type = session.party_types[role_key]
-            elif session.role == role_key and session.person_type:
-                 # Fallback for backward compatibility
-                p_type = session.person_type
+    for role_key in target_roles:
+        # Determine person type
+        p_type = None
+        if session.party_types and role_key in session.party_types:
+            p_type = session.party_types[role_key]
+        elif session.role == role_key and session.person_type:
+                # Fallback for backward compatibility
+            p_type = session.person_type
 
-            # Default to individual if unknown, to ensure we list something
-            if not p_type:
-                p_type = "individual"
+        # Default to individual if unknown, to ensure we list something
+        if not p_type:
+            p_type = "individual"
 
-            party_fields_list = list_party_fields(session.category_id, p_type)
-            for pf in party_fields_list:
-                if pf.required:
-                    key = f"{role_key}.{pf.field}"
-                    result.append(FieldSchema(
-                        key=key,
-                        field_name=pf.field,
-                        role=role_key,
-                        label=pf.label,
-                        required=True,
-                        type="text" # Party fields usually don't have type in metadata yet, handled by validator heuristic
-                    ))
+        party_fields_list = []
+        if is_dynamic:
+            module = modules.get(p_type)
+            if module:
+                from src.categories.index import PartyField
+                for raw in module.get("fields", []):
+                    party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
+        
+        if not is_dynamic and not party_fields_list:
+             party_fields_list = list_party_fields(session.category_id, p_type)
+
+        for pf in party_fields_list:
+            if pf.required:
+                key = f"{role_key}.{pf.field}"
+                result.append(FieldSchema(
+                    key=key,
+                    field_name=pf.field,
+                    role=role_key,
+                    label=pf.label,
+                    required=True,
+                    type="text" # Party fields usually don't have type in metadata yet, handled by validator heuristic
+                ))
 
     return result
 

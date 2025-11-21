@@ -74,9 +74,42 @@ def chat_with_tools(
     started = time.perf_counter()
     # Не задаємо штучний ліміт max_completion_tokens — дозволяємо моделі
     # повністю сформувати відповідь у межах її власного ліміту.
+    # Filter messages to ensure tool roles are valid
+    # LiteLLM/OpenAI requires that a message with role 'tool' MUST follow a message with 'tool_calls'
+    # and match the tool_call_id.
+    # We also need to ensure that if we have a tool call, we provide the result.
+    
+    valid_messages = []
+    tool_call_ids = set()
+    
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                for tc in tool_calls:
+                    # tc might be a dict or an object depending on how it was stored
+                    if isinstance(tc, dict):
+                        t_id = tc.get("id")
+                    else:
+                        t_id = getattr(tc, "id", None)
+                    
+                    if t_id:
+                        tool_call_ids.add(t_id)
+            valid_messages.append(msg)
+        elif role == "tool":
+            # Only include tool response if we saw the call
+            t_id = msg.get("tool_call_id")
+            if t_id and t_id in tool_call_ids:
+                 valid_messages.append(msg)
+            else:
+                logger.warning(f"Dropping orphaned tool response: {t_id}")
+        else:
+            valid_messages.append(msg)
+
     response = litellm.completion(
         model=settings.llm_model,
-        messages=messages,
+        messages=valid_messages,
         tools=tools,
         tool_choice="required" if require_tools else "auto",
         parallel_tool_calls=True,
@@ -84,8 +117,9 @@ def chat_with_tools(
         top_p=1,
         presence_penalty=0,
         frequency_penalty=0,
-        timeout=30,
+        timeout=120,
         num_retries=2,
+        drop_params=True,
         **kwargs,
     )
     duration_ms = (time.perf_counter() - started) * 1000

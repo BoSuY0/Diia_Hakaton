@@ -479,8 +479,16 @@ class SetFillingModeTool(BaseTool):
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         mode = args["mode"]
+        client_id = context.get("client_id")
 
         with transactional_session(session_id) as session:
+            # Access check
+            if session.party_users:
+                 if not client_id:
+                      return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
+                 if client_id not in session.party_users.values():
+                      return {"ok": False, "error": "Ви не є учасником цієї сесії."}
+
             session.filling_mode = mode
             return {
                 "ok": True,

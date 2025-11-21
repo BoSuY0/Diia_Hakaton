@@ -1,0 +1,33 @@
+{
+  "document_id": "custom_contract_f7ac91d6-789b-4c75-b461-f1716d07dc8f",
+  "category_id": "custom",
+  "template_id": "custom_contract",
+  "status": "draft",
+  "parties": {
+    "lessee": {
+      "person_type": "individual",
+      "source": "manual",
+      "data": {
+        "name": "[NAME#1]",
+        "address": "Хрещатик, Київ"
+      }
+    }
+  },
+  "contract_fields": {
+    "contract_title": null,
+    "contract_city": null,
+    "contract_date": null,
+    "contract_subject": null,
+    "contract_terms": null
+  },
+  "signatures": {
+    "lessor": {
+      "status": "pending",
+      "signed_at": null
+    },
+    "lessee": {
+      "status": "pending",
+      "signed_at": null
+    }
+  }
+}

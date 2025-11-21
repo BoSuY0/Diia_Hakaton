@@ -208,6 +208,21 @@ def _det_unzr(canon: str, mapping: List[int], src: str) -> List[Span]:
     return out
 
 
+def _det_names(canon: str, mapping: List[int], src: str) -> List[Span]:
+    out: List[Span] = []
+    # Heuristic: 3 capitalized words in Cyrillic (Surname Name Patronymic)
+    upper = "А-ЯІЇЄҐ"
+    lower = "а-яіїєґ'’`"
+    
+    # Pattern: Capitalized word, space, Capitalized word, space, Capitalized word
+    pattern = fr"(?<![{lower}{upper}])[{upper}][{lower}]+\s+[{upper}][{lower}]+\s+[{upper}][{lower}]+(?![{lower}{upper}])"
+    
+    for m in re.finditer(pattern, src):
+        out.append(Span(m.start(), m.end(), "NAME", PRIORITY["NAME"]))
+        
+    return out
+
+
 def _det_raw(src: str) -> List[Span]:
     out: List[Span] = []
     for typ, rgx in (
@@ -290,6 +305,7 @@ def sanitize_typed(text: str) -> Dict[str, object]:
     spans += _det_ipn(canon, mapping, text)
     spans += _det_passports(canon, mapping, text)
     spans += _det_unzr(canon, mapping, text)
+    spans += _det_names(canon, mapping, text)
 
     spans = _merge_typed(spans)
 

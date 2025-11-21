@@ -298,7 +298,7 @@ def set_session_template(session: Session, template_id: str) -> None:
     _update_progress(session)
 
 
-def claim_session_role(session: Session, role: str, user_id: str) -\u003e bool:
+def claim_session_role(session: Session, role: str, user_id: str) -> bool:
     """
     Attempts to claim a role for a specific user.
     Returns True if successful, False otherwise.

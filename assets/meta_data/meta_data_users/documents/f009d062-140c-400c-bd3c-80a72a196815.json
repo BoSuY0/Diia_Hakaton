@@ -1,20 +1,16 @@
 {
-  "document_id": "d1da7661-9f15-4e65-8d23-de168a67a6cf",
+  "document_id": "lease_flat_f009d062-140c-400c-bd3c-80a72a196815",
   "category_id": "lease_living",
-  "template_id": null,
+  "template_id": "lease_flat",
   "status": "draft",
   "parties": {
     "lessor": {
       "person_type": "individual",
       "source": "manual",
       "data": {
-        "name": null,
-        "address": null,
-        "id_code": null,
-        "id_doc": null,
-        "iban": null,
-        "phone": null,
-        "email": null
+        "name": "ggergfgd",
+        "address": "gg",
+        "id_doc": "tregr g"
       }
     }
   },

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+// Trigger rebuild
 import './App.css';
 import { api } from './api';
 import { SectionCard } from './components/SectionCard';
@@ -10,6 +11,7 @@ import { ModeSelector } from './components/ModeSelector';
 import { RoleSelector } from './components/RoleSelector';
 import { Dashboard } from './components/Dashboard';
 import { ContractDetails } from './components/ContractDetails';
+import { AIChat } from './components/AIChat';
 
 // Simple debounce utility
 const debounce = (func, wait) => {
@@ -65,6 +67,12 @@ function App() {
     initialized.current = true;
 
     const init = async () => {
+      // Ensure we are on the root path
+      if (window.location.pathname !== '/') {
+        const cleanUrl = `/${window.location.search}`;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+
       const params = new URLSearchParams(window.location.search);
       const sid = params.get('session_id');
 
@@ -220,7 +228,7 @@ function App() {
         const session = await api.createSession();
         sid = session.session_id;
         setSessionId(sid);
-        const newUrl = `${window.location.pathname}?session_id=${sid}`;
+        const newUrl = `/?session_id=${sid}`;
         window.history.pushState({ path: newUrl }, '', newUrl);
 
         // Set category and template
@@ -235,6 +243,13 @@ function App() {
         setIsLoading(false);
       }
     } else {
+      if (selectedCategory) {
+        try {
+          await api.setCategory(sid, selectedCategory);
+        } catch (e) {
+          console.error("Failed to set category", e);
+        }
+      }
       await api.setTemplate(sid, templateId);
     }
 
@@ -246,7 +261,7 @@ function App() {
 
     if (sessionId) {
       try {
-        await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial');
+        await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial', clientId);
       } catch (e) {
         console.error("Failed to set mode", e);
       }
@@ -269,17 +284,24 @@ function App() {
     setSelectedRole(role);
 
     if (selectedMode === 'full') {
-      // Try to claim all known roles.
-      try {
-        await api.setPartyContext(sessionId, 'lessor', 'individual', clientId);
-      } catch (e) { }
-      try {
-        await api.setPartyContext(sessionId, 'lessee', 'individual', clientId);
-      } catch (e) { }
+      // Try to claim all known roles dynamically
+      if (schema && schema.parties) {
+        for (const party of schema.parties) {
+          const defaultType = party.allowed_types && party.allowed_types.length > 0 ? party.allowed_types[0].value : 'individual';
+          try {
+            await api.setPartyContext(sessionId, party.role, defaultType, clientId);
+          } catch (e) {
+            console.error(`Failed to set context for ${party.role}`, e);
+          }
+        }
+      }
     } else {
       // Partial mode: claim only selected
+      const party = schema && schema.parties ? schema.parties.find(p => p.role === role) : null;
+      const defaultType = party && party.allowed_types && party.allowed_types.length > 0 ? party.allowed_types[0].value : 'individual';
+
       try {
-        const res = await api.setPartyContext(sessionId, role, 'individual', clientId);
+        const res = await api.setPartyContext(sessionId, role, defaultType, clientId);
         if (res.data && !res.data.ok) {
           alert(res.data.error || "Не вдалося обрати роль. Можливо, вона вже зайнята.");
           await fetchSchema(sessionId);
@@ -301,17 +323,35 @@ function App() {
     setStep('form');
   };
 
+  const clearUrlSession = () => {
+    window.history.pushState({}, '', '/');
+  };
+
   const handleBack = () => {
     switch (step) {
-      case 'template': setStep('category'); break;
+      case 'template':
+        setStep('category');
+        setSessionId(null);
+        clearUrlSession();
+        break;
       case 'mode':
         setStep('template');
         break;
       case 'role': setStep('mode'); break;
       case 'form': setStep('role'); break;
-      case 'details': setStep('dashboard'); break;
-      case 'dashboard': setStep('category'); break;
-      default: setStep('category');
+      case 'details':
+        setStep('dashboard');
+        clearUrlSession();
+        break;
+      case 'dashboard':
+        setStep('category');
+        setSessionId(null);
+        clearUrlSession();
+        break;
+      default:
+        setStep('category');
+        setSessionId(null);
+        clearUrlSession();
     }
   };
 
@@ -559,91 +599,98 @@ function App() {
             onSelect={handleRoleSelect}
             takenRoles={takenRoles}
             myRoles={myRoles}
-    {!isOnline && (
-      <div className="offline-notification">
-        <span>⚠️</span>
-        <span>Зв'язок втрачено. Редагування недоступне.</span>
-      </div>
-    )}
-
-    <PreviewDrawer
-      isOpen={showPreview}
-      onClose={() => setShowPreview(false)}
-      sessionId={sessionId}
-    />
-
-    <header className="header">
-      {step !== 'category' && step !== 'dashboard' && (
-        <button className="back-button" onClick={handleBack}>←</button>
-      )}
-      <h1 className="title">Договір оренди житла</h1>
-    </header>
-
-    <div className="content-area">
-      {renderStep()}
-    </div>
-
-    <button
-      className="floating-dashboard-btn"
-      onClick={() => setStep('dashboard')}
-    >
-      <span>📂</span> Усі договори
-    </button>
-  </div >
-);
-}
-
-// --- AI Chat Component ---
-const AIChat = ({ sessionId, clientId, onBack }) => {
-  const [messages, setMessages] = useState([
-    { role: 'system', content: 'Привіт! Я ваш AI-помічник. Я можу допомогти вам заповнити договір. Просто напишіть мені дані або завантажте документ.' }
-  ]);
-  const [input, setInput] = useState('');
-  const [isSending, setIsSending] = useState(false);
-
-  const handleSend = async () => {
-    if (!input.trim()) return;
-
-    const userMsg = { role: 'user', content: input };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    setIsSending(true);
-
-    try {
-      const res = await api.chat(sessionId, userMsg.content);
-      setMessages(prev => [...prev, { role: 'assistant', content: res.reply }]);
-    } catch (e) {
-      console.error("Chat failed", e);
-      setMessages(prev => [...prev, { role: 'system', content: 'Вибачте, сталася помилка. Спробуйте ще раз.' }]);
-    } finally {
-      setIsSending(false);
+            isFullMode={selectedMode === 'full'}
+          />
+        );
+      case 'form':
+        return renderForm();
+      case 'success':
+        return (
+          <div className="success-screen">
+            <h2>Договір успішно створено!</h2>
+            <p>Ви можете завантажити його або переглянути в панелі керування.</p>
+            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId), '_blank')}>
+              Завантажити DOCX
+            </button>
+            <button className="btn-secondary" onClick={() => {
+              setStep('dashboard');
+              clearUrlSession();
+            }}>
+              На головну
+            </button>
+          </div>
+        );
+      case 'details':
+        return (
+          <ContractDetails
+            sessionId={sessionId}
+            clientId={clientId}
+            onBack={handleBack}
+            onEdit={() => setStep('form')}
+          />
+        );
+      case 'dashboard':
+        return (
+          <Dashboard
+            clientId={clientId}
+            onSelectSession={(sid) => {
+              setSessionId(sid);
+              fetchSchema(sid);
+              setStep('details');
+            }}
+            onBack={handleBack}
+          />
+        );
+      case 'ai_chat':
+        return (
+          <AIChat
+            sessionId={sessionId}
+            clientId={clientId}
+            onBack={() => setStep('mode')}
+          />
+        );
+      default:
+        return <div>Unknown step</div>;
     }
   };
 
   return (
-    <div className="chat-container">
-      <div className="chat-messages">
-        {messages.map((m, i) => (
-          <div key={i} className={`chat-message ${m.role}`}>
-            <div className="message-content">{m.content}</div>
-          </div>
-        ))}
-        {isSending && <div className="chat-message system">Writing...</div>}
+    <div className="app-container">
+      {!isOnline && (
+        <div className="offline-notification">
+          <span>⚠️</span>
+          <span>Зв'язок втрачено. Редагування недоступне.</span>
+        </div>
+      )}
+
+      <PreviewDrawer
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        sessionId={sessionId}
+      />
+
+      <header className="header">
+        {step !== 'category' && step !== 'dashboard' && (
+          <button className="back-button" onClick={handleBack}>←</button>
+        )}
+        <h1 className="title">Договір оренди житла</h1>
+      </header>
+
+      <div className="content-area">
+        {renderStep()}
       </div>
-      <div className="chat-input-area">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyPress={e => e.key === 'Enter' && handleSend()}
-          placeholder="Напишіть повідомлення..."
-          disabled={isSending}
-        />
-        <button onClick={handleSend} disabled={isSending}>Send</button>
-      </div>
-      <button className="btn-secondary" style={{ marginTop: 10 }} onClick={onBack}>Back to Form</button>
+
+      <button
+        className="floating-dashboard-btn"
+        onClick={() => {
+          setStep('dashboard');
+          clearUrlSession();
+        }}
+      >
+        <span>📂</span> Усі договори
+      </button>
     </div>
   );
-};
+}
 
 export default App;

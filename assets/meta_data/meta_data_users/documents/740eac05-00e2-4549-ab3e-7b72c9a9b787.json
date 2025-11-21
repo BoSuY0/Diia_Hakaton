@@ -1,10 +1,10 @@
 {
-  "document_id": "d1da7661-9f15-4e65-8d23-de168a67a6cf",
-  "category_id": "lease_living",
-  "template_id": null,
+  "document_id": "custom_contract_740eac05-00e2-4549-ab3e-7b72c9a9b787",
+  "category_id": "custom",
+  "template_id": "custom_contract",
   "status": "draft",
   "parties": {
-    "lessor": {
+    "lessee": {
       "person_type": "individual",
       "source": "manual",
       "data": {
@@ -19,14 +19,11 @@
     }
   },
   "contract_fields": {
-    "object_address": null,
-    "object_description": null,
-    "area_sqm": null,
-    "rent_price_month": null,
-    "deposit_amount": null,
-    "payment_due_day": null,
-    "start_date": null,
-    "end_date": null
+    "contract_title": null,
+    "contract_city": null,
+    "contract_date": null,
+    "contract_subject": null,
+    "contract_terms": null
   },
   "signatures": {
     "lessor": {

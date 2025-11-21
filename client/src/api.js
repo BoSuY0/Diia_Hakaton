@@ -28,8 +28,12 @@ export const api = {
         }, config);
     },
 
-    async setFillingMode(sessionId, mode) {
-        return axios.post(`${API_URL}/sessions/${sessionId}/filling-mode`, { mode });
+    async setFillingMode(sessionId, mode, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        return axios.post(`${API_URL}/sessions/${sessionId}/filling-mode`, { mode }, config);
     },
 
     async upsertField(sessionId, field, value, role = null, clientId = null) {

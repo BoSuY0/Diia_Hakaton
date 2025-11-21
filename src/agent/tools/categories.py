@@ -36,8 +36,8 @@ class FindCategoryByQueryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Знаходить категорію договорів за текстовим запитом користувача (без PII). "
-            "Спочатку використовує локальний пошук по назвах категорій."
+            "ОБОВ'ЯЗКОВО використовуйте цей інструмент ПЕРШИМ кроком для пошуку категорії договору. "
+            "Він знайде правильну категорію (наприклад 'custom' для спадщини) за запитом користувача."
         )
 
     @property
@@ -95,7 +95,10 @@ class GetTemplatesForCategoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Повертає список доступних шаблонів для обраної категорії."
+        return (
+            "Повертає список доступних шаблонів для обраної категорії. "
+            "Використовуйте 'custom' для створення будь-яких інших договорів (спадщина, дарування, послуги тощо)."
+        )
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -124,18 +127,18 @@ class GetTemplatesForCategoryTool(BaseTool):
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
 
-        # Auto-select if only one template (original logic)
-        session_id = args.get("session_id")
-        if session_id and len(templates) == 1:
-             try:
-                with transactional_session(session_id) as session:
-                    # Only set if matches category
-                    if session.category_id == category_id:
-                        from src.services.session import set_session_template
-                        set_session_template(session, templates[0].id)
-                        logger.info("Auto-selected single template: %s", templates[0].id)
-             except Exception:
-                 pass
+        # Auto-select logic removed to prevent wrong template selection
+        # session_id = args.get("session_id")
+        # if session_id and len(templates) == 1:
+        #      try:
+        #         with transactional_session(session_id) as session:
+        #             # Only set if matches category
+        #             if session.category_id == category_id:
+        #                 from src.services.session import set_session_template
+        #                 set_session_template(session, templates[0].id)
+        #                 logger.info("Auto-selected single template: %s", templates[0].id)
+        #      except Exception:
+        #          pass
 
         return {
             "category_id": category_id,
@@ -231,7 +234,7 @@ class SetCategoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Встановлює для сесії обрану категорію договорів."
+        return "Встановлює для сесії обрану категорію договорів. Використовуйте 'custom' для нестандартних договорів."
 
     @property
     def parameters(self) -> Dict[str, Any]:

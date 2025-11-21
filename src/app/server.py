@@ -42,20 +42,61 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_directories()
-    # Run cleanup on startup
-    try:
-        from src.sessions.cleaner import clean_stale_sessions
-        clean_stale_sessions()
-    except Exception as e:
-        logger.error(f"Cleanup failed: {e}")
+    
+    import asyncio
+    from src.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
+    
+    stop_event = asyncio.Event()
+
+    async def cleanup_loop():
+        # Give server a moment to start up fully
+        await asyncio.sleep(5)
+        
+        while not stop_event.is_set():
+            try:
+                # Import stream_manager here to avoid circular/early import issues
+                # (It is defined in this file but later)
+                from src.app.server import stream_manager
+                
+                active_ids = set(stream_manager.connections.keys())
+                
+                # Run cleanup
+                clean_abandoned_sessions(active_ids, grace_period_minutes=5)
+                clean_stale_sessions()
+                
+            except Exception as e:
+                logger.error(f"Background cleanup error: {e}")
+            
+            # Wait for 60 seconds or until stop signal
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=60)
+            except asyncio.TimeoutError:
+                pass
+
+    cleanup_task = asyncio.create_task(cleanup_loop())
         
     logger.info("Server started")
     yield
     
     # Shutdown logic
     logger.info("Shutting down server...")
-    from src.app.server import stream_manager
-    await stream_manager.shutdown()
+    stop_event.set()
+    
+    try:
+        # Give cleanup task a moment to exit gracefully
+        await asyncio.wait_for(cleanup_task, timeout=2.0)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        pass
+    except Exception as e:
+        logger.error(f"Error waiting for cleanup task: {e}")
+
+    try:
+        # Force close all SSE streams
+        if 'stream_manager' in globals():
+            await asyncio.wait_for(stream_manager.shutdown(), timeout=2.0)
+    except Exception:
+        pass
+        
     logger.info("Server shutdown complete")
 
 app = FastAPI(title="Contract Builder ChatBot", lifespan=lifespan)
@@ -80,22 +121,6 @@ class ChatResponse(BaseModel):
     session_id: str
     reply: str
 
-
-@app.post("/chat", response_model=ChatResponse)
-def chat_endpoint(req: ChatRequest) -> ChatResponse:
-    # Load conversation
-    conv = conversation_store.get_conversation(req.session_id)
-    
-    # Add user message
-    conv.messages.append({"role": "user", "content": req.message})
-    
-    # Run tool loop
-    conv.messages = _tool_loop(conv.messages, conv)
-    
-    # Get reply
-    reply = _format_reply_from_messages(conv.messages)
-    
-    return ChatResponse(session_id=req.session_id, reply=reply)
 
 
 class FindCategoryRequest(BaseModel):
@@ -130,6 +155,11 @@ class SetTemplateRequest(BaseModel):
 
 class BuildContractRequest(BaseModel):
     template_id: str
+
+
+class SetPartyContextRequest(BaseModel):
+    role: str
+    person_type: str
 
 
 SESSION_AWARE_TOOLS = {
@@ -850,14 +880,12 @@ def check_session_access(session: Session, client_id: Optional[str]):
     
     if occupied_roles >= expected_roles_count:
         # Session is full.
-        # RELAXED: We allow reading the session even if full, so new users can see "Session is full" or read-only view.
-        # If we block here, the frontend can't even load the schema to show "Taken".
-        # if not client_id:
-        #      raise HTTPException(status_code=403, detail="Session is full. Access denied.")
+        if not client_id:
+             raise HTTPException(status_code=403, detail="Session is full. Access denied.")
              
         # Check if client is a participant
-        # if client_id not in session.party_users.values():
-        #      raise HTTPException(status_code=403, detail="Session is full. You are not a participant.")
+        if client_id not in session.party_users.values():
+             raise HTTPException(status_code=403, detail="Session is full. You are not a participant.")
         pass
 
 
@@ -909,18 +937,45 @@ def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, 
     return result
 
 
+@app.post("/sessions/{session_id}/party-context")
+def set_session_party_context(
+    session_id: str, 
+    req: SetPartyContextRequest,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
+    from src.app.tool_router import tool_registry
+    tool = tool_registry.get("set_party_context")
+    if not tool:
+        raise HTTPException(status_code=500, detail="Tool not found")
+    
+    result = tool.execute(
+        {"session_id": session_id, "role": req.role, "person_type": req.person_type}, 
+        {"client_id": x_client_id}
+    )
+    if not result.get("ok", False):
+        raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
+    return result
+
+
 class SetFillingModeRequest(BaseModel):
     mode: str
 
 
 @app.post("/sessions/{session_id}/filling-mode")
-def set_session_filling_mode(session_id: str, req: SetFillingModeRequest) -> Dict[str, Any]:
+def set_session_filling_mode(
+    session_id: str, 
+    req: SetFillingModeRequest,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
     from src.app.tool_router import tool_registry
     tool = tool_registry.get("set_filling_mode")
     if not tool:
         raise HTTPException(status_code=500, detail="Tool not found")
     
-    result = tool.execute({"session_id": session_id, "mode": req.mode}, {})
+    result = tool.execute(
+        {"session_id": session_id, "mode": req.mode}, 
+        {"client_id": x_client_id}
+    )
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
     return result
@@ -955,7 +1010,8 @@ class StreamManager:
         msg = f"data: {data}\n\n"
         
         to_remove = []
-        for queue in self.connections[session_id]:
+        # Iterate over a copy to avoid issues if queues are modified during iteration
+        for queue in list(self.connections[session_id]):
             try:
                 # Use put_nowait to avoid blocking if queue is full (though unlikely with infinite queue)
                 # But more importantly, if we want to detect closed loops, we rely on client disconnecting.
@@ -971,7 +1027,8 @@ class StreamManager:
         """
         Gracefully close all connections.
         """
-        for session_id, queues in self.connections.items():
+        # Iterate over a copy of items because disconnect() might modify the dictionary
+        for session_id, queues in list(self.connections.items()):
             for queue in queues:
                 try:
                     queue.put_nowait(None)
@@ -998,13 +1055,10 @@ async def stream_session_events(session_id: str):
                 yield msg
         except asyncio.CancelledError:
             # Client disconnected or server shutting down
-            stream_manager.disconnect(session_id, queue)
-            # Do not re-raise to avoid noisy logs on server shutdown
-            return
+            # We just exit silently
+            pass
         except Exception as e:
             logger.error(f"SSE stream error for {session_id}: {e}")
-            stream_manager.disconnect(session_id, queue)
-            return
         finally:
              stream_manager.disconnect(session_id, queue)
 

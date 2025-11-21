@@ -57,6 +57,20 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         )
     template = templates[template_id]
 
+    # Dynamic Template Handling
+    is_dynamic = template_id.startswith("dynamic_")
+    dynamic_meta = {}
+    
+    if is_dynamic:
+        from src.categories.index import get_dynamic_template_meta
+        dynamic_meta = get_dynamic_template_meta(template_id)
+        if not dynamic_meta:
+             raise MetaNotFoundError(f"Dynamic template meta not found: {template_id}")
+        
+        # Override template object locally
+        from src.categories.index import TemplateInfo
+        template = TemplateInfo(id=template_id, name=dynamic_meta.get("label", "Dynamic Contract"), file=f"{template_id}.docx")
+
     # 1. Validate missing fields using shared service
     # We get ALL required fields.
     required_fields = get_required_fields(session)
@@ -94,38 +108,17 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
     field_values: Dict[str, str] = {}
     PLACEHOLDER = "(____________)"
 
-    # We iterate over ALL fields that might be in the session, not just required ones.
-    # But wait, the template might use fields that are NOT required but optional.
-    # So we should probably iterate over all DEFINED fields in the category, including optional.
-
-    # Let's get ALL potential fields (required + optional)
-    # Re-using logic from get_required_fields but without filtering by 'required=True'
-    # Ideally get_required_fields should be get_all_fields(session, required_only=False)
-    # But for now let's replicate logic or update service.
-
-    # Since we need to fill the template, we can just iterate over session.all_data!
-    # The session.all_data contains flattened keys like "lessor.name" or "contract_date".
-    # This is exactly what the template expects (plus simple transformation if needed).
-
-    # However, session.all_data might contain stale data or data not relevant to current category roles?
-    # Unlikely.
-
-    # Let's safely iterate over known entities + known party fields to pull form all_data
-    # This ensures we don't dump garbage into the template context, but also ensures we catch optional fields.
-
-    # Actually, iterating over session.all_data is safer if we trust the keys.
-    # But let's try to be structured to handle default values (PLACEHOLDER) for missing optional fields if partial=True?
-    # No, if partial=True, we only care about REQUIRED fields being filled if we were in strict mode.
-    # But here we want to fill what we have.
-
-    # Let's use session.all_data directly as base, and fill missing keys with placeholders?
-    # The issue is we don't know "missing keys" unless we list them.
-
-    # So we DO need to list all fields.
-    from src.categories.index import list_entities, list_party_fields, _load_meta, store as cat_store
+    from src.categories.index import list_entities, list_party_fields, _load_meta, store as cat_store, Entity, PartyField
 
     # Contract fields
-    entities = list_entities(session.category_id)
+    if is_dynamic:
+        # Use fields from dynamic meta
+        entities = []
+        for raw in dynamic_meta.get("contract_fields", []):
+             entities.append(Entity(field=raw["field"], type="text", label=raw["label"], required=raw.get("required", True)))
+    else:
+        entities = list_entities(session.category_id)
+        
     for entity in entities:
         entry = (session.all_data or {}).get(entity.field)
         value = None
@@ -141,50 +134,71 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             field_values[entity.field] = str(value)
 
     # Party fields
-    category_def = cat_store.get(session.category_id)
-    if category_def:
-        meta = _load_meta(category_def)
+    if is_dynamic:
+        roles = dynamic_meta.get("roles") or {}
+        # For dynamic templates, we might have custom party fields defined in meta
+        # But usually we stick to standard modules.
+        # Let's check if dynamic meta overrides party modules
+        modules = dynamic_meta.get("party_modules") or {}
+    else:
+        category_def = cat_store.get(session.category_id)
+        meta = _load_meta(category_def) if category_def else {}
         roles = meta.get("roles") or {}
-        for role_key in roles.keys():
-            # Determine person type
-            p_type = None
-            if session.party_types and role_key in session.party_types:
-                p_type = session.party_types[role_key]
-            elif session.role == role_key and session.person_type:
-                 # Fallback for backward compatibility
-                p_type = session.person_type
+        modules = meta.get("party_modules") or {}
 
-            if not p_type:
-                p_type = "individual"
+    for role_key in roles.keys():
+        # Determine person type
+        p_type = None
+        if session.party_types and role_key in session.party_types:
+            p_type = session.party_types[role_key]
+        elif session.role == role_key and session.person_type:
+                # Fallback for backward compatibility
+            p_type = session.person_type
 
-            party_fields_list = list_party_fields(session.category_id, p_type)
-            for pf in party_fields_list:
-                key = f"{role_key}.{pf.field}"
-                entry = (session.all_data or {}).get(key)
-                value = None
-                if isinstance(entry, dict):
-                    value = entry.get("current")
-                else:
-                    value = entry
+        if not p_type:
+            p_type = "individual"
 
-                if value is None or str(value).strip() == "":
-                    field_values[key] = PLACEHOLDER if partial else ""
-                else:
-                    field_values[key] = str(value)
+        # Get fields for this type
+        party_fields_list = []
+        module = modules.get(p_type)
+        if module:
+             for raw in module.get("fields", []):
+                party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
+        
+        # Add standard fields if not dynamic (or if dynamic uses standard modules logic)
+        if not is_dynamic and not party_fields_list:
+             party_fields_list = list_party_fields(session.category_id, p_type)
+
+        for pf in party_fields_list:
+            key = f"{role_key}.{pf.field}"
+            entry = (session.all_data or {}).get(key)
+            value = None
+            if isinstance(entry, dict):
+                value = entry.get("current")
+            else:
+                value = entry
+
+            if value is None or str(value).strip() == "":
+                field_values[key] = PLACEHOLDER if partial else ""
+            else:
+                field_values[key] = str(value)
 
     output_path = output_document_path(template.id, session_id, ext="docx")
 
     from src.common.config import settings
 
-    template_path = (
-        settings.default_documents_root
-        / category.id
-        / template.file
-    )
-    if not template_path.exists():
-        fallback = settings.default_documents_root / template.file
-        if fallback.exists():
-            template_path = fallback
+    if is_dynamic:
+        template_path = settings.assets_dir / "documents" / "templates" / "dynamic" / template.file
+    else:
+        template_path = (
+            settings.default_documents_root
+            / category.id
+            / template.file
+        )
+        if not template_path.exists():
+            fallback = settings.default_documents_root / template.file
+            if fallback.exists():
+                template_path = fallback
 
     fill_docx_template(template_path, field_values, output_path)
     logger.info(

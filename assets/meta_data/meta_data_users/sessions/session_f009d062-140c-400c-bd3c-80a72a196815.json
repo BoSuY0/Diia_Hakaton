@@ -1,0 +1,114 @@
+{
+  "session_id": "f009d062-140c-400c-bd3c-80a72a196815",
+  "user_id": null,
+  "updated_at": "2025-11-21T13:26:10.747670",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessor": {
+      "id_doc": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      },
+      "name": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessor": "4gjkql"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 2
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.id_doc": {
+      "current": "tregr g",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "tregr g",
+          "normalized": "tregr g",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "gg",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "gg",
+          "normalized": "gg",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.name": {
+      "current": "ggergfgd",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": " g",
+          "normalized": "g",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": " g",
+          "normalized": "g",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": " ggergfgd",
+          "normalized": "ggergfgd",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": " ggergfgd",
+          "normalized": "ggergfgd",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": " ggergfgd",
+          "normalized": "ggergfgd",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}
