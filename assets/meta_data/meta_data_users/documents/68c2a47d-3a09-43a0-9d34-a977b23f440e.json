@@ -1,0 +1,42 @@
+{
+  "document_id": "lease_flat_68c2a47d-3a09-43a0-9d34-a977b23f440e",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "status": "draft",
+  "parties": {
+    "lessee": {
+      "person_type": "individual",
+      "source": "manual",
+      "data": {
+        "name": "4r4r4r4re43r"
+      }
+    },
+    "lessor": {
+      "person_type": "individual",
+      "source": "manual",
+      "data": {
+        "name": "4r4r4r43r4"
+      }
+    }
+  },
+  "contract_fields": {
+    "object_address": null,
+    "object_description": null,
+    "area_sqm": null,
+    "rent_price_month": null,
+    "deposit_amount": null,
+    "payment_due_day": null,
+    "start_date": null,
+    "end_date": null
+  },
+  "signatures": {
+    "lessor": {
+      "status": "pending",
+      "signed_at": null
+    },
+    "lessee": {
+      "status": "pending",
+      "signed_at": null
+    }
+  }
+}

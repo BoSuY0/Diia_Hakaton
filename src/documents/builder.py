@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
     logger.info(
-        "builder=build_contract session_id=%s template_id=%s partial=%s", 
+        "builder=build_contract session_id=%s template_id=%s partial_arg=%s", 
         session_id, template_id, partial
     )
     try:
@@ -26,6 +26,13 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             "builder=build_contract session_not_found session_id=%s", session_id
         )
         raise SessionNotFoundError(str(exc))
+
+    # Infer partial mode from session if not explicitly set
+    # REMOVED: We want strict validation if partial=False is passed (default), 
+    # regardless of filling_mode. order_contract relies on this.
+    # if not partial and session.filling_mode == "partial":
+    #    partial = True
+    #    logger.info("builder=build_contract inferred_partial=True from session.filling_mode")
 
     if session.template_id and session.template_id != template_id:
         logger.error(

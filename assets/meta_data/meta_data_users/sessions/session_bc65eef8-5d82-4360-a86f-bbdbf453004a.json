@@ -1,0 +1,134 @@
+{
+  "session_id": "bc65eef8-5d82-4360-a86f-bbdbf453004a",
+  "user_id": null,
+  "updated_at": "2025-11-21T09:19:37.397255",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual",
+    "lessee": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      }
+    },
+    "lessee": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {
+    "start_date": {
+      "status": true,
+      "error": null
+    },
+    "rent_price_month": {
+      "status": true,
+      "error": null
+    }
+  },
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessor": "4gjkql",
+    "lessee": "1upucl"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 4
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "4к4к4к43к43к5е",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4к4к4к43к43к5е",
+          "normalized": "4к4к4к43к43к5е",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.name": {
+      "current": "4к43к43к4кц",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4к43к43к4кц",
+          "normalized": "4к43к43к4кц",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.address": {
+      "current": "43кіук43кцук",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "43кіук43кцук",
+          "normalized": "43кіук43кцук",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "start_date": {
+      "current": "4к34к34куік4",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4к34к34куік4",
+          "normalized": "4к34к34куік4",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "rent_price_month": {
+      "current": "15000",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "1500",
+          "normalized": "1500",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "15000",
+          "normalized": "15000",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

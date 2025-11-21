@@ -17,11 +17,19 @@ export const api = {
         return axios.post(`${API_URL}/sessions/${sessionId}/template`, { template_id: templateId });
     },
 
-    async setPartyContext(sessionId, role, personType) {
+    async setPartyContext(sessionId, role, personType, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
         return axios.post(`${API_URL}/sessions/${sessionId}/party-context`, {
             role: role,
             person_type: personType
-        });
+        }, config);
+    },
+
+    async setFillingMode(sessionId, mode) {
+        return axios.post(`${API_URL}/sessions/${sessionId}/filling-mode`, { mode });
     },
 
     async upsertField(sessionId, field, value, role = null, clientId = null) {
@@ -29,10 +37,11 @@ export const api = {
         if (role) {
             payload.role = role;
         }
+        const config = {};
         if (clientId) {
-            payload.client_id = clientId;
+            config.headers = { 'X-Client-ID': clientId };
         }
-        return axios.post(`${API_URL}/sessions/${sessionId}/fields`, payload);
+        return axios.post(`${API_URL}/sessions/${sessionId}/fields`, payload, config);
     },
 
     async getContract(sessionId) {
@@ -47,15 +56,23 @@ export const api = {
         return `${API_URL}/sessions/${sessionId}/contract/download`;
     },
 
-    async getSchema(sessionId, scope = 'all', dataMode = 'values') {
-        const res = await axios.get(`${API_URL}/sessions/${sessionId}/schema`, {
+    async getSchema(sessionId, scope = 'all', dataMode = 'values', clientId = null) {
+        const config = {
             params: { scope, data_mode: dataMode }
-        });
+        };
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.get(`${API_URL}/sessions/${sessionId}/schema`, config);
         return res.data;
     },
 
-    async orderContract(sessionId) {
-        const res = await axios.post(`${API_URL}/sessions/${sessionId}/order`);
+    async orderContract(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.post(`${API_URL}/sessions/${sessionId}/order`, {}, config);
         return res.data;
     },
 
@@ -66,6 +83,32 @@ export const api = {
 
     async getTemplates(categoryId) {
         const res = await axios.get(`${API_URL}/categories/${categoryId}/templates`);
+        return res.data;
+    },
+
+    async chat(sessionId, message) {
+        const res = await axios.post(`${API_URL}/chat`, {
+            session_id: sessionId,
+            message: message
+        });
+        return res.data;
+    },
+
+    async getMySessions(clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.get(`${API_URL}/my-sessions`, config);
+        return res.data;
+    },
+
+    async signContract(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.post(`${API_URL}/sessions/${sessionId}/contract/sign`, {}, config);
         return res.data;
     }
 };

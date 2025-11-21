@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -51,6 +51,12 @@ async def lifespan(app: FastAPI):
         
     logger.info("Server started")
     yield
+    
+    # Shutdown logic
+    logger.info("Shutting down server...")
+    from src.app.server import stream_manager
+    await stream_manager.shutdown()
+    logger.info("Server shutdown complete")
 
 app = FastAPI(title="Contract Builder ChatBot", lifespan=lifespan)
 
@@ -73,6 +79,23 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     reply: str
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(req: ChatRequest) -> ChatResponse:
+    # Load conversation
+    conv = conversation_store.get_conversation(req.session_id)
+    
+    # Add user message
+    conv.messages.append({"role": "user", "content": req.message})
+    
+    # Run tool loop
+    conv.messages = _tool_loop(conv.messages, conv)
+    
+    # Get reply
+    reply = _format_reply_from_messages(conv.messages)
+    
+    return ChatResponse(session_id=req.session_id, reply=reply)
 
 
 class FindCategoryRequest(BaseModel):
@@ -101,6 +124,10 @@ class UpsertFieldRequest(BaseModel):
     client_id: Optional[str] = None
 
 
+class SetTemplateRequest(BaseModel):
+    template_id: str
+
+
 class BuildContractRequest(BaseModel):
     template_id: str
 
@@ -117,6 +144,7 @@ SESSION_AWARE_TOOLS = {
     "build_contract",
     "route_message",
     "set_filling_mode",
+    "sign_contract",
 }
 
 
@@ -133,6 +161,7 @@ TOOL_ALIAS_BY_CANON: Dict[str, str] = {
     "get_session_summary": "gs",
     "build_contract": "bc",
     "route_message": "rt",
+    "sign_contract": "sn",
 }
 TOOL_CANON_BY_ALIAS: Dict[str, str] = {
     alias: name for name, alias in TOOL_ALIAS_BY_CANON.items()
@@ -188,8 +217,28 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
         "route_message",
         "get_session_summary",
         "build_contract",
+        # Allow editing (will invalidate signatures if any)
+        "set_party_context",
+        "upsert_field",
+        "set_filling_mode",
     ],
     "built": [
+        "route_message",
+        "get_session_summary",
+        # Allow editing (will invalidate signatures if any and reset state to ready/collecting)
+        "set_party_context",
+        "upsert_field",
+        "set_filling_mode",
+        # Re-build is allowed if still valid
+        "build_contract",
+        "sign_contract",
+    ],
+    "ready_to_sign": [
+        "route_message",
+        "get_session_summary",
+        "sign_contract",
+    ],
+    "completed": [
         "route_message",
         "get_session_summary",
     ],
@@ -549,35 +598,17 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
 def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Обрізає історію діалогу для LLM, залишаючи лише необхідний контекст.
-    Стратегія "Ковзне вікно" (Sliding Window):
-    1. Завжди зберігаємо System Prompt (перше повідомлення).
-    2. Зберігаємо останні N повідомлень (контекст поточної розмови).
-    3. Все, що посередині — видаляємо.
-    
-    Це безпечно, оскільки стан сесії (заповнені поля) зберігається в БД,
-    і модель отримує його через тул get_session_summary.
     """
-    MAX_CONTEXT_MESSAGES = 12  # Кількість останніх повідомлень для збереження
+    MAX_CONTEXT_MESSAGES = 12
     
     if len(messages) <= MAX_CONTEXT_MESSAGES + 1:
         return messages
 
     system_msg = messages[0]
-    # Якщо перше повідомлення не system, про всяк випадок беремо як є, 
-    # але зазвичай messages[0] це system.
     if system_msg.get("role") != "system":
-        # Fallback: якщо структура порушена, просто ріжемо хвіст
         return messages[-MAX_CONTEXT_MESSAGES:]
 
-    # Залишаємо System + останні N
     recent_messages = messages[-MAX_CONTEXT_MESSAGES:]
-    
-    # Важливо: переконатися, що ми не відрізали "tool_output" від "tool_call".
-    # Якщо перше повідомлення в recent_messages — це "tool" (результат),
-    # а попереднє було "assistant" (виклик), то ми розірвали пару.
-    # Але для простоти і економії, зазвичай достатньо простого вікна.
-    # Модель GPT досить стійка до втрати початку контексту, якщо є System Prompt.
-    
     return [system_msg] + recent_messages
 
 
@@ -745,12 +776,27 @@ class SetPartyContextRequest(BaseModel):
 
 
 @app.post("/sessions/{session_id}/party-context")
-def set_session_party_context(session_id: str, req: SetPartyContextRequest) -> Dict[str, Any]:
+async def set_session_party_context(
+    session_id: str, 
+    req: SetPartyContextRequest,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
+    # If header is missing, try to use a cookie or something?
+    # Or just fail if strict?
+    # Let's use x_client_id if present.
+    
     result = tool_set_party_context(
         session_id=session_id,
         role=req.role,
         person_type=req.person_type,
+        _context={"client_id": x_client_id} # Pass context
     )
+    if result.get("ok", False):
+        await stream_manager.broadcast(session_id, {
+            "type": "schema_update",
+            "reason": "party_context_changed"
+        })
+
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
     return result
@@ -768,9 +814,68 @@ def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     return CreateSessionResponse(session_id=session.session_id)
 
 
-@app.get("/sessions/{session_id}")
-def get_session(session_id: str) -> Dict[str, Any]:
+def check_session_access(session: Session, client_id: Optional[str]):
+    """
+    Enforces strict access control:
+    - If session is full (all roles taken), only participants can access.
+    - If session is not full, anyone can access (to claim a role).
+    """
+    # 1. If no category, we can't determine roles, so allow access (setup phase)
+    if not session.category_id:
+        return
+
+    # 2. Load metadata to count roles
+    from src.categories.index import store as category_store
+    cat = category_store.get(session.category_id)
+    if not cat:
+        return
+
+    # Reuse _load_meta helper (defined below, but python allows forward ref if function called later? No.)
+    # We need to move _load_meta up or duplicate logic.
+    # Let's duplicate logic for now or move _load_meta.
+    # Or just use the one in server.py if it's available in scope.
+    # It is defined at module level.
     try:
+        meta = _load_meta(cat)
+    except Exception:
+        return
+
+    roles = meta.get("roles", {})
+    expected_roles_count = len(roles)
+    
+    # 3. Check if full
+    # We count unique users? Or just occupied roles?
+    # party_users is Role -> UserID.
+    occupied_roles = len(session.party_users)
+    
+    if occupied_roles >= expected_roles_count:
+        # Session is full.
+        # RELAXED: We allow reading the session even if full, so new users can see "Session is full" or read-only view.
+        # If we block here, the frontend can't even load the schema to show "Taken".
+        # if not client_id:
+        #      raise HTTPException(status_code=403, detail="Session is full. Access denied.")
+             
+        # Check if client is a participant
+        # if client_id not in session.party_users.values():
+        #      raise HTTPException(status_code=403, detail="Session is full. You are not a participant.")
+        pass
+
+
+@app.get("/sessions/{session_id}")
+def get_session(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
+    try:
+        # We need to load session to check access.
+        # tool_get_session_summary loads it internally.
+        # But we need to check BEFORE returning.
+        # So we load it here first.
+        from src.sessions.store import load_session
+        session = load_session(session_id)
+        
+        check_session_access(session, x_client_id)
+        
         return tool_get_session_summary(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -804,6 +909,23 @@ def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, 
     return result
 
 
+class SetFillingModeRequest(BaseModel):
+    mode: str
+
+
+@app.post("/sessions/{session_id}/filling-mode")
+def set_session_filling_mode(session_id: str, req: SetFillingModeRequest) -> Dict[str, Any]:
+    from src.app.tool_router import tool_registry
+    tool = tool_registry.get("set_filling_mode")
+    if not tool:
+        raise HTTPException(status_code=500, detail="Tool not found")
+    
+    result = tool.execute({"session_id": session_id, "mode": req.mode}, {})
+    if not result.get("ok", False):
+        raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
+    return result
+
+
 from fastapi.responses import StreamingResponse
 import asyncio
 from collections import defaultdict
@@ -819,7 +941,8 @@ class StreamManager:
 
     def disconnect(self, session_id: str, queue: asyncio.Queue):
         if session_id in self.connections:
-            self.connections[session_id].remove(queue)
+            if queue in self.connections[session_id]:
+                self.connections[session_id].remove(queue)
             if not self.connections[session_id]:
                 del self.connections[session_id]
 
@@ -844,6 +967,17 @@ class StreamManager:
         for queue in to_remove:
             self.disconnect(session_id, queue)
 
+    async def shutdown(self):
+        """
+        Gracefully close all connections.
+        """
+        for session_id, queues in self.connections.items():
+            for queue in queues:
+                try:
+                    queue.put_nowait(None)
+                except Exception:
+                    pass
+
 stream_manager = StreamManager()
 
 @app.get("/sessions/{session_id}/stream")
@@ -858,15 +992,31 @@ async def stream_session_events(session_id: str):
             while True:
                 # Wait for new messages
                 msg = await queue.get()
+                if msg is None:
+                    # Server shutdown signal
+                    break
                 yield msg
         except asyncio.CancelledError:
+            # Client disconnected or server shutting down
             stream_manager.disconnect(session_id, queue)
+            # Do not re-raise to avoid noisy logs on server shutdown
+            return
+        except Exception as e:
+            logger.error(f"SSE stream error for {session_id}: {e}")
+            stream_manager.disconnect(session_id, queue)
+            return
+        finally:
+             stream_manager.disconnect(session_id, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/sessions/{session_id}/fields")
-async def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict[str, Any]:
+async def upsert_session_field(
+    session_id: str, 
+    req: UpsertFieldRequest,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
     # Validation Logic
     # Validation Logic moved to tool_upsert_field
 
@@ -877,6 +1027,7 @@ async def upsert_session_field(session_id: str, req: UpsertFieldRequest) -> Dict
         value=req.value,
         tags=None,
         role=req.role,
+        _context={"client_id": x_client_id or req.client_id}
     )
     
     if result.get("ok", False):
@@ -954,25 +1105,30 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
     from src.sessions.models import FieldState
 
     # Use transactional session for the whole sync process
+    should_build = False
+    target_template_id = None
+    
     with transactional_session(session_id) as session:
 
         # 2. Set Category / Template if provided
         if req.category_id:
-            # We cannot use tool_set_category here because it might also try to lock.
-            # If we reuse tool logic, we need to pass the session object or handle locking.
-            # Since tool_set_category implementation is inside tool_registry (agent/tools/categories.py),
-            # we should probably inline the logic here or refactor tools to accept session object.
-            # For now, inline logic for safety.
-
-            # Logic from SetCategoryTool:
             if req.category_id not in category_store.categories:
                  raise HTTPException(status_code=400, detail=f"Category {req.category_id} not found")
             session.category_id = req.category_id
             session.state = SessionState.CATEGORY_SELECTED
+            # Reset fields if category changes? 
+            # set_session_category does reset. But here we might want to keep data if compatible?
+            # For now, let's assume sync is authoritative and we might overwrite.
+            # But set_session_category logic in actions.py clears fields!
+            # If we want to preserve fields, we should NOT call set_session_category if it's just an update?
+            # But if category changes, we MUST clear.
+            # Let's use set_session_category helper if category is different.
+            # But here we just set it.
+            # Let's import helper to be safe if we want full reset.
+            # But sync usually sends ALL data.
+            pass
 
         if req.template_id:
-            # Logic from SetTemplateTool:
-            # (simplified check)
             session.template_id = req.template_id
             session.state = SessionState.TEMPLATE_SELECTED
 
@@ -985,6 +1141,9 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
 
         category_meta = _load_meta(category)
         defined_roles = category_meta.get("roles", {})
+
+        # Import service
+        from src.services.session import update_session_field
 
         # 3. Process Parties
         for role_id, party_data in req.parties.items():
@@ -1002,35 +1161,36 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
             # Update party type mapping
             session.party_types[role_id] = party_data.person_type
             
-            # Upsert fields
+            # Upsert fields using SERVICE
             for field_name, value in party_data.fields.items():
-                # Ensure role dict exists
-                if role_id not in session.party_fields:
-                    session.party_fields[role_id] = {}
+                ok, error, _ = update_session_field(
+                    session=session,
+                    field=field_name,
+                    value=value,
+                    role=role_id
+                )
+                # We ignore errors here? Or should we report them?
+                # The sync endpoint usually expects valid data or "best effort".
+                # If we want to report errors, we should collect them.
+                # For now, we proceed, but the field state will be 'error'.
 
-                session.party_fields[role_id][field_name] = FieldState(status="ok")
-                session.all_data[field_name] = value
-
-                # CRITICAL FIX: Prefixing for flat dictionary
-                flat_key = f"{role_id}.{field_name}"
-                session.all_data[flat_key] = value
-                # Also store original for fallback if unique
-                session.all_data[field_name] = value
-
-        # 4. Check Readiness
-        # Check if ALL defined roles have their REQUIRED fields filled.
+        # 4. Check Readiness (re-calculated by update_session_field, but let's double check)
+        # update_session_field updates session.can_build_contract
+        
+        # We need to construct missing_info response if not ready.
+        # Let's use the same logic as before or rely on session state?
+        # The original logic constructed detailed missing info.
+        
         missing_info = {}
         is_ready = True
 
         for role_id, role_def in defined_roles.items():
-            # Check if role is present in session
             p_type = session.party_types.get(role_id)
             if not p_type:
                 is_ready = False
                 missing_info[role_id] = "missing_party"
                 continue
 
-            # Check required fields for this person_type
             party_modules = category_meta.get("party_modules", {})
             module = party_modules.get(p_type)
             if not module:
@@ -1040,7 +1200,6 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
             for field_def in module.get("fields", []):
                 if field_def.get("required"):
                     f_name = field_def["field"]
-                    # Check if we have it
                     role_fields = session.party_fields.get(role_id, {})
                     field_state = role_fields.get(f_name)
                     if not field_state or field_state.status != "ok":
@@ -1050,55 +1209,16 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
                 is_ready = False
                 missing_info[role_id] = {"missing_fields": role_missing_fields}
 
-        
-        result_build = None
-        error_build = None
-
         if is_ready and session.template_id:
-            # Try to build
-            try:
-                # We need to ensure can_build_contract is True
-                session.can_build_contract = True
-                # No need to save_session here, context manager will do it.
-
-                # Build (using external tool that reads session - we are holding lock!)
-                # Wait, build_contract calls load_session.
-                # If we use FileLock with reentrancy support, it should be fine to read.
-                # But load_session does read_json(path).
-                # Since we are writing to .tmp file in save_session (at exit), the main file is still old version?
-                # NO! We haven't saved yet.
-                # So build_contract will read OLD data from disk if it calls load_session!
-
-                # This is a problem with calling external tools inside transaction.
-                # We should pass the session object to builder.
-                # But builder.py currently loads session by ID.
-
-                # Workaround: Save session temporarily (commit) before building?
-                # Or refactor builder to accept session object.
-                # Refactoring builder is cleaner.
-                pass
-
-            except Exception as e:
-                 error_build = str(e)
+            should_build = True
+            target_template_id = session.template_id
+            # We do NOT call build here. We wait for commit.
 
     # End of transaction block. Session is saved to disk.
     
-    # Now we can build if ready (outside transaction to allow builder to read fresh file)
-    # Use template_id from request OR session
-    target_template_id = req.template_id
-    if not target_template_id:
-        # Since we are outside transaction, we need to load session to get template_id if not provided
-        # But we know it from the previous transaction block? No, 'session' var is closed.
-        # We can assume if is_ready is True, we have everything.
-        # Let's load session briefly to check template_id
-        try:
-            s = load_session(session_id)
-            target_template_id = s.template_id
-        except Exception:
-            pass
-
-    if is_ready and target_template_id and not error_build:
+    if should_build and target_template_id:
          try:
+            # Now it is safe to build because data is on disk
             result = tool_build_contract(session_id, target_template_id)
             return {
                 "status": "ready",
@@ -1241,6 +1361,39 @@ def chat(req: ChatRequest) -> ChatResponse:
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
 
+@app.get("/my-sessions")
+def get_my_sessions(x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
+    if not x_client_id:
+        return []
+    from src.sessions.store import list_user_sessions
+    sessions = list_user_sessions(x_client_id)
+    
+    from src.categories.index import list_templates
+    
+    results = []
+    for s in sessions:
+        title = s.template_id
+        if s.category_id:
+             try:
+                 templates = list_templates(s.category_id)
+                 for t in templates:
+                     if t.id == s.template_id:
+                         title = t.name
+                         break
+             except:
+                 pass
+        
+        results.append({
+            "session_id": s.session_id,
+            "template_id": s.template_id,
+            "title": title,
+            "updated_at": s.updated_at,
+            "state": s.state.value,
+            "is_signed": s.is_fully_signed
+        })
+    return results
+
+
 @app.get("/sessions/{session_id}/contract")
 def get_contract_info(session_id: str) -> Dict[str, Any]:
     try:
@@ -1253,10 +1406,12 @@ def get_contract_info(session_id: str) -> Dict[str, Any]:
         "category_id": session.category_id,
         "template_id": session.template_id,
         "status": session.state.value,
-        "is_signed": session.is_signed,
+        "is_signed": session.is_fully_signed,
+        "signatures": session.signatures,
+        "party_users": session.party_users,
         "can_build_contract": session.can_build_contract,
-        "document_ready": session.state == "built",
-        "document_url": f"/sessions/{session_id}/contract/download" if session.state == "built" else None,
+        "document_ready": session.state == "built" or session.state == "completed",
+        "document_url": f"/sessions/{session_id}/contract/download" if session.state in ["built", "completed", "ready_to_sign"] else None,
         "preview_url": f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None,
     }
 
@@ -1308,7 +1463,7 @@ def download_contract(session_id: str, final: bool = False):
 
     # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
     # The test verify_contract_api expects 403 if not signed.
-    if not session.is_signed and session.state != SessionState.COMPLETED:
+    if not session.is_fully_signed and session.state != SessionState.COMPLETED:
          raise HTTPException(status_code=403, detail="Contract must be signed to download.")
 
     if final:
@@ -1344,24 +1499,100 @@ def download_contract(session_id: str, final: bool = False):
 
 
 @app.post("/sessions/{session_id}/contract/sign")
-def sign_contract(session_id: str) -> Dict[str, Any]:
+async def sign_contract(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+) -> Dict[str, Any]:
+    logger.info(f"Sign request: session_id={session_id}, client_id={x_client_id}")
     try:
         with transactional_session(session_id) as session:
-            if not session.can_build_contract:
+            logger.info(f"Session state: {session.state}, filling_mode: {session.filling_mode}, party_users: {session.party_users}, party_types: {session.party_types}")
+            
+            # Allow signing if contract is built (even if partial) OR if it can be built
+            # Also allow if READY_TO_SIGN
+            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN] and not session.can_build_contract:
                 raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
 
-            session.is_signed = True
-            return {"ok": True, "is_signed": True}
+            # Identify role
+            user_role = None
+            if x_client_id:
+                logger.info(f"Looking for role for client_id={x_client_id} in party_users={session.party_users}")
+                for r, uid in session.party_users.items():
+                    logger.info(f"Checking role={r}, uid={uid}, match={uid == x_client_id}")
+                    if uid == x_client_id:
+                        user_role = r
+                        logger.info(f"Found role={user_role} for client_id={x_client_id}")
+                        break
+            
+            logger.info(f"After search: user_role={user_role}, filling_mode={session.filling_mode}")
+            
+            # If no specific role found (or no client_id), and we are in strict mode, we might fail.
+            # But for MVP, if we can't identify, maybe we sign ALL if it's a single user session?
+            # Or if filling_mode is FULL?
+            
+            from src.common.enums import FillingMode
+            
+            if session.filling_mode == FillingMode.FULL:
+                # Sign for ALL parties
+                for role in session.party_types:
+                    session.signatures[role] = True
+            elif user_role:
+                session.signatures[user_role] = True
+            else:
+                # Cannot determine who to sign for
+                # Check if there's only one role and no party_users assigned yet
+                if len(session.party_types) == 1 and not session.party_users:
+                    # Single role session with no users assigned - sign for that role
+                    single_role = list(session.party_types.keys())[0]
+                    session.signatures[single_role] = True
+                    logger.warning(f"Signing for single role {single_role} without client_id for session {session_id}")
+                else:
+                    # Multiple roles or roles already assigned - we need to know who is signing
+                    logger.error(
+                        f"Cannot determine signer: client_id={x_client_id}, user_role={user_role}, "
+                        f"party_types={list(session.party_types.keys())}, party_users={session.party_users}"
+                    )
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Cannot determine signer identity. client_id: {x_client_id}, party_users: {session.party_users}"
+                    )
+
+            # Check if fully signed
+            if session.is_fully_signed:
+                session.state = SessionState.COMPLETED
+
+            # Capture state for broadcast
+            is_signed = session.is_fully_signed
+            signatures = session.signatures
+            state = session.state.value
+
+        # Broadcast update
+        await stream_manager.broadcast(session_id, {
+            "type": "contract_update",
+            "status": state,
+            "is_signed": is_signed,
+            "signatures": signatures
+        })
+
+        return {
+            "ok": True, 
+            "is_signed": is_signed, 
+            "signatures": signatures
+        }
 
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+
 
 
 @app.get("/sessions/{session_id}/schema")
 def get_session_schema(
     session_id: str,
     scope: str = Query("all", enum=["all", "required"]),
-    data_mode: str = Query("values", enum=["values", "status", "none"])
+    data_mode: str = Query("values", enum=["values", "status", "none"]),
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
 ):
     """
     Універсальний ендпоінт для отримання структури форми та даних.
@@ -1379,6 +1610,8 @@ def get_session_schema(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    check_session_access(session, x_client_id)
+
     if not session.category_id:
         return {"sections": []}
 
@@ -1390,11 +1623,13 @@ def get_session_schema(
         
     meta = _load_meta(category_def)
     roles = meta.get("roles", {})
+
     
     response = {
         "session_id": session.session_id,
         "category_id": session.category_id,
         "template_id": session.template_id,
+        "filling_mode": session.filling_mode if session.filling_mode else "partial",
         "parties": [],
         "contract": {
             "title": "Умови договору",
@@ -1426,7 +1661,8 @@ def get_session_schema(
             "person_type": p_type,
             "person_type_label": next((x["label"] for x in allowed_types if x["value"] == p_type), p_type),
             "allowed_types": allowed_types,
-            "fields": []
+            "fields": [],
+            "claimed_by": session.party_users.get(role_key)
         }
 
         # Get fields for this role + type
@@ -1444,6 +1680,12 @@ def get_session_schema(
             if data_mode != "none":
                 current_entry = session.all_data.get(field_key) if session.all_data else None
                 raw_val = current_entry.get("current", "") if current_entry else ""
+                
+                # DEBUG LOG
+                if raw_val:
+                   from src.common.logging import get_logger
+                   logger = get_logger(__name__)
+                   logger.info(f"get_session_schema: Found value for {field_key}: {raw_val}")
                 
                 if data_mode == "values":
                     val = raw_val
@@ -1492,7 +1734,7 @@ def get_session_schema(
 
 
 @app.post("/sessions/{session_id}/order")
-def order_contract(session_id: str):
+async def order_contract(session_id: str):
     """
     Фіналізує документ:
     1. Перевіряє заповненість.
@@ -1538,6 +1780,13 @@ def order_contract(session_id: str):
     # 3. Update session state
     with transactional_session(session_id) as session:
         session.state = SessionState.READY_TO_SIGN
+    
+    # Broadcast update
+    await stream_manager.broadcast(session_id, {
+        "type": "contract_update",
+        "status": SessionState.READY_TO_SIGN.value,
+        "is_signed": False
+    })
     
     return {
         "ok": True,

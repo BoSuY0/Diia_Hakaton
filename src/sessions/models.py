@@ -56,8 +56,18 @@ class Session:
     # Чи вже можна будувати договір (всі required поля зі status=ok)
     can_build_contract: bool = False
 
-    # Чи підписано договір
-    is_signed: bool = False
+    # Підписи сторін: Role -> Signed (True/False)
+    signatures: Dict[str, bool] = field(default_factory=dict)
+
+    # Прив'язка користувачів до ролей: Role -> UserID (client_id)
+    party_users: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def is_fully_signed(self) -> bool:
+        # Перевіряємо, чи всі сторони, визначені в party_types, підписали
+        if not self.party_types:
+            return False
+        return all(self.signatures.get(role, False) for role in self.party_types)
 
     # Прогрес заповнення (агреговані лічильники/флаги)
     progress: Dict[str, Any] = field(default_factory=dict)

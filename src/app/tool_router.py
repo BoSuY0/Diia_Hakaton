@@ -91,10 +91,13 @@ def tool_set_template(session_id: str, template_id: str) -> Dict[str, Any]:
         return tool.execute({"session_id": session_id, "template_id": template_id}, {})
     return {}
 
-def tool_upsert_field(session_id: str, field: str, value: str, tags: Dict[str, str] | None = None, role: Optional[str] = None) -> Dict[str, Any]:
+def tool_upsert_field(session_id: str, field: str, value: str, tags: Dict[str, str] | None = None, role: Optional[str] = None, _context: Dict[str, Any] | None = None) -> Dict[str, Any]:
     tool = tool_registry.get("upsert_field")
     if tool:
-        return tool.execute({"session_id": session_id, "field": field, "value": value, "role": role}, {"tags": tags})
+        context = {"tags": tags}
+        if _context:
+            context.update(_context)
+        return tool.execute({"session_id": session_id, "field": field, "value": value, "role": role}, context)
     return {}
 
 def tool_get_session_summary(session_id: str) -> Dict[str, Any]:
@@ -109,11 +112,17 @@ def tool_build_contract(session_id: str, template_id: str) -> Dict[str, Any]:
         return tool.execute({"session_id": session_id, "template_id": template_id}, {})
     return {}
 
-def tool_set_party_context(session_id: str, role: str, person_type: str) -> Dict[str, Any]:
+def tool_set_party_context(session_id: str, role: str, person_type: str, _context: Dict[str, Any] | None = None) -> Dict[str, Any]:
     tool = tool_registry.get("set_party_context")
     if not tool:
         logger.error("tool_set_party_context: Tool 'set_party_context' not found in registry!")
         return {"ok": False, "error": "Tool set_party_context not found"}
     
     logger.info("tool_set_party_context: Executing for session_id=%s", session_id)
-    return tool.execute({"session_id": session_id, "role": role, "person_type": person_type}, {})
+    return tool.execute({"session_id": session_id, "role": role, "person_type": person_type}, _context or {})
+
+def tool_sign_contract(session_id: str, role: Optional[str] = None) -> Dict[str, Any]:
+    tool = tool_registry.get("sign_contract")
+    if tool:
+        return tool.execute({"session_id": session_id, "role": role}, {})
+    return {}

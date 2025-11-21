@@ -7,20 +7,45 @@ import random
 import string
 from contextlib import contextmanager
 
+from src.common.config import settings
 from src.common.errors import SessionNotFoundError
 from src.documents.user_document import save_user_document
 from src.sessions.models import FieldState, Session, SessionState
 from src.storage.fs import read_json, session_answers_path, write_json, FileLock
 
 
+def list_user_sessions(client_id: str) -> list[Session]:
+    """
+    Lists all sessions where the given client_id is a participant.
+    """
+    sessions = []
+    if not settings.sessions_root.exists():
+        return []
+
+    for file_path in settings.sessions_root.glob("session_*.json"):
+        try:
+            # Read without lock for speed/listing
+            data = read_json(file_path)
+            party_users = data.get("party_users") or {}
+            
+            # Check if client is a participant
+            if client_id in party_users.values():
+                sessions.append(_from_dict(data))
+        except Exception:
+            continue
+
+    # Sort by updated_at desc
+    sessions.sort(key=lambda s: s.updated_at, reverse=True)
+    return sessions
+
+
 def generate_readable_id(prefix: str = "session") -> str:
     """
-    Генерує читабельний ID у форматі {prefix}_{random_digits}.
-    Наприклад: lease_flat_59210
+    Генерує унікальний ID (UUID).
+    Аргумент prefix залишено для сумісності, але ігнорується.
     """
-    # 5 випадкових цифр
-    suffix = "".join(random.choices(string.digits, k=5))
-    return f"{prefix}_{suffix}"
+    import uuid
+    return str(uuid.uuid4())
 
 
 def _from_dict(data: dict) -> Session:
@@ -83,7 +108,9 @@ def _from_dict(data: dict) -> Session:
         party_fields=party_fields,
         contract_fields=contract_fields,
         can_build_contract=bool(data.get("can_build_contract", False)),
-        is_signed=bool(data.get("is_signed", False)),
+        # is_signed removed from model, replaced by signatures dict
+        signatures=data.get("signatures") or {},
+        party_users=data.get("party_users") or {},
         party_types=data.get("party_types") or {},
         filling_mode=data.get("filling_mode", "partial"),
     )
@@ -102,18 +129,21 @@ def _from_dict(data: dict) -> Session:
 
 def get_or_create_session(session_id: str, user_id: Optional[str] = None) -> Session:
     path = session_answers_path(session_id)
-    if path.exists():
-        # READ-ONLY usage, so we don't lock strictly here,
-        # but ideally we should if we expect to modify immediately.
-        # For get_or_create usually it's fine to just read.
-        # However, to be safe, let's assume no lock needed for simple read.
-        data = read_json(path)
-        return _from_dict(data)
+    
+    # Ensure parent dir exists
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    session = Session(session_id=session_id, user_id=user_id)
-    # Initial creation -> write with lock
-    save_session(session)
-    return session
+    with FileLock(path):
+        if path.exists():
+            # File exists, load it safely under lock
+            data = read_json(path)
+            return _from_dict(data)
+
+        # File does not exist, create new session
+        session = Session(session_id=session_id, user_id=user_id)
+        # Save with locked_by_caller=True since we already hold the lock
+        save_session(session, locked_by_caller=True)
+        return session
 
 
 def load_session(session_id: str) -> Session:
@@ -138,6 +168,13 @@ def save_session(session: Session, locked_by_caller: bool = False) -> None:
 
     path = session_answers_path(session.session_id)
     data = asdict(session)
+    
+    # Ensure party_users and party_types are serialized (asdict should handle it if they are dicts)
+    # But let's be explicit just in case
+    data["party_users"] = session.party_users
+    data["party_types"] = session.party_types
+    data["filling_mode"] = session.filling_mode
+    data["signatures"] = session.signatures
     
     # Serialize datetime
     data["updated_at"] = session.updated_at.isoformat()

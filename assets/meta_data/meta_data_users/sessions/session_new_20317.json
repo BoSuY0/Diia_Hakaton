@@ -1,0 +1,75 @@
+{
+  "session_id": "new_20317",
+  "user_id": null,
+  "updated_at": "2025-11-21T07:34:03.973913",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "individual",
+  "party_types": {
+    "lessee": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessee": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessee": "6u8hj8"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 2
+  },
+  "routing": {},
+  "all_data": {
+    "lessee.name": {
+      "current": "4к4аа 43кв 4к4",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4к4аа 43кв 4к4",
+          "normalized": "4к4аа 43кв 4к4",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessee.address": {
+      "current": "32432іа3к",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "32432",
+          "normalized": "32432",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "32432іа3к",
+          "normalized": "32432іа3к",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

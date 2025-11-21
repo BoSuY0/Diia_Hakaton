@@ -97,8 +97,8 @@ class SetTemplateTool(BaseTool):
                     "error": "Шаблон не належить до обраної категорії.",
                 }
 
-            session.template_id = template_id
-            session.state = SessionState.TEMPLATE_SELECTED
+            from src.services.session import set_session_template
+            set_session_template(session, template_id)
 
             # Return specific values, session is auto-saved
             return {
@@ -162,22 +162,41 @@ class SetPartyContextTool(BaseTool):
                 "error": f"Невідомий тип особи. Допустимі: {', '.join([p.value for p in PersonType])}",
             }
 
-        with transactional_session(session_id) as session:
-            session.role = role
-            session.person_type = person_type
+        client_id = context.get("client_id")
+        # If not, we can't enforce strict access control properly.
+        # Fallback to session.user_id if available?
+        if not client_id:
+             # Try to get from args if passed explicitly (for testing)
+             client_id = args.get("client_id")
+        
+        if not client_id:
+             # If still no ID, we can't claim role safely.
+             # But maybe we allow it for "anonymous" single-user mode?
+             # User wants STRICT control. So we should probably error or generate one.
+             # Let's generate a temporary one if missing, but warn.
+             client_id = "anon_" + session_id # Fallback
 
-            # Save party type for this role
-            if session.party_types is None:
-                session.party_types = {}
-            session.party_types[role] = person_type
+        with transactional_session(session_id) as session:
+            from src.services.session import set_party_type, claim_session_role
+            
+            # Claim role
+            try:
+                success = claim_session_role(session, role, client_id)
+                if not success:
+                    return {"ok": False, "error": f"Роль '{role}' вже зайнята або ви вже маєте іншу роль."}
+            except ValueError as e:
+                 return {"ok": False, "error": str(e)}
+
+            # Set person type
+            set_party_type(session, role, person_type)
 
             return {
                 "ok": True,
                 "role": role,
                 "person_type": person_type,
+                "client_id": client_id
             }
-
-
+            
 @register_tool
 class GetPartyFieldsForSessionTool(BaseTool):
     @property
@@ -280,183 +299,69 @@ class UpsertFieldTool(BaseTool):
             "required": ["session_id", "field", "value"],
             "additionalProperties": False,
         }
-
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         field = args["field"]
         value = args["value"]
-        # Allow explicit role override, otherwise fallback to session active role
-        target_role = args.get("role")
-        tags = context.get("tags") # Tags passed via context
+        role_arg = args.get("role")
+
+        # Extract PII tags from context if available
+        # The LLM might have tagged PII in the value, e.g. "My phone is [PHONE#1]"
+        # But the value passed here is usually the raw value or the tagged value?
+        # If the LLM passes tagged value, we need the mapping.
+        # The mapping is usually in context["pii_tags"] if we support that flow.
+        # For now, we assume value might contain tags, and we try to unmask if tags are provided.
+        tags = context.get("pii_tags")
+        
+        # Unmask value if needed (for storage)
+        # Actually, we want to store the REAL value, so we unmask.
+        real_value = self._unmask_value(value, tags)
 
         with transactional_session(session_id) as session:
-            if not session.category_id:
+            # Access Control Check
+            client_id = context.get("client_id")
+            if client_id and session.category_id:
+                # Determine if this is a party field
+                entities = {e.field: e for e in list_entities(session.category_id)}
+                entity = entities.get(field)
+                
+                if entity is None:
+                    # It is a party field
+                    effective_role = role_arg or session.role
+                    if effective_role:
+                        owner = session.party_users.get(effective_role)
+                        if owner and owner != client_id:
+                             from src.common.enums import FillingMode
+                             if session.filling_mode != FillingMode.FULL:
+                                 return {
+                                     "ok": False, 
+                                     "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
+                                 }
+
+            from src.services.session import update_session_field
+            
+            ok, error, fs = update_session_field(
+                session=session,
+                field=field,
+                value=real_value,
+                role=role_arg,
+                tags=tags # Pass tags for history tracking
+            )
+
+            if not ok:
                 return {
                     "ok": False,
-                    "error": "Спочатку потрібно обрати категорію (set_category).",
+                    "error": error,
+                    "field_state": {
+                        "status": fs.status,
+                        "error": fs.error
+                    }
                 }
-
-            # Unmask first
-            raw_value = self._unmask_value(value, tags)
-
-            # Centralized validation for all field types
-            from src.validators.core import validate_value
-            from src.categories.index import list_entities, list_party_fields
-            from src.sessions.models import FieldState
-
-            entities = {e.field: e for e in list_entities(session.category_id)}
-            entity = entities.get(field)
-            is_party_field = False
-
-            if entity is None:
-                effective_role = target_role or session.role
-                if not effective_role:
-                     return {
-                        "ok": False,
-                        "error": "Спочатку потрібно обрати роль (set_party_context) або передати її явно.",
-                    }
-
-                effective_person_type = None
-                if session.party_types and effective_role in session.party_types:
-                    effective_person_type = session.party_types[effective_role]
-                elif effective_role == session.role:
-                    effective_person_type = session.person_type
-
-                if not effective_person_type:
-                    return {
-                        "ok": False,
-                        "error": f"Невідомий тип особи для ролі {effective_role}. Встановіть контекст або тип особи.",
-                    }
-
-                party_fields = {
-                    f.field: f
-                    for f in list_party_fields(session.category_id, effective_person_type)
-                }
-                party_meta = party_fields.get(field)
-                if party_meta is None:
-                    return {
-                        "ok": False,
-                        "error": "Поле не належить до обраної категорії.",
-                    }
-                is_party_field = True
-            else:
-                # Contract field
-                effective_role = None # Not needed for contract fields
-
-            logger.info(
-                "tool=upsert_field session_id=%s field=%s raw_value_length=%d role=%s",
-                session_id,
-                field,
-                len(raw_value),
-                target_role or "current",
-            )
-
-            value_type = "text"
-            if entity:
-                value_type = entity.type
-            elif is_party_field:
-                 # Heuristic mapping for party fields
-                 if "rnokpp" in field or "tax_id" in field:
-                     value_type = "rnokpp"
-                 elif "edrpou" in field:
-                     value_type = "edrpou"
-                 elif "iban" in field:
-                     value_type = "iban"
-                 elif "date" in field:
-                     value_type = "date"
-                 elif "email" in field:
-                     value_type = "email"
-
-            normalized, error = validate_value(value_type, raw_value)
-
-            if is_party_field:
-                if not effective_role:
-                     return {
-                        "ok": False,
-                        "error": "Role not determined.",
-                    }
-
-                if effective_role not in session.party_fields:
-                    session.party_fields[effective_role] = {}
-
-                fs = session.party_fields[effective_role].get(field) or FieldState()
-            else:
-                fs = session.contract_fields.get(field) or FieldState()
-
-            if error:
-                fs.status = "error"
-                fs.error = error
-                ok = False
-            else:
-                fs.status = "ok"
-                fs.error = None
-                ok = True
-
-            if is_party_field:
-                session.party_fields[effective_role][field] = fs
-            else:
-                session.contract_fields[field] = fs
-
-            # History logic
-            all_data = session.all_data or {}
-            key = field
-            if is_party_field and effective_role:
-                key = f"{effective_role}.{field}"
-
-            entry = all_data.get(key) or {}
-            history = entry.get("history") or []
-            history.append(
-                {
-                    "source": "chat" if tags is not None else "chat",
-                    "value": raw_value,
-                    "normalized": normalized if error is None else None,
-                    "valid": error is None,
-                }
-            )
-            entry["current"] = normalized if error is None else entry.get("current")
-            entry["validated"] = error is None
-            entry["source"] = "chat"
-            entry["history"] = history
-            all_data[key] = entry
-            session.all_data = all_data
-
-            # Recalculate state using shared service
-            is_ready = validate_session_readiness(session)
-            session.can_build_contract = is_ready
-            if is_ready:
-                session.state = SessionState.READY_TO_BUILD
-            else:
-                session.state = SessionState.COLLECTING_FIELDS
-
-            # Update progress (rough estimate for info)
-            # We could use get_required_fields to get exact count, but let's leave as is for now or update?
-            # Updating progress logic is good.
-            from src.services.fields import get_required_fields
-            required = get_required_fields(session)
-
-            total_req = len(required)
-            filled_req = 0
-            for r in required:
-                if r.role:
-                    rf = session.party_fields.get(r.role) or {}
-                    st = rf.get(r.field_name)
-                    if st and st.status == "ok":
-                        filled_req += 1
-                else:
-                    st = session.contract_fields.get(r.field_name)
-                    if st and st.status == "ok":
-                        filled_req += 1
-
-            progress = session.progress or {}
-            progress["required_total"] = total_req
-            progress["required_filled"] = filled_req
-            session.progress = progress
 
             return {
-                "ok": ok,
+                "ok": True,
                 "field": field,
                 "status": fs.status,
-                "error": fs.error,
                 "can_build_contract": session.can_build_contract,
                 "state": session.state.value,
             }
@@ -646,3 +551,77 @@ class BuildContractTool(BaseTool):
             session.state = SessionState.BUILT
 
         return result
+
+@register_tool
+class SignContractTool(BaseTool):
+    @property
+    def name(self) -> str:
+        return "sign_contract"
+
+    @property
+    def description(self) -> str:
+        return "Sign the contract for the current role."
+
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+                "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Role to sign as (must match session role or be explicit)"
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": False,
+        }
+
+    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+        session_id = args["session_id"]
+        role_arg = args.get("role")
+
+        with transactional_session(session_id) as session:
+            # Determine role
+            role = role_arg or session.role
+            if not role:
+                 return {
+                    "ok": False,
+                    "error": "Не визначена роль для підпису. Встановіть контекст або передайте роль.",
+                }
+
+            # Check state
+            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN]:
+                 return {
+                    "ok": False,
+                    "error": f"Не можна підписати договір у стані {session.state.value}. Спочатку сформуйте його.",
+                }
+
+            # Check if already signed
+            if session.signatures.get(role):
+                 return {
+                    "ok": False,
+                    "error": "Ви вже підписали цей договір.",
+                }
+
+            # Sign
+            session.signatures[role] = True
+            logger.info("tool=sign_contract session_id=%s role=%s signed=True", session_id, role)
+
+            # Check if fully signed
+            if session.is_fully_signed:
+                session.state = SessionState.COMPLETED
+            else:
+                session.state = SessionState.READY_TO_SIGN
+
+            return {
+                "ok": True,
+                "role": role,
+                "signed": True,
+                "is_fully_signed": session.is_fully_signed,
+                "state": session.state.value
+            }

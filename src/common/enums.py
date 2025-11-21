@@ -13,3 +13,4 @@ class ContractRole(str, Enum):
 class FillingMode(str, Enum):
     PARTIAL = "partial"
     FULL = "full"
+    AI = "ai"

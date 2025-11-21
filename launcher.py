@@ -25,31 +25,56 @@ def kill_process_on_port(port: int) -> None:
     import subprocess
     
     try:
-        # Знайти PID процесу на порту
-        result = subprocess.run(
-            ["lsof", "-t", f"-i:{port}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            pid = int(result.stdout.strip().split()[0])
-            logger.info(f"Found process {pid} on port {port}, terminating...")
+        if sys.platform == "win32":
+            # Windows implementation
+            cmd = f"netstat -ano | findstr :{port}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.stdout:
+                # Parse output to find PID. Format: PROTO Local Address Foreign Address State PID
+                # TCP    0.0.0.0:8000           0.0.0.0:0              LISTENING       1234
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 5 and f":{port}" in parts[1]:
+                        pid = int(parts[-1])
+                        logger.info(f"Found process {pid} on port {port}, terminating...")
+                        subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+                        logger.info(f"Process {pid} terminated")
+                        import time
+                        time.sleep(1)
+                        return
+        else:
+            # Unix implementation
+            # Знайти PID процесу на порту
+            result = subprocess.run(
+                ["lsof", "-t", f"-i:{port}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
             
-            try:
-                os.kill(pid, signal.SIGTERM)
-                logger.info(f"Process {pid} terminated successfully")
-                # Дати ОС час звільнити порт
-                import time
-                time.sleep(1)
-            except ProcessLookupError:
-                logger.warning(f"Process {pid} already dead")
-            except PermissionError:
-                logger.error(f"No permission to kill process {pid}")
+            if result.returncode == 0 and result.stdout.strip():
+                pid = int(result.stdout.strip().split()[0])
+                logger.info(f"Found process {pid} on port {port}, terminating...")
                 
-    except FileNotFoundError:
-        # lsof не встановлено, пробуємо fuser
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    logger.info(f"Process {pid} terminated successfully")
+                    # Дати ОС час звільнити порт
+                    import time
+                    time.sleep(1)
+                except ProcessLookupError:
+                    logger.warning(f"Process {pid} already dead")
+                except PermissionError:
+                    logger.error(f"No permission to kill process {pid}")
+                return
+                
+    except Exception as e:
+        # Fallback or error logging
+        pass
+
+    if sys.platform != "win32":
+        # lsof не встановлено, пробуємо fuser (тільки Linux/Mac)
         try:
             result = subprocess.run(
                 ["fuser", "-k", f"{port}/tcp"],
@@ -61,8 +86,8 @@ def kill_process_on_port(port: int) -> None:
                 logger.info(f"Killed process on port {port} using fuser")
         except FileNotFoundError:
             logger.warning("Neither lsof nor fuser available, cannot auto-kill old server")
-    except Exception as e:
-        logger.warning(f"Could not kill process on port {port}: {e}")
+        except Exception as e:
+            logger.warning(f"Could not kill process on port {port}: {e}")
 
 
 def run_app(
@@ -93,6 +118,8 @@ def run_app(
         # Використовуємо наше глобальне налаштування logging,
         # uvicorn не перестворює власні хендлери/форматери
         log_config=None,
+        timeout_keep_alive=5,
+        timeout_graceful_shutdown=3,
     )
 
 

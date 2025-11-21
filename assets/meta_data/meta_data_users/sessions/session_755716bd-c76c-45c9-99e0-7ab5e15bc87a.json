@@ -1,0 +1,28 @@
+{
+  "session_id": "755716bd-c76c-45c9-99e0-7ab5e15bc87a",
+  "user_id": null,
+  "updated_at": "2025-11-21T08:25:36.034661",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessee",
+  "person_type": "individual",
+  "party_types": {
+    "lessee": "individual"
+  },
+  "state": "template_selected",
+  "party_fields": {},
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessee": "xlkjdw"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 0
+  },
+  "routing": {},
+  "all_data": {},
+  "filling_mode": "partial"
+}

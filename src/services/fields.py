@@ -44,7 +44,15 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
         meta = _load_meta(category_def)
         roles = meta.get("roles") or {}
 
-        for role_key in roles.keys():
+        # Filter roles if filling_mode is partial
+        target_roles = list(roles.keys())
+        if session.filling_mode == "partial" and session.role:
+             # In partial mode, we only require fields for the CURRENT role.
+             # Unless the role is not in the category (which shouldn't happen if validated).
+             if session.role in roles:
+                 target_roles = [session.role]
+
+        for role_key in target_roles:
             # Determine person type
             p_type = None
             if session.party_types and role_key in session.party_types:

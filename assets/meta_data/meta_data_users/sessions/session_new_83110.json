@@ -1,0 +1,89 @@
+{
+  "session_id": "new_83110",
+  "user_id": null,
+  "updated_at": "2025-11-21T07:24:29.240448",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": "lease_flat",
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual"
+  },
+  "state": "collecting_fields",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      },
+      "address": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {
+    "lessor": "xxchbr"
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 2
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "vfdvfd sdfsdffds fdsfs",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "vfdvfd sdfsdffds ",
+          "normalized": "vfdvfd sdfsdffds",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "vfdvfd sdfsdffds fdsfs",
+          "normalized": "vfdvfd sdfsdffds fdsfs",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    },
+    "lessor.address": {
+      "current": "4fds 3dss a",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "4fds",
+          "normalized": "4fds",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "4fds 3dss",
+          "normalized": "4fds 3dss",
+          "valid": true,
+          "tags": null
+        },
+        {
+          "source": "api",
+          "value": "4fds 3dss a",
+          "normalized": "4fds 3dss a",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}

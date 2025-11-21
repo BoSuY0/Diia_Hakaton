@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const InputField = ({ label, placeholder, value, onChange, type = "text", required = false }) => (
+export const InputField = ({ label, placeholder, value, onChange, onBlur, type = "text", required = false, disabled = false }) => (
     <div className="input-group">
         <label className="input-label">
             {label}
@@ -13,6 +13,8 @@ export const InputField = ({ label, placeholder, value, onChange, type = "text",
             placeholder={placeholder}
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            disabled={disabled}
         />
     </div>
 );

@@ -131,8 +131,8 @@ class GetTemplatesForCategoryTool(BaseTool):
                 with transactional_session(session_id) as session:
                     # Only set if matches category
                     if session.category_id == category_id:
-                        session.template_id = templates[0].id
-                        session.state = SessionState.TEMPLATE_SELECTED
+                        from src.services.session import set_session_template
+                        set_session_template(session, templates[0].id)
                         logger.info("Auto-selected single template: %s", templates[0].id)
              except Exception:
                  pass

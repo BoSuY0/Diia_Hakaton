@@ -1,0 +1,21 @@
+{
+  "session_id": "new_01091",
+  "user_id": null,
+  "updated_at": "2025-11-21T04:36:32.020042",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": null,
+  "role": null,
+  "person_type": null,
+  "party_types": {},
+  "state": "category_selected",
+  "party_fields": {},
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "party_users": {},
+  "progress": {},
+  "routing": {},
+  "all_data": {},
+  "filling_mode": "partial"
+}

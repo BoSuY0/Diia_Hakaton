@@ -72,14 +72,28 @@ class FileLock:
         # Try to acquire physical file lock
         start_time = time.time()
         while True:
+            # Optimization: Check if held by another thread in THIS process first
+            # This avoids "File in use" errors on Windows when one thread tries to delete 
+            # while others are reading the PID.
+            with self._memory_lock_mutex:
+                if self.lock_path in self._memory_locks:
+                    # Held by sibling thread. Sleep and retry without touching file.
+                    time.sleep(0.05)
+                    continue
+
             try:
                 # Attempt atomic create
-                with open(self.lock_path, "x"):
-                    self._acquired = True
-                    # Mark as owned by this thread
-                    with self._memory_lock_mutex:
-                        self._memory_locks[self.lock_path] = (thread_id, 1)
-                    return
+                # Write PID to lock file for better stale detection
+                with open(self.lock_path, "x", encoding="utf-8") as f:
+                    f.write(str(os.getpid()))
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                self._acquired = True
+                # Mark as owned by this thread
+                with self._memory_lock_mutex:
+                    self._memory_locks[self.lock_path] = (thread_id, 1)
+                return
             except FileExistsError:
                 # Check timeout
                 if time.time() - start_time > self.timeout:
@@ -87,10 +101,34 @@ class FileLock:
                 
                 # Check for stale lock (e.g. process crash)
                 try:
-                    stat = self.lock_path.stat()
-                    # Hardcoded strict stale time (e.g. 30s)
-                    # If a transaction takes >30s, it's likely dead.
-                    if time.time() - stat.st_mtime > 30.0:
+                    # Read PID from lock file
+                    try:
+                        with open(self.lock_path, "r", encoding="utf-8") as f:
+                            pid_str = f.read().strip()
+                        lock_pid = int(pid_str) if pid_str else None
+                    except (ValueError, OSError):
+                        lock_pid = None
+
+                    is_stale = False
+                    if lock_pid:
+                        if lock_pid == os.getpid():
+                            # Lock file says it's us, but we don't have it in memory (checked above).
+                            # This means we failed to delete it previously. It's stale.
+                            is_stale = True
+                        else:
+                            # Check if other process exists
+                            try:
+                                os.kill(lock_pid, 0)
+                            except OSError:
+                                # Process does not exist -> Stale lock
+                                is_stale = True
+                    else:
+                        # No PID or empty file -> Fallback to time check
+                        stat = self.lock_path.stat()
+                        if time.time() - stat.st_mtime > 30.0:
+                            is_stale = True
+
+                    if is_stale:
                         try:
                             os.remove(self.lock_path)
                         except OSError:
@@ -117,10 +155,14 @@ class FileLock:
                         # Last release, remove physical lock
                         del self._memory_locks[self.lock_path]
 
-        try:
-            os.remove(self.lock_path)
-        except OSError:
-            pass # Already gone?
+        # Retry deletion a few times to handle Windows transient file locking (e.g. antivirus)
+        for _ in range(3):
+            try:
+                os.remove(self.lock_path)
+                break
+            except OSError:
+                time.sleep(0.01)
+        
         self._acquired = False
 
     def __enter__(self):

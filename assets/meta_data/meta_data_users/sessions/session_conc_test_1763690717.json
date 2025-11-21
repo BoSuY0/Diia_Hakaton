@@ -1,0 +1,20 @@
+{
+  "session_id": "conc_test_1763690717",
+  "user_id": "user_1",
+  "updated_at": "2025-11-21T04:05:17.181546",
+  "locale": "uk",
+  "category_id": null,
+  "template_id": null,
+  "role": null,
+  "person_type": null,
+  "party_types": {},
+  "state": "idle",
+  "party_fields": {},
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {},
+  "progress": {},
+  "routing": {},
+  "all_data": {},
+  "filling_mode": "partial"
+}

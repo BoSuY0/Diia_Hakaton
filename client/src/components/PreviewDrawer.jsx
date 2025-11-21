@@ -68,12 +68,7 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId }) {
                     )}
                 </div>
 
-                <div className="drawer-footer">
-                    <button className="download-btn" onClick={handleDownload} disabled={loading || error}>
-                        <Download size={20} style={{ marginRight: '8px' }} />
-                        Завантажити PDF (Оригінал)
-                    </button>
-                </div>
+                {/* Footer removed as per request */}
             </div>
         </div>
     );

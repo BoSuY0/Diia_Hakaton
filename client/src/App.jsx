@@ -8,6 +8,8 @@ import { CategorySelector } from './components/CategorySelector';
 import { TemplateSelector } from './components/TemplateSelector';
 import { ModeSelector } from './components/ModeSelector';
 import { RoleSelector } from './components/RoleSelector';
+import { Dashboard } from './components/Dashboard';
+import { ContractDetails } from './components/ContractDetails';
 
 // Simple debounce utility
 const debounce = (func, wait) => {
@@ -19,7 +21,7 @@ const debounce = (func, wait) => {
 };
 
 function App() {
-  // Steps: 'category' -> 'template' -> 'mode' -> 'role' -> 'form'
+  // Steps: 'category' -> 'template' -> 'mode' -> 'role' -> 'form' -> 'success' -> 'details' -> 'dashboard'
   const [step, setStep] = useState('category');
 
   const [sessionId, setSessionId] = useState(null);
@@ -27,15 +29,33 @@ function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [schema, setSchema] = useState(null);
   const [formValues, setFormValues] = useState({});
-  const [takenRoles, setTakenRoles] = useState([]);
+
+  const [clientId] = useState(() => {
+    const stored = localStorage.getItem('diia_client_id');
+    if (stored) return stored;
+    const newId = Math.random().toString(36).substring(7);
+    localStorage.setItem('diia_client_id', newId);
+    return newId;
+  });
+
+  // Derived state for taken roles (reactive to formValues)
+  const takenRoles = React.useMemo(() => {
+    if (!schema || !schema.parties) return [];
+    const taken = [];
+    schema.parties.forEach(party => {
+      // Only mark as taken if claimed by SOMEONE ELSE
+      if (party.claimed_by && party.claimed_by !== clientId) {
+        taken.push(party.role);
+      }
+    });
+    return taken;
+  }, [schema, clientId]);
 
   // Selections
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedMode, setSelectedMode] = useState(null); // 'single', 'full', 'ai'
   const [selectedRole, setSelectedRole] = useState(null); // 'lessor', 'lessee'
-
-  const [clientId] = useState(() => Math.random().toString(36).substring(7));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Initialize session on mount
@@ -53,18 +73,7 @@ function App() {
         setSessionId(sid);
         await restoreSession(sid);
       } else {
-        try {
-          const session = await api.createSession();
-          setSessionId(session.session_id);
-          // Update URL with new session_id
-          const newUrl = `${window.location.pathname}?session_id=${session.session_id}`;
-          window.history.pushState({ path: newUrl }, '', newUrl);
-          setIsLoading(false);
-        } catch (e) {
-          console.error("Failed to init session", e);
-          alert("Failed to initialize session. Check backend.");
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     };
     init();
@@ -96,27 +105,23 @@ function App() {
   const restoreSession = async (sid) => {
     try {
       setIsLoading(true);
-      const data = await api.getSchema(sid, 'all', 'values');
+      const data = await api.getSchema(sid, 'all', 'values', clientId);
 
       if (data && data.contract) {
         setSchema(data);
+        if (data.filling_mode) {
+          setSelectedMode(data.filling_mode === 'full' ? 'full' : 'single');
+        }
 
         const initialValues = {};
-        const taken = [];
 
         if (data.parties) {
           data.parties.forEach(party => {
-            // Check if party has significant data filled
-            let hasData = false;
             party.fields.forEach(field => {
               if (field.value) {
                 initialValues[field.key] = field.value;
-                hasData = true;
               }
             });
-            if (hasData) {
-              taken.push(party.role);
-            }
           });
         }
         data.contract.fields.forEach(field => {
@@ -124,11 +129,24 @@ function App() {
         });
 
         setFormValues(prev => ({ ...prev, ...initialValues }));
-        setTakenRoles(taken);
 
-        // If we have data, assume we can skip category/template selection
-        // Go to Mode selection to let user decide how to proceed
-        setStep('mode');
+        // Check if I have a role
+        const myRole = data.parties.find(p => p.claimed_by === clientId)?.role;
+
+        if (myRole) {
+          if (data.filling_mode) {
+            setStep('role');
+          } else {
+            setStep('mode');
+          }
+        } else {
+          // No role yet
+          if (data.filling_mode) {
+            setStep('role');
+          } else {
+            setStep('mode');
+          }
+        }
       } else {
         setStep('category');
       }
@@ -142,18 +160,19 @@ function App() {
 
   // SSE for real-time updates
   useEffect(() => {
-    if (step !== 'form' || !sessionId) return;
+    if (!sessionId) return;
 
     const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream`);
 
     eventSource.onopen = () => {
       setIsOnline(true);
-      // Optional: we could fetchSchema here too, but 'online' event usually handles it
     };
 
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log("SSE Event:", data);
+
         if (data.type === 'field_update') {
           // Ignore my own updates to prevent cursor jumping
           if (data.client_id === clientId) return;
@@ -163,6 +182,8 @@ function App() {
             ...prev,
             [data.field]: data.value
           }));
+        } else if (data.type === 'schema_update') {
+          fetchSchema(sessionId);
         }
       } catch (e) {
         console.error("SSE parse error", e);
@@ -171,10 +192,7 @@ function App() {
 
     eventSource.onerror = (e) => {
       console.error("SSE error", e);
-      // If SSE fails, we might be offline or server down
       if (eventSource.readyState === EventSource.CLOSED || eventSource.readyState === EventSource.CONNECTING) {
-        // Don't force offline here immediately as it might be a momentary reconnect,
-        // but if navigator.onLine is false, we are definitely offline.
         if (!navigator.onLine) setIsOnline(false);
       }
       eventSource.close();
@@ -183,26 +201,59 @@ function App() {
     return () => {
       eventSource.close();
     };
-  }, [step, sessionId, clientId]);
+  }, [sessionId, clientId]);
 
   // --- Step Handlers ---
 
-  const handleCategorySelect = async (categoryId) => {
+  const handleCategorySelect = (categoryId) => {
     setSelectedCategory(categoryId);
-    await api.setCategory(sessionId, categoryId);
     setStep('template');
   };
 
   const handleTemplateSelect = async (templateId) => {
     setSelectedTemplate(templateId);
-    await api.setTemplate(sessionId, templateId);
+
+    let sid = sessionId;
+    if (!sid) {
+      try {
+        setIsLoading(true);
+        const session = await api.createSession();
+        sid = session.session_id;
+        setSessionId(sid);
+        const newUrl = `${window.location.pathname}?session_id=${sid}`;
+        window.history.pushState({ path: newUrl }, '', newUrl);
+
+        // Set category and template
+        await api.setCategory(sid, selectedCategory);
+        await api.setTemplate(sid, templateId);
+      } catch (e) {
+        console.error("Failed to create session", e);
+        alert("Failed to create session");
+        setIsLoading(false);
+        return;
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      await api.setTemplate(sid, templateId);
+    }
+
     setStep('mode');
   };
 
-  const handleModeSelect = (mode) => {
+  const handleModeSelect = async (mode) => {
     setSelectedMode(mode);
+
+    if (sessionId) {
+      try {
+        await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial');
+      } catch (e) {
+        console.error("Failed to set mode", e);
+      }
+    }
+
     if (mode === 'ai') {
-      alert("AI режим ще в розробці");
+      setStep('ai_chat');
       return;
     }
     setStep('role');
@@ -216,8 +267,35 @@ function App() {
     }
 
     setSelectedRole(role);
-    await api.setPartyContext(sessionId, 'lessor', 'individual');
-    await api.setPartyContext(sessionId, 'lessee', 'individual');
+
+    if (selectedMode === 'full') {
+      // Try to claim all known roles.
+      try {
+        await api.setPartyContext(sessionId, 'lessor', 'individual', clientId);
+      } catch (e) { }
+      try {
+        await api.setPartyContext(sessionId, 'lessee', 'individual', clientId);
+      } catch (e) { }
+    } else {
+      // Partial mode: claim only selected
+      try {
+        const res = await api.setPartyContext(sessionId, role, 'individual', clientId);
+        if (res.data && !res.data.ok) {
+          alert(res.data.error || "Не вдалося обрати роль. Можливо, вона вже зайнята.");
+          await fetchSchema(sessionId);
+          return;
+        }
+      } catch (error) {
+        console.error("Role selection error:", error);
+        if (error.response && error.response.data && error.response.data.detail) {
+          alert(`Помилка: ${error.response.data.detail}`);
+        } else {
+          alert("Не вдалося обрати роль. Спробуйте оновити сторінку.");
+        }
+        await fetchSchema(sessionId);
+        return;
+      }
+    }
 
     await fetchSchema(sessionId);
     setStep('form');
@@ -227,12 +305,12 @@ function App() {
     switch (step) {
       case 'template': setStep('category'); break;
       case 'mode':
-        // If we restored session, we might not have selectedTemplate locally set.
-        // But if user wants to go back, they probably want to change template.
         setStep('template');
         break;
       case 'role': setStep('mode'); break;
       case 'form': setStep('role'); break;
+      case 'details': setStep('dashboard'); break;
+      case 'dashboard': setStep('category'); break;
       default: setStep('category');
     }
   };
@@ -242,7 +320,7 @@ function App() {
   const fetchSchema = async (sid) => {
     try {
       setIsLoading(true);
-      const data = await api.getSchema(sid, 'all', 'values');
+      const data = await api.getSchema(sid, 'all', 'values', clientId);
       setSchema(data);
 
       // Populate initial form values
@@ -273,13 +351,22 @@ function App() {
       } catch (e) {
         console.error(`Failed to save ${field}`, e);
       }
-    }, 500),
+    }, 1000),
     []
   );
 
   const handleChange = (key, fieldName, value, role = null) => {
     setFormValues(prev => ({ ...prev, [key]: value }));
     debouncedUpsert(sessionId, fieldName, value, role, clientId);
+  };
+
+  const handleBlur = async (key, fieldName, value, role = null) => {
+    if (!sessionId) return;
+    try {
+      await api.upsertField(sessionId, fieldName, value, role, clientId);
+    } catch (e) {
+      console.error(`Failed to save ${fieldName} on blur`, e);
+    }
   };
 
   const handlePartyTypeChange = async (role, newType) => {
@@ -299,52 +386,36 @@ function App() {
     setShowPreview(true);
   };
 
-  const handleOrder = async () => {
+  const handleOrder = async (isOptional = false) => {
     if (!sessionId) return;
+
+    if (isOptional) {
+      alert("Дані успішно збережено! Ви можете скопіювати посилання з адресного рядка і надіслати його іншій стороні для заповнення.");
+      return;
+    }
+
     try {
       setIsLoading(true);
-      const res = await api.orderContract(sessionId);
+      const res = await api.orderContract(sessionId, clientId);
       if (res.ok) {
-        alert("Договір успішно сформовано і збережено в системі!");
+        await fetchSchema(sessionId);
+        setStep('success');
       }
     } catch (e) {
       console.error("Order failed", e);
       alert("Order failed: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  // Derived state for my roles
+  const myRoles = React.useMemo(() => {
+    if (!schema || !schema.parties) return [];
+    return schema.parties.filter(p => p.claimed_by === clientId).map(p => p.role);
+  }, [schema, clientId]);
 
   // --- Render Helpers ---
-
-  const renderStep = () => {
-    switch (step) {
-      case 'category':
-        return <CategorySelector onSelect={handleCategorySelect} />;
-      case 'template':
-        return (
-          <TemplateSelector
-            categoryId={selectedCategory}
-            onSelect={handleTemplateSelect}
-          />
-        );
-      case 'mode':
-        return (
-          <ModeSelector
-            onSelect={handleModeSelect}
-          />
-        );
-      case 'role':
-        return (
-          <RoleSelector
-            onSelect={handleRoleSelect}
-            takenRoles={takenRoles}
-          />
-        );
-      case 'form':
-        return renderForm();
-      default:
-        return <div>Unknown step</div>;
-    }
-  };
 
   const renderForm = () => {
     if (!schema) return <div>Loading form...</div>;
@@ -365,18 +436,16 @@ function App() {
           const isMyRole = party.role === selectedRole;
           const isTaken = takenRoles.includes(party.role);
 
-          // If single mode, I edit ONLY my role.
-          // Other roles are read-only.
-          const isEditable = isSingleMode ? isMyRole : !isTaken;
+          const isFullMode = selectedMode === 'full';
+          const isEditable = isFullMode ? true : (isSingleMode ? isMyRole : !isTaken);
 
-          // Hide empty other roles in single mode if they are not taken
           if (isSingleMode && !isMyRole && !isTaken) return null;
 
           return (
             <SectionCard
               key={party.role}
               title={party.label}
-              subtitle={isTaken ? '(Заповнено іншою стороною)' : `Вкажіть дані для сторони "${party.label}"`}
+              subtitle={party.claimed_by && party.claimed_by !== clientId ? '(Заповнено іншою стороною)' : `Вкажіть дані для сторони "${party.label}"`}
             >
               <div style={{ marginBottom: 16 }}>
                 <label className="input-label">Тип особи</label>
@@ -399,6 +468,7 @@ function App() {
                   placeholder={field.placeholder}
                   value={formValues[field.key]}
                   onChange={(val) => handleChange(field.key, field.field_name, val, party.role)}
+                  onBlur={() => handleBlur(field.key, field.field_name, formValues[field.key], party.role)}
                   required={field.required}
                   disabled={!isEditable || !isOnline}
                 />
@@ -420,16 +490,42 @@ function App() {
               placeholder={field.placeholder}
               value={formValues[field.key]}
               onChange={(val) => handleChange(field.key, field.field_name, val, null)}
-              required={isContractOptional ? false : field.required}
+              onBlur={() => handleBlur(field.key, field.field_name, formValues[field.key], null)}
+              required={field.required}
               disabled={!isOnline}
             />
           ))}
         </SectionCard>
 
         <div className="actions">
-          <button className="btn-primary" onClick={handleOrder} disabled={!isOnline}>
-            {isContractOptional ? 'Зберегти та продовжити' : 'Замовити договір'}
-          </button>
+          {schema.status === 'completed' ? (
+            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId), '_blank')}>
+              Завантажити DOCX
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              onClick={() => handleOrder(isContractOptional)}
+              disabled={!isOnline || !(() => {
+                if (!schema) return false;
+                for (const party of schema.parties) {
+                  if (selectedMode === 'single' && party.role !== selectedRole) continue;
+                  for (const field of party.fields) {
+                    if (field.required && !formValues[field.key]) return false;
+                  }
+                }
+                if (!isContractOptional) {
+                  for (const field of schema.contract.fields) {
+                    if (field.required && !formValues[field.key]) return false;
+                  }
+                }
+                return true;
+              })()}
+              title={!isOnline ? "Немає зв'язку" : "Заповніть всі обов'язкові поля"}
+            >
+              {isContractOptional ? 'Зберегти та продовжити' : 'Замовити договір'}
+            </button>
+          )}
           <button className="btn-secondary" onClick={handlePreview}>
             Попередній перегляд
           </button>
@@ -438,35 +534,116 @@ function App() {
     );
   };
 
-  return (
-    <div className="app-container">
-      {isLoading && <div className="loading-overlay">Loading...</div>}
-
-      {!isOnline && (
-        <div className="offline-notification">
-          <span>⚠️</span>
-          <span>Зв'язок втрачено. Редагування недоступне.</span>
-        </div>
-      )}
-
-      <PreviewDrawer
-        isOpen={showPreview}
-        onClose={() => setShowPreview(false)}
-        sessionId={sessionId}
-      />
-
-      <header className="header">
-        {step !== 'category' && (
-          <button className="back-button" onClick={handleBack}>←</button>
-        )}
-        <h1 className="title">Договір оренди житла</h1>
-      </header>
-
-      <div className="content-area">
-        {renderStep()}
+  const renderStep = () => {
+    switch (step) {
+      case 'category':
+        return <CategorySelector onSelect={handleCategorySelect} />;
+      case 'template':
+        return (
+          <TemplateSelector
+            categoryId={selectedCategory}
+            onSelect={handleTemplateSelect}
+            onBack={handleBack}
+          />
+        );
+      case 'mode':
+        return (
+          <ModeSelector
+            onSelect={handleModeSelect}
+            onBack={handleBack}
+          />
+        );
+      case 'role':
+        return (
+          <RoleSelector
+            onSelect={handleRoleSelect}
+            takenRoles={takenRoles}
+            myRoles={myRoles}
+    {!isOnline && (
+      <div className="offline-notification">
+        <span>⚠️</span>
+        <span>Зв'язок втрачено. Редагування недоступне.</span>
       </div>
+    )}
+
+    <PreviewDrawer
+      isOpen={showPreview}
+      onClose={() => setShowPreview(false)}
+      sessionId={sessionId}
+    />
+
+    <header className="header">
+      {step !== 'category' && step !== 'dashboard' && (
+        <button className="back-button" onClick={handleBack}>←</button>
+      )}
+      <h1 className="title">Договір оренди житла</h1>
+    </header>
+
+    <div className="content-area">
+      {renderStep()}
+    </div>
+
+    <button
+      className="floating-dashboard-btn"
+      onClick={() => setStep('dashboard')}
+    >
+      <span>📂</span> Усі договори
+    </button>
+  </div >
+);
+}
+
+// --- AI Chat Component ---
+const AIChat = ({ sessionId, clientId, onBack }) => {
+  const [messages, setMessages] = useState([
+    { role: 'system', content: 'Привіт! Я ваш AI-помічник. Я можу допомогти вам заповнити договір. Просто напишіть мені дані або завантажте документ.' }
+  ]);
+  const [input, setInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    const userMsg = { role: 'user', content: input };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setIsSending(true);
+
+    try {
+      const res = await api.chat(sessionId, userMsg.content);
+      setMessages(prev => [...prev, { role: 'assistant', content: res.reply }]);
+    } catch (e) {
+      console.error("Chat failed", e);
+      setMessages(prev => [...prev, { role: 'system', content: 'Вибачте, сталася помилка. Спробуйте ще раз.' }]);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="chat-container">
+      <div className="chat-messages">
+        {messages.map((m, i) => (
+          <div key={i} className={`chat-message ${m.role}`}>
+            <div className="message-content">{m.content}</div>
+          </div>
+        ))}
+        {isSending && <div className="chat-message system">Writing...</div>}
+      </div>
+      <div className="chat-input-area">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyPress={e => e.key === 'Enter' && handleSend()}
+          placeholder="Напишіть повідомлення..."
+          disabled={isSending}
+        />
+        <button onClick={handleSend} disabled={isSending}>Send</button>
+      </div>
+      <button className="btn-secondary" style={{ marginTop: 10 }} onClick={onBack}>Back to Form</button>
     </div>
   );
-}
+};
 
 export default App;

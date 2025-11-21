@@ -322,3 +322,181 @@ body {
     opacity: 1;
   }
 }
+
+/* --- Dashboard Styles --- */
+
+.dashboard {
+  width: 100%;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.session-card {
+  background: var(--card-bg);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid transparent;
+}
+
+.session-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.session-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.session-id {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.session-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.built,
+.status-badge.completed,
+.status-badge.ready_to_sign {
+  background-color: #DEF7EC;
+  color: #03543F;
+}
+
+.status-badge.collecting_fields,
+.status-badge.template_selected {
+  background-color: #E1EFFE;
+  color: #1E429F;
+}
+
+.status-badge.signed {
+  background-color: #E1EFFE;
+  color: #1E429F;
+  /* Or a different color for signed */
+}
+
+/* --- Contract Details Styles --- */
+
+.contract-details {
+  width: 100%;
+}
+
+.details-card {
+  background: var(--card-bg);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.detail-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signatures-section {
+  background: #F9FAFB;
+  border-radius: 16px;
+  padding: 16px;
+  margin: 24px 0;
+}
+
+.signature-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.signature-row:last-child {
+  border-bottom: none;
+}
+
+.role-name {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.signature-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.signature-status.signed {
+  color: #059669;
+}
+
+.signature-status.pending {
+  color: #D97706;
+}
+
+.offline-notification {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #FEF3C7;
+  color: #92400E;
+  padding: 8px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 2000;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}

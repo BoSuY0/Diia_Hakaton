@@ -1,0 +1,51 @@
+{
+  "session_id": "test_sig_session",
+  "user_id": null,
+  "updated_at": "2025-11-21T03:39:59.234145",
+  "locale": "uk",
+  "category_id": "lease_living",
+  "template_id": null,
+  "role": "lessor",
+  "person_type": "individual",
+  "party_types": {
+    "lessor": "individual",
+    "lessee": "individual"
+  },
+  "state": "ready_to_sign",
+  "party_fields": {
+    "lessor": {
+      "name": {
+        "status": true,
+        "error": null
+      }
+    }
+  },
+  "contract_fields": {},
+  "can_build_contract": false,
+  "signatures": {
+    "lessor": true,
+    "lessee": false
+  },
+  "progress": {
+    "required_total": 5,
+    "required_filled": 1
+  },
+  "routing": {},
+  "all_data": {
+    "lessor.name": {
+      "current": "Lessor Name",
+      "validated": true,
+      "source": "api",
+      "history": [
+        {
+          "source": "api",
+          "value": "Lessor Name",
+          "normalized": "Lessor Name",
+          "valid": true,
+          "tags": null
+        }
+      ]
+    }
+  },
+  "filling_mode": "partial"
+}
