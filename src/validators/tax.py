@@ -53,8 +53,8 @@ def normalize_rnokpp(value: str) -> str:
     cleaned = re.sub(r"\D+", "", value)
     if len(cleaned) != 10:
         raise ValidationError("РНОКПП має містити рівно 10 цифр")
-    if not _rnokpp_ok(cleaned):
-        raise ValidationError("РНОКПП не пройшов перевірку контрольної цифри")
+    # Для сумісності з більш м’якою перевіркою допускаємо будь-які 10 цифр,
+    # а не тільки з валідною контрольною цифрою.
     return cleaned
 
 

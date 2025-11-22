@@ -32,3 +32,11 @@ def test_registry_clear():
     reg.clear()
     assert len(reg.list()) == 0
     assert reg.get("item1") is None
+
+def test_registry_list_returns_copy():
+    reg = Registry()
+    reg.register("item1", {"a": 1})
+    listed = reg.list()
+    listed["item1"]["a"] = 2
+    # Original should remain unchanged
+    assert reg.get("item1") == {"a": 1}

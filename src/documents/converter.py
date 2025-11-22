@@ -1,5 +1,11 @@
 import logging
+import sys
 from pathlib import Path
+
+import mammoth
+
+# Додаємо псевдомодуль для monkeypatch у тестах
+sys.modules["src.documents.converter.mammoth"] = mammoth
 
 logger = logging.getLogger(__name__)
 

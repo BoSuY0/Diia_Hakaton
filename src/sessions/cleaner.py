@@ -83,11 +83,6 @@ def clean_abandoned_sessions(active_session_ids: set[str], grace_period_minutes:
     
     for file_path in sessions_dir.glob("*.json"):
         try:
-            # Оптимізація: спочатку перевіряємо час модифікації файлу, щоб не читати все підряд
-            mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-            if mtime > threshold:
-                continue
-
             # Читаємо JSON
             data = read_json(file_path)
             session_id = data.get("session_id")

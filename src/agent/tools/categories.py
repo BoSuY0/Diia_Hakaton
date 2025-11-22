@@ -274,6 +274,9 @@ class SetCategoryTool(BaseTool):
 
         from src.sessions.actions import set_session_category
 
+        # Гарантуємо, що файл сесії існує, щоб transactional_session не впав із 404
+        get_or_create_session(session_id)
+
         with transactional_session(session_id) as session:
              ok = set_session_category(session, category_id)
 

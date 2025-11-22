@@ -1,0 +1,91 @@
+from src.app import server
+
+
+def test_detect_lang_uk_en():
+    assert server._detect_lang("Привіт") == "uk"
+    assert server._detect_lang("Hello") == "en"
+
+
+def test_last_user_message_text_handles_structured():
+    msgs = [
+        {"role": "user", "content": [{"text": "First"}, {"text": ""}]},
+        {"role": "assistant", "content": "Reply"},
+        {"role": "user", "content": [{"text": ""}, {"text": "Second"}]},
+    ]
+    assert server._last_user_message_text(msgs) == "Second"
+
+
+def test_canonical_args_sorts_keys():
+    raw = '{"b":1,"a":2}'
+    canon = server._canonical_args(raw)
+    assert canon == '{"a":2,"b":1}'
+
+
+def test_inject_session_id_adds_and_expands_alias():
+    args = '{"cid": "cat1", "f": "field1"}'
+    injected = server._inject_session_id(args, "sess1", "upsert_field")
+    data = server.json.loads(injected)
+    assert data["session_id"] == "sess1"
+    # alias cid -> category_id should be preserved as explicit field when not session-aware
+    assert data["category_id"] == "cat1"
+    assert data["field"] == "field1"
+
+
+def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_settings, mock_categories_data):
+    from src.sessions.store import get_or_create_session, save_session
+    s = get_or_create_session("eff_state")
+    s.category_id = mock_categories_data
+    s.state = server.SessionState.TEMPLATE_SELECTED
+    save_session(s)
+    state = server._get_effective_state("eff_state", [], has_category_tool=False)
+    assert state == "template_selected"
+
+
+def test_prune_strips_orphan_tools():
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "tool_calls": [{"id": "call1"}]},
+        {"role": "tool", "tool_call_id": "call1", "content": "ok"},
+        {"role": "tool", "tool_call_id": "orphan", "content": "drop me"},
+    ]
+    pruned = server._prune_messages(msgs)
+    roles = [m["role"] for m in pruned]
+    assert roles.count("tool") == 1
+
+
+def test_format_reply_uses_tool_templates():
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "c1"}],
+            "content": None,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "name": "get_templates_for_category",
+            "content": "TEMPLATES\nlease_flat|Flat",
+        },
+    ]
+    text = server._format_reply_from_messages(msgs)
+    assert "Доступні шаблони" in text or "Available templates" in text
+
+
+def test_format_reply_uses_tool_entities():
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "c1"}],
+            "content": None,
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "name": "get_category_entities",
+            "content": "ENTITIES\nfield1|Label|text|1",
+        },
+    ]
+    text = server._format_reply_from_messages(msgs)
+    assert "field1" in text

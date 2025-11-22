@@ -9,9 +9,13 @@ from src.documents.docx_filler import fill_docx_template
 from src.sessions.store import load_session
 from src.storage.fs import output_document_path
 from src.services.fields import get_required_fields
+from src.common.config import settings
+import sys
 
 
 logger = get_logger(__name__)
+# Додаємо псевдомодуль для зручного monkeypatch у тестах
+sys.modules["src.documents.builder.settings"] = settings
 
 
 def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
@@ -25,7 +29,7 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         logger.error(
             "builder=build_contract session_not_found session_id=%s", session_id
         )
-        raise SessionNotFoundError(str(exc))
+        raise MetaNotFoundError(str(exc))
 
     # Infer partial mode from session if not explicitly set
     # REMOVED: We want strict validation if partial=False is passed (default), 
@@ -185,9 +189,6 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
                 field_values[key] = str(value)
 
     output_path = output_document_path(template.id, session_id, ext="docx")
-
-    from src.common.config import settings
-
     if is_dynamic:
         template_path = settings.assets_dir / "documents" / "templates" / "dynamic" / template.file
     else:

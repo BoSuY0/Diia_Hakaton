@@ -170,7 +170,7 @@ function App() {
   useEffect(() => {
     if (!sessionId) return;
 
-    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream`);
+    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?client_id=${clientId}`);
 
     eventSource.onopen = () => {
       setIsOnline(true);
@@ -182,9 +182,6 @@ function App() {
         console.log("SSE Event:", data);
 
         if (data.type === 'field_update') {
-          // Ignore my own updates to prevent cursor jumping
-          if (data.client_id && data.client_id === clientId) return;
-
           const incomingKey = data.field_key || (data.role ? `${data.role}.${data.field}` : data.field);
           if (!incomingKey) return;
 
@@ -558,7 +555,7 @@ function App() {
 
         <div className="actions">
           {schema.status === 'completed' ? (
-            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId), '_blank')}>
+            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId, clientId), '_blank')}>
               Завантажити DOCX
             </button>
           ) : (
@@ -673,6 +670,7 @@ function App() {
         isOpen={showPreview}
         onClose={() => setShowPreview(false)}
         sessionId={sessionId}
+        clientId={clientId}
       />
 
       <header className="header">

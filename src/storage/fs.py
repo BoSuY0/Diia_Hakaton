@@ -78,6 +78,8 @@ class FileLock:
             with self._memory_lock_mutex:
                 if self.lock_path in self._memory_locks:
                     # Held by sibling thread. Sleep and retry without touching file.
+                    if time.time() - start_time > self.timeout:
+                        raise TimeoutError(f"Could not acquire lock for {self.path} after {self.timeout}s")
                     time.sleep(0.05)
                     continue
 

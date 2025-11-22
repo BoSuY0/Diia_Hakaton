@@ -28,6 +28,9 @@ def set_session_category(session: Session, category_id: str) -> bool:
     session.party_fields.clear()
     session.contract_fields.clear()
     session.can_build_contract = False
+    session.party_types.clear()
+    session.party_users.clear()
+    session.signatures.clear()
     session.progress = {}
     
     # session is yielded by context manager, so changes will be saved on exit.

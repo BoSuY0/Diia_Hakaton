@@ -34,6 +34,9 @@ def fill_docx_template(
             if key.endswith(".id_doc"):
                 alias = key.replace(".id_doc", ".passport")
                 values.setdefault(alias, val)
+            if key.endswith(".passport"):
+                alias = key.replace(".passport", ".id_doc")
+                values.setdefault(alias, val)
             if key.endswith(".id_code"):
                 alias = key.replace(".id_code", ".rnokpp")
                 values.setdefault(alias, val)

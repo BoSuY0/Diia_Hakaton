@@ -9,7 +9,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
     const load = async () => {
         try {
             setIsLoading(true);
-            const res = await api.getContract(sessionId);
+            const res = await api.getContract(sessionId, clientId);
             setInfo(res.data);
         } catch (e) {
             console.error("Failed to load contract info", e);
@@ -44,16 +44,8 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
     if (isLoading && !info) return <div>Loading...</div>;
     if (!info) return <div>Failed to load info</div>;
 
-    // Determine my role
-    let myRole = null;
-    if (info.party_users) {
-        for (const [role, uid] of Object.entries(info.party_users)) {
-            if (uid === clientId) {
-                myRole = role;
-                break;
-            }
-        }
-    }
+    // Determine my role based on server-side mapping (does not expose other users)
+    const myRole = info.client_roles && info.client_roles.length > 0 ? info.client_roles[0] : null;
 
     const mySignature = myRole ? info.signatures?.[myRole] : false;
     const isFullySigned = info.is_signed;
@@ -76,16 +68,16 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
 
                 <div className="signatures-section">
                     <h3 className="card-title" style={{ fontSize: 16, marginBottom: 16 }}>Підписи сторін</h3>
-                    {info.party_users && Object.entries(info.party_users).map(([role, uid]) => {
-                        const signed = info.signatures?.[role];
-                        return (
-                            <div key={role} className="signature-row">
-                                <span className="role-name">{role}</span>
-                                <span className={`signature-status ${signed ? 'signed' : 'pending'}`}>
-                                    {signed ? "✅ Підписано" : "⏳ Очікується"}
-                                </span>
-                            </div>
-                        );
+                    {info.signatures && Object.keys(info.signatures).map((role) => {
+                      const signed = info.signatures?.[role];
+                      return (
+                        <div key={role} className="signature-row">
+                          <span className="role-name">{role}</span>
+                          <span className={`signature-status ${signed ? 'signed' : 'pending'}`}>
+                            {signed ? "✅ Підписано" : "⏳ Очікується"}
+                          </span>
+                        </div>
+                      );
                     })}
                 </div>
 

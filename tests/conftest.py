@@ -1,7 +1,25 @@
-import pytest
-import shutil
+import sys
 from pathlib import Path
-from src.common.config import Settings
+import shutil
+
+import pytest
+
+# Додаємо корінь проєкту в sys.path, щоб імпорти src.* працювали без інсталяції пакету
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+root_str = str(PROJECT_ROOT)
+# Щоб src.* бралося з кореня, а не з tests/src, ставимо корінь на початок sys.path
+if root_str in sys.path:
+    sys.path.remove(root_str)
+sys.path.insert(0, root_str)
+
+try:
+    from src.common.config import Settings
+except ModuleNotFoundError:
+    # Додаткова спроба з явним шляхом до кореня
+    if root_str in sys.path:
+        sys.path.remove(root_str)
+    sys.path.insert(0, root_str)
+    from src.common.config import Settings
 
 @pytest.fixture
 def temp_workspace(tmp_path):

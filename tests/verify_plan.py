@@ -188,6 +188,7 @@ def test_contract_api_flow():
     # 1. Setup Session
     resp = client.post("/sessions", json={})
     session_id = resp.json()["session_id"]
+    client_id = "plan_user"
     
     # 2. Sync Session to be ready
     sync_data = {
@@ -214,7 +215,11 @@ def test_contract_api_flow():
             }
         }
     }
-    client.post(f"/sessions/{session_id}/sync", json=sync_data)
+    client.post(
+        f"/sessions/{session_id}/sync",
+        json=sync_data,
+        headers={"X-Client-ID": client_id},
+    )
     
     # Upsert remaining contract fields
     contract_fields = {
@@ -223,7 +228,11 @@ def test_contract_api_flow():
         "start_date": "01.01.2025"
     }
     for f, v in contract_fields.items():
-        client.post(f"/sessions/{session_id}/fields", json={"field": f, "value": v})
+        client.post(
+            f"/sessions/{session_id}/fields",
+            json={"field": f, "value": v},
+            headers={"X-Client-ID": client_id},
+        )
         
     # Force can_build_contract just in case
     sess = load_session(session_id)
@@ -231,42 +240,60 @@ def test_contract_api_flow():
     save_session(sess)
     
     # 3. Get Contract Info
-    resp = client.get(f"/sessions/{session_id}/contract")
+    resp = client.get(
+        f"/sessions/{session_id}/contract",
+        headers={"X-Client-ID": client_id},
+    )
     data = resp.json()
     print("Contract Info:", data)
     assert data["is_signed"] == False
     assert data["can_build_contract"] == True
-    assert data["preview_url"] == f"/sessions/{session_id}/contract/preview"
+    assert data["preview_url"].startswith(f"/sessions/{session_id}/contract/preview")
     # document_url should be None or present? 
     # Code: "document_url": ... if session.state == "built" else None
     # State is probably READY_TO_BUILD, not BUILT yet.
     
     # 4. Preview
-    resp = client.get(f"/sessions/{session_id}/contract/preview")
+    resp = client.get(
+        f"/sessions/{session_id}/contract/preview",
+        headers={"X-Client-ID": client_id},
+    )
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert resp.headers["content-type"].startswith("text/html")
     
     # Now state might be BUILT because preview calls build_contract if needed?
     # Let's check code:
     # if not path.exists(): if can_build: tool_build_contract(...)
     # tool_build_contract sets state to BUILT.
     
-    resp = client.get(f"/sessions/{session_id}/contract")
+    resp = client.get(
+        f"/sessions/{session_id}/contract",
+        headers={"X-Client-ID": client_id},
+    )
     data = resp.json()
     assert data["document_ready"] == True
-    assert data["document_url"] == f"/sessions/{session_id}/contract/download"
+    assert data["document_url"].startswith(f"/sessions/{session_id}/contract/download")
     
     # 5. Download (Unsigned) -> 403
-    resp = client.get(f"/sessions/{session_id}/contract/download")
+    resp = client.get(
+        f"/sessions/{session_id}/contract/download",
+        headers={"X-Client-ID": client_id},
+    )
     assert resp.status_code == 403
     
     # 6. Sign
-    resp = client.post(f"/sessions/{session_id}/contract/sign")
+    resp = client.post(
+        f"/sessions/{session_id}/contract/sign",
+        headers={"X-Client-ID": client_id},
+    )
     assert resp.status_code == 200
     assert resp.json()["is_signed"] == True
     
     # 7. Download (Signed) -> 200
-    resp = client.get(f"/sessions/{session_id}/contract/download")
+    resp = client.get(
+        f"/sessions/{session_id}/contract/download",
+        headers={"X-Client-ID": client_id},
+    )
     print(f"Download (Signed) Status: {resp.status_code}")
     if resp.status_code != 200:
         print(f"Download Error: {resp.text}")

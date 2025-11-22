@@ -48,16 +48,25 @@ export const api = {
         return axios.post(`${API_URL}/sessions/${sessionId}/fields`, payload, config);
     },
 
-    async getContract(sessionId) {
-        return axios.get(`${API_URL}/sessions/${sessionId}/contract`);
+    async getContract(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        return axios.get(`${API_URL}/sessions/${sessionId}/contract`, config);
     },
 
-    async getPreview(sessionId) {
-        return axios.get(`${API_URL}/sessions/${sessionId}/contract/preview`);
+    async getPreview(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        return axios.get(`${API_URL}/sessions/${sessionId}/contract/preview`, config);
     },
 
-    getDownloadUrl(sessionId) {
-        return `${API_URL}/sessions/${sessionId}/contract/download`;
+    getDownloadUrl(sessionId, clientId) {
+        const suffix = clientId ? `?client_id=${clientId}` : '';
+        return `${API_URL}/sessions/${sessionId}/contract/download${suffix}`;
     },
 
     async getSchema(sessionId, scope = 'all', dataMode = 'values', clientId = null) {

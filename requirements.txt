@@ -7,6 +7,7 @@ python-dotenv
 pathspec
 tenacity
 pytest
+pytest-asyncio
 httpx
 pytest-cov
 mammoth

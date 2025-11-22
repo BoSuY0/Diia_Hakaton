@@ -163,6 +163,24 @@ class SetPartyContextTool(BaseTool):
                 "error": f"Невідомий тип особи. Допустимі: {', '.join([p.value for p in PersonType])}",
             }
 
+        # Validate person_type against category metadata
+        try:
+            session = load_session(session_id)
+            if not session.category_id:
+                 return {"ok": False, "error": "Спочатку оберіть категорію."}
+            from src.categories.index import store as category_store, _load_meta
+            cat = category_store.get(session.category_id)
+            if not cat:
+                 return {"ok": False, "error": "Невідома категорія."}
+            meta = _load_meta(cat)
+            role_meta = (meta.get("roles") or {}).get(role)
+            allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
+            if allowed_types and person_type not in allowed_types:
+                 return {"ok": False, "error": "Невірний тип особи для ролі."}
+        except Exception:
+            # Fail closed if meta cannot be read
+            return {"ok": False, "error": "Не вдалося перевірити тип особи."}
+
         client_id = context.get("client_id")
         # If not, we can't enforce strict access control properly.
         # Fallback to session.user_id if available?
@@ -332,7 +350,7 @@ class UpsertFieldTool(BaseTool):
         # If the LLM passes tagged value, we need the mapping.
         # The mapping is usually in context["pii_tags"] if we support that flow.
         # For now, we assume value might contain tags, and we try to unmask if tags are provided.
-        tags = context.get("pii_tags")
+        tags = context.get("pii_tags") or context.get("tags")
         
         # Unmask value if needed (for storage)
         # Actually, we want to store the REAL value, so we unmask.
@@ -341,16 +359,46 @@ class UpsertFieldTool(BaseTool):
         with transactional_session(session_id) as session:
             # Access Control Check
             client_id = context.get("client_id")
-            if client_id and session.category_id:
-                # Determine if this is a party field
-                entities = {e.field: e for e in list_entities(session.category_id)}
-                entity = entities.get(field)
-                
-                if entity is None:
-                    # It is a party field
-                    effective_role = role_arg or session.role
-                    if effective_role:
-                        owner = session.party_users.get(effective_role)
+            target_role = role_arg or session.role
+            owner_for_role = session.party_users.get(target_role) if session.party_users else None
+
+            # Дозволяємо роботу без client_id лише якщо всі ролі наразі anon_ (тимчасові сесії)
+            all_anon = bool(session.party_users) and all(str(v).startswith("anon_") for v in session.party_users.values())
+            if session.party_users and not client_id and not all_anon:
+                return {"ok": False, "error": "Необхідний заголовок X-Client-ID."}
+
+            entities = {e.field: e for e in list_entities(session.category_id)} if session.category_id else {}
+            entity = entities.get(field)
+
+            # Доступ до умов договору (contract fields) — лише орендодавець
+            lessor_id = session.party_users.get("lessor")
+            if entity is not None:
+                # Контрактні поля
+                if session.role and session.role != "lessor":
+                    return {"ok": False, "error": "Умови договору може змінювати лише орендодавець."}
+                if lessor_id:
+                    if not client_id and not str(lessor_id).startswith("anon_"):
+                        return {"ok": False, "error": "Потрібен X-Client-ID орендодавця для редагування умов."}
+                    # Якщо власник anon_* і прийшов реальний користувач — перезакріплюємо
+                    if str(lessor_id).startswith("anon_") and client_id:
+                        session.party_users["lessor"] = client_id
+                        lessor_id = client_id
+                    if client_id != lessor_id:
+                        return {"ok": False, "error": "Редагувати умови може лише орендодавець."}
+            elif client_id and session.category_id:
+                # It is a party field
+                effective_role = role_arg or session.role
+                if effective_role:
+                    owner = session.party_users.get(effective_role)
+                    if owner:
+                        # Якщо роль прив'язана до anon_* і прийшов реальний користувач — перезакріплюємо
+                        if str(owner).startswith("anon_"):
+                            if client_id:
+                                session.party_users[effective_role] = client_id
+                                owner = client_id
+                            else:
+                                # anon власник, запит без client_id — дозволяємо
+                                owner = client_id
                         if owner and owner != client_id:
                              from src.common.enums import FillingMode
                              if session.filling_mode != FillingMode.FULL:

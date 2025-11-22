@@ -31,6 +31,8 @@ def update_session_field(
         Tuple[success, error_message, field_state]
     """
     
+    raw_value = "" if value is None else str(value)
+
     # 1. Determine Context (Entity vs Party Field)
     if not session.category_id:
         return False, "Спочатку потрібно обрати категорію (set_category).", FieldState(status="error", error="No category")
@@ -67,6 +69,17 @@ def update_session_field(
         # Contract field
         pass
 
+    # 0. Порожнє значення для обов'язкового поля — це помилка
+    is_required = True
+    if entity:
+        is_required = entity.required
+    elif is_party_field and party_meta is not None:
+        is_required = party_meta.required
+
+    error_override = None
+    if is_required and not raw_value.strip():
+        error_override = "Значення не може бути порожнім."
+
     # 2. Check Signature Constraints
     # If CURRENT role has signed, they cannot edit.
     if session.signatures.get(effective_role or session.role):
@@ -93,6 +106,9 @@ def update_session_field(
              value_type = "email"
 
     normalized, error = validate_value(value_type, value)
+    if error_override:
+        error = error_override
+        normalized = raw_value
 
     # 3. Update Field State
     if is_party_field:

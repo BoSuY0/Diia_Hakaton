@@ -4,12 +4,14 @@ import json
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+import inspect
 
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from src.agent.tools.registry import tool_registry
 from src.agent.llm_client import chat_with_tools, load_system_prompt
 from src.app.state import Conversation, conversation_store
 from src.app.tool_router import (
@@ -49,9 +51,9 @@ async def lifespan(app: FastAPI):
 
     async def cleanup_loop():
         try:
-            # Give server a moment to start up fully, but exit early on shutdown
+            # Невелика затримка, щоб не блокувати старт
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=5)
+                await asyncio.wait_for(stop_event.wait(), timeout=0.1)
                 return
             except asyncio.TimeoutError:
                 pass
@@ -63,10 +65,32 @@ async def lifespan(app: FastAPI):
                     from src.app.server import stream_manager
                     
                     active_ids = set(stream_manager.connections.keys())
-                    
-                    # Run cleanup
-                    clean_abandoned_sessions(active_ids, grace_period_minutes=5)
-                    clean_stale_sessions()
+
+                    # Run cleanup in background threads with таймаутами
+                    try:
+                        if inspect.iscoroutinefunction(clean_abandoned_sessions):
+                            await asyncio.wait_for(
+                                clean_abandoned_sessions(active_ids, grace_period_minutes=5),
+                                timeout=2.0,
+                            )
+                        else:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(clean_abandoned_sessions, active_ids, 5),
+                                timeout=2.0,
+                            )
+                    except Exception as e:
+                        logger.error(f"Abandoned cleanup error/timeout: {e}")
+
+                    try:
+                        if inspect.iscoroutinefunction(clean_stale_sessions):
+                            await asyncio.wait_for(clean_stale_sessions(), timeout=2.0)
+                        else:
+                            await asyncio.wait_for(
+                                asyncio.to_thread(clean_stale_sessions),
+                                timeout=2.0,
+                            )
+                    except Exception as e:
+                        logger.error(f"Stale cleanup error/timeout: {e}")
                     
                 except Exception as e:
                     logger.error(f"Background cleanup error: {e}")
@@ -516,14 +540,21 @@ def _get_effective_state(
     До першого set_category в поточній розмові вважаємо станом "idle",
     навіть якщо у збереженій сесії він був інший.
     """
-    if not has_category_tool:
-        return "idle"
     try:
         session = load_session(session_id)
-        return session.state.value
     except Exception:
         # Якщо сесію ще не створено або сталася помилка — вважаємо стан "idle".
         return "idle"
+
+    # Якщо в історії поточної розмови ще не було set_category, але сесія вже має категорію/шаблон,
+    # використовуємо фактичний стан сесії, щоб не зависати в idle після рестарту чи REST-створення.
+    if not has_category_tool and session.category_id:
+        return session.state.value
+
+    if not has_category_tool:
+        return "idle"
+
+    return session.state.value
 
 
 def _filter_tools_for_session(
@@ -674,6 +705,7 @@ def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[
                     tool_name,
                     tool_args,
                     tags=getattr(conv, "tags", None),
+                    client_id=None,  # client_id is only known for HTTP endpoints, not chat
                 )
 
                 if tool_name == "set_category":
@@ -953,21 +985,34 @@ def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     return CreateSessionResponse(session_id=session.session_id)
 
 
-def check_session_access(session: Session, client_id: Optional[str]):
+def check_session_access(
+    session: Session,
+    client_id: Optional[str],
+    *,
+    require_participant: bool = False,
+):
     """
     Enforces strict access control:
     - If session is full (all roles taken), only participants can access.
     - If session is not full, anyone can access (to claim a role).
+    - If require_participant=True, enforce participant header even if session is not full.
     """
+    # If participant-level access is required, enforce header presence early
+    if require_participant and not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+
     # 1. If no category, we can't determine roles, so allow access (setup phase)
     if not session.category_id:
+        # If some roles are already claimed, still enforce participant ownership
+        if session.party_users and client_id not in session.party_users.values():
+            raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
     # 2. Load metadata to count roles
     from src.categories.index import store as category_store
     cat = category_store.get(session.category_id)
     if not cat:
-        return
+        raise HTTPException(status_code=404, detail="Category not found")
 
     # Reuse _load_meta helper (defined below, but python allows forward ref if function called later? No.)
     # We need to move _load_meta up or duplicate logic.
@@ -977,24 +1022,25 @@ def check_session_access(session: Session, client_id: Optional[str]):
     try:
         meta = _load_meta(cat)
     except Exception:
-        return
+        raise HTTPException(status_code=500, detail="Failed to load category metadata")
 
     roles = meta.get("roles", {})
-    expected_roles_count = len(roles)
+    expected_roles_count = len(roles) if roles else max(len(session.party_types), len(session.party_users))
     
     # 3. Check if full
     # We count unique users? Or just occupied roles?
     # party_users is Role -> UserID.
     occupied_roles = len(session.party_users)
+    is_full = expected_roles_count > 0 and occupied_roles >= expected_roles_count
     
-    if occupied_roles >= expected_roles_count:
-        # Session is full.
+    if require_participant or is_full or session.party_users:
+        # Session is full OR participant-only endpoint OR someone already claimed a role.
         if not client_id:
-             raise HTTPException(status_code=403, detail="Session is full. Access denied.")
-             
+            raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+
         # Check if client is a participant
-        if client_id not in session.party_users.values():
-             raise HTTPException(status_code=403, detail="Session is full. You are not a participant.")
+        if session.party_users and client_id not in session.party_users.values():
+            raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         pass
 
 
@@ -1019,11 +1065,24 @@ def get_session(
 
 
 @app.get("/user-documents/{session_id}")
-def get_user_document_api(session_id: str) -> Dict[str, Any]:
+def get_user_document_api(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+) -> Dict[str, Any]:
     """
     Повертає user-document JSON у форматі example_user_document.json
     для вказаної сесії.
     """
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not x_client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+
+    check_session_access(session, x_client_id, require_participant=True)
+
     try:
         return load_user_document(session_id)
     except FileNotFoundError as exc:
@@ -1086,21 +1145,23 @@ class SafeStreamingResponse(StreamingResponse):
 
 class StreamManager:
     def __init__(self):
-        self.connections: Dict[str, List[asyncio.Queue]] = defaultdict(list)
+        self.connections: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    async def connect(self, session_id: str) -> asyncio.Queue:
+    async def connect(self, session_id: str, client_id: Optional[str]) -> asyncio.Queue:
         queue = asyncio.Queue(maxsize=100)
-        self.connections[session_id].append(queue)
+        self.connections[session_id].append({"queue": queue, "client_id": client_id})
         return queue
 
     def disconnect(self, session_id: str, queue: asyncio.Queue):
-        if session_id in self.connections:
-            if queue in self.connections[session_id]:
-                self.connections[session_id].remove(queue)
-            if not self.connections[session_id]:
-                del self.connections[session_id]
+        if session_id not in self.connections:
+            return
+        filtered = [c for c in self.connections[session_id] if c.get("queue") is not queue]
+        if filtered:
+            self.connections[session_id] = filtered
+        else:
+            del self.connections[session_id]
 
-    async def broadcast(self, session_id: str, message: dict):
+    async def broadcast(self, session_id: str, message: dict, exclude_client_id: Optional[str] = None):
         if session_id not in self.connections:
             return
         
@@ -1110,14 +1171,19 @@ class StreamManager:
         
         to_remove = []
         # Iterate over a copy to avoid issues if queues are modified during iteration
-        for queue in list(self.connections[session_id]):
+        for conn in list(self.connections[session_id]):
             try:
+                queue = conn.get("queue")
+                cid = conn.get("client_id")
+                if exclude_client_id and cid and cid == exclude_client_id:
+                    continue
+                if queue is None:
+                    continue
                 # Use put_nowait to avoid blocking if queue is full (though unlikely with infinite queue)
-                # But more importantly, if we want to detect closed loops, we rely on client disconnecting.
-                # Here we just put. If loop is closed, it might raise.
                 queue.put_nowait(msg)
             except Exception:
-                to_remove.append(queue)
+                if queue:
+                    to_remove.append(queue)
         
         for queue in to_remove:
             self.disconnect(session_id, queue)
@@ -1127,8 +1193,11 @@ class StreamManager:
         Gracefully close all connections.
         """
         # Iterate over a copy of items because disconnect() might modify the dictionary
-        for session_id, queues in list(self.connections.items()):
-            for queue in queues:
+        for session_id, conns in list(self.connections.items()):
+            for conn in conns:
+                queue = conn.get("queue")
+                if queue is None:
+                    continue
                 try:
                     queue.put_nowait(None)
                 except Exception:
@@ -1137,11 +1206,26 @@ class StreamManager:
 stream_manager = StreamManager()
 
 @app.get("/sessions/{session_id}/stream")
-async def stream_session_events(session_id: str):
+async def stream_session_events(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+):
     """
     Server-Sent Events endpoint for real-time session updates.
     """
-    queue = await stream_manager.connect(session_id)
+    client_id = x_client_id or client_id_query
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    check_session_access(session, client_id, require_participant=True)
+
+    queue = await stream_manager.connect(session_id, client_id)
     
     async def event_generator():
         try:
@@ -1170,9 +1254,14 @@ async def upsert_session_field(
     req: UpsertFieldRequest,
     x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
 ) -> Dict[str, Any]:
-    # Validation Logic
-    # Validation Logic moved to tool_upsert_field
+    # Якщо у сесії вже є учасники — вимагаємо автентифікацію через заголовок.
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if session.party_users and not x_client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
 
     result = tool_upsert_field(
         session_id=session_id,
@@ -1180,21 +1269,24 @@ async def upsert_session_field(
         value=req.value,
         tags=None,
         role=req.role,
-        _context={"client_id": x_client_id or req.client_id}
+        _context={"client_id": x_client_id}
     )
     
     if result.get("ok", False):
         sender_id = x_client_id or req.client_id
         field_key = f"{req.role}.{req.field}" if req.role else req.field
         # Broadcast update to all listeners
-        await stream_manager.broadcast(session_id, {
-            "type": "field_update",
-            "field": req.field,
-            "field_key": field_key,
-            "value": req.value,
-            "role": req.role,
-            "client_id": sender_id
-        })
+        await stream_manager.broadcast(
+            session_id,
+            {
+                "type": "field_update",
+                "field": req.field,
+                "field_key": field_key,
+                "value": req.value,
+                "role": req.role,
+            },
+            exclude_client_id=sender_id,
+        )
 
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
     if not result.get("ok", False) and result.get("error"):
@@ -1251,18 +1343,35 @@ class SyncSessionRequest(BaseModel):
 
 
 @app.post("/sessions/{session_id}/sync")
-def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
+def sync_session(
+    session_id: str,
+    req: SyncSessionRequest,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+) -> Dict[str, Any]:
     """
     Універсальний ендпоінт для пакетного оновлення даних сесії.
     Підтримує One-shot (все одразу) та Two-shot (по частинах) флоу.
     """
-    from src.categories.index import store as category_store
+    from src.categories.index import store as category_store, list_templates
     from src.common.errors import MetaNotFoundError
     from src.sessions.models import FieldState
+    from src.sessions.store import get_or_create_session
 
-    # Use transactional session for the whole sync process
-    should_build = False
-    target_template_id = None
+        # Use transactional session for the whole sync process
+
+    # Якщо сесія ще не створена — створюємо файл-чернетку
+    get_or_create_session(session_id)
+
+    # Access control: only participants can sync when roles are claimed/full.
+    client_id = x_client_id or client_id_query
+    if not client_id:
+         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    session_for_acl = load_session(session_id)
+    check_session_access(session_for_acl, client_id, require_participant=True)
+
+    # Під час тестів метадані можуть змінюватися на льоту — перезавантажуємо індекс
+    category_store.load()
     
     with transactional_session(session_id) as session:
 
@@ -1270,21 +1379,17 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
         if req.category_id:
             if req.category_id not in category_store.categories:
                  raise HTTPException(status_code=400, detail=f"Category {req.category_id} not found")
-            session.category_id = req.category_id
-            session.state = SessionState.CATEGORY_SELECTED
-            # Reset fields if category changes? 
-            # set_session_category does reset. But here we might want to keep data if compatible?
-            # For now, let's assume sync is authoritative and we might overwrite.
-            # But set_session_category logic in actions.py clears fields!
-            # If we want to preserve fields, we should NOT call set_session_category if it's just an update?
-            # But if category changes, we MUST clear.
-            # Let's use set_session_category helper if category is different.
-            # But here we just set it.
-            # Let's import helper to be safe if we want full reset.
-            # But sync usually sends ALL data.
-            pass
+            from src.sessions.actions import set_session_category
+            # Якщо категорія змінюється — робимо повне очищення стану.
+            if session.category_id != req.category_id:
+                ok = set_session_category(session, req.category_id)
+                if not ok:
+                    raise HTTPException(status_code=400, detail="Failed to set category")
 
         if req.template_id:
+            templates = {t.id for t in list_templates(session.category_id)} if session.category_id else set()
+            if templates and req.template_id not in templates:
+                 raise HTTPException(status_code=400, detail="Template does not belong to category")
             session.template_id = req.template_id
             session.state = SessionState.TEMPLATE_SELECTED
 
@@ -1330,67 +1435,61 @@ def sync_session(session_id: str, req: SyncSessionRequest) -> Dict[str, Any]:
                 # If we want to report errors, we should collect them.
                 # For now, we proceed, but the field state will be 'error'.
 
-        # 4. Check Readiness (re-calculated by update_session_field, but let's double check)
-        # update_session_field updates session.can_build_contract
-        
-        # We need to construct missing_info response if not ready.
-        # Let's use the same logic as before or rely on session state?
-        # The original logic constructed detailed missing info.
-        
-        missing_info = {}
+        # 4. Check Readiness using shared schema helper
+        from src.services.fields import get_required_fields
+        missing_contract: list[str] = []
+        missing_roles: Dict[str, Any] = {}
         is_ready = True
 
-        for role_id, role_def in defined_roles.items():
-            p_type = session.party_types.get(role_id)
-            if not p_type:
-                is_ready = False
-                missing_info[role_id] = "missing_party"
-                continue
+        required_fields = get_required_fields(session)
+        for f in required_fields:
+            if f.role:
+                role_fields = session.party_fields.get(f.role, {})
+                fs = role_fields.get(f.field_name)
+                if not fs or fs.status != "ok":
+                    is_ready = False
+                    entry = missing_roles.get(f.role) or {"missing_fields": []}
+                    entry["missing_fields"].append(f.field_name)
+                    missing_roles[f.role] = entry
+            else:
+                fs = session.contract_fields.get(f.field_name)
+                if not fs or fs.status != "ok":
+                    is_ready = False
+                    missing_contract.append(f.field_name)
+    
+        contract_only_missing = (not is_ready and missing_contract and not missing_roles)
 
-            party_modules = category_meta.get("party_modules", {})
-            module = party_modules.get(p_type)
-            if not module:
-                continue
-
-            role_missing_fields = []
-            for field_def in module.get("fields", []):
-                if field_def.get("required"):
-                    f_name = field_def["field"]
-                    role_fields = session.party_fields.get(role_id, {})
-                    field_state = role_fields.get(f_name)
-                    if not field_state or field_state.status != "ok":
-                        role_missing_fields.append(f_name)
-            
-            if role_missing_fields:
-                is_ready = False
-                missing_info[role_id] = {"missing_fields": role_missing_fields}
-
-        if is_ready and session.template_id:
-            should_build = True
-            target_template_id = session.template_id
-            # We do NOT call build here. We wait for commit.
+        session.can_build_contract = is_ready
+        session.state = SessionState.READY_TO_BUILD if is_ready else SessionState.COLLECTING_FIELDS
 
     # End of transaction block. Session is saved to disk.
     
-    if should_build and target_template_id:
-         try:
-            # Now it is safe to build because data is on disk
-            result = tool_build_contract(session_id, target_template_id)
-            return {
-                "status": "ready",
-                "document_url": result.get("document_url"),
-                "session_id": session_id
-            }
-         except Exception as e:
-             return {
-                "status": "error",
-                "error": str(e),
-                "session_id": session_id
-             }
+    if is_ready and session.template_id:
+        try:
+            result = tool_build_contract(session_id, session.template_id)
+            document_url = result.get("document_url") or result.get("file_path")
+        except Exception as e:
+            logger.error(f"sync_session auto-build failed: {e}")
+            document_url = None
+
+        resp = {
+            "status": "ready",
+            "missing": {
+                "contract": missing_contract,
+                "roles": missing_roles,
+            },
+            "session_id": session_id
+        }
+        if document_url:
+            resp["document_url"] = document_url
+        return resp
 
     return {
-        "status": "partial",
-        "missing": missing_info,
+        "status": "partial" if not is_ready else "ready",
+        "missing": {
+            "contract": missing_contract,
+            "roles": missing_roles,
+        },
         "session_id": session_id
     }
 
@@ -1533,18 +1632,37 @@ def get_my_sessions(x_client_id: Optional[str] = Header(None, alias="X-Client-ID
 
 
 @app.get("/sessions/{session_id}/contract")
-def get_contract_info(session_id: str) -> Dict[str, Any]:
+def get_contract_info(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+) -> Dict[str, Any]:
     try:
         session = load_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    client_id = x_client_id or client_id_query
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+
+    check_session_access(session, client_id, require_participant=True)
+
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
-        f"/sessions/{session_id}/contract/download" 
+        f"/sessions/{session_id}/contract/download"
         if session.state in {SessionState.BUILT, SessionState.COMPLETED, SessionState.READY_TO_SIGN}
         else None
     )
+    if document_url and client_id:
+        document_url = f"{document_url}?client_id={client_id}"
+
+    preview_url = f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None
+    if preview_url and client_id:
+        preview_url = f"{preview_url}?client_id={client_id}"
+
+    client_roles = [role for role, uid in session.party_users.items() if uid == client_id]
+
     return {
         "session_id": session.session_id,
         "category_id": session.category_id,
@@ -1552,20 +1670,29 @@ def get_contract_info(session_id: str) -> Dict[str, Any]:
         "status": session.state.value,
         "is_signed": session.is_fully_signed,
         "signatures": session.signatures,
-        "party_users": session.party_users,
+        "client_roles": client_roles,
         "can_build_contract": session.can_build_contract,
         "document_ready": document_ready,
         "document_url": document_url,
-        "preview_url": f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None,
+        "preview_url": preview_url,
     }
 
 
 @app.get("/sessions/{session_id}/contract/preview")
-def preview_contract(session_id: str) -> FileResponse:
+def preview_contract(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+) -> FileResponse:
     try:
         session = load_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    client_id = x_client_id or client_id_query
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    check_session_access(session, client_id, require_participant=True)
 
     if not session.template_id:
          raise HTTPException(status_code=400, detail="Template not selected")
@@ -1595,7 +1722,12 @@ def preview_contract(session_id: str) -> FileResponse:
 
 
 @app.get("/sessions/{session_id}/contract/download")
-def download_contract(session_id: str, final: bool = False):
+def download_contract(
+    session_id: str,
+    final: bool = False,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+):
     from src.storage.fs import output_document_path
     from src.common.config import settings
     from src.sessions.store import load_session
@@ -1605,35 +1737,40 @@ def download_contract(session_id: str, final: bool = False):
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    client_id = x_client_id or client_id_query
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    check_session_access(session, client_id, require_participant=True)
+
     # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
     # The test verify_contract_api expects 403 if not signed.
     if not session.is_fully_signed and session.state != SessionState.COMPLETED:
-         raise HTTPException(status_code=403, detail="Contract must be signed to download.")
+        raise HTTPException(status_code=403, detail="Contract must be signed to download.")
 
     if final:
         # Ensure session is actually in a final state
         if session.state not in [SessionState.READY_TO_SIGN, SessionState.COMPLETED]:
-             raise HTTPException(status_code=409, detail="Document has been modified. Please order again.")
+            raise HTTPException(status_code=409, detail="Document has been modified. Please order again.")
 
         filename = f"contract_{session_id}.docx"
         path = settings.filled_documents_root / filename
         if not path.exists():
-             raise HTTPException(status_code=404, detail="Final document not found")
+            raise HTTPException(status_code=404, detail="Final document not found")
     else:
         # Try to find temp document (Draft)
         if not session.template_id:
-             raise HTTPException(status_code=400, detail="Template not selected")
+            raise HTTPException(status_code=400, detail="Template not selected")
         path = output_document_path(session.template_id, session_id, ext="docx")
         
         # If not exists, try to build on the fly
         if not path.exists():
-             if session.can_build_contract:
-                 try:
+            if session.can_build_contract:
+                try:
                     tool_build_contract(session_id, session.template_id)
-                 except Exception:
+                except Exception:
                     raise HTTPException(status_code=404, detail="Document not built yet")
-             else:
-                 raise HTTPException(status_code=404, detail="Document not built yet")
+            else:
+                raise HTTPException(status_code=404, detail="Document not built yet")
 
     return FileResponse(
         path=str(path),
@@ -1648,25 +1785,34 @@ async def sign_contract(
     x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
 ) -> Dict[str, Any]:
     logger.info(f"Sign request: session_id={session_id}, client_id={x_client_id}")
+    if not x_client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
     try:
         with transactional_session(session_id) as session:
             logger.info(f"Session state: {session.state}, filling_mode: {session.filling_mode}, party_users: {session.party_users}, party_types: {session.party_types}")
             
-            # Allow signing if contract is built (even if partial) OR if it can be built
-            # Also allow if READY_TO_SIGN
-            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN] and not session.can_build_contract:
+            # Якщо контракт ще не зібрано, але всі обов'язкові поля готові — пробуємо зібрати.
+            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN] and session.can_build_contract and session.template_id:
+                try:
+                    tool_build_contract(session.session_id, session.template_id)
+                    session.state = SessionState.BUILT
+                except Exception as e:
+                    logger.error(f"Auto-build before sign failed: {e}")
+                    raise HTTPException(status_code=400, detail="Contract must be generated before signing.")
+
+            # Дозволяємо підпис лише коли договір зібраний/готовий до підпису.
+            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN]:
                 raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
 
             # Identify role
             user_role = None
-            if x_client_id:
-                logger.info(f"Looking for role for client_id={x_client_id} in party_users={session.party_users}")
-                for r, uid in session.party_users.items():
-                    logger.info(f"Checking role={r}, uid={uid}, match={uid == x_client_id}")
-                    if uid == x_client_id:
-                        user_role = r
-                        logger.info(f"Found role={user_role} for client_id={x_client_id}")
-                        break
+            logger.info(f"Looking for role for client_id={x_client_id} in party_users={session.party_users}")
+            for r, uid in session.party_users.items():
+                logger.info(f"Checking role={r}, uid={uid}, match={uid == x_client_id}")
+                if uid == x_client_id:
+                    user_role = r
+                    logger.info(f"Found role={user_role} for client_id={x_client_id}")
+                    break
             
             logger.info(f"After search: user_role={user_role}, filling_mode={session.filling_mode}")
             
@@ -1677,28 +1823,34 @@ async def sign_contract(
             from src.common.enums import FillingMode
             
             if session.filling_mode == FillingMode.FULL:
-                # Sign for ALL parties
+                # У режимі FULL дозволяємо клієнту підписати всі ролі, які або пусті, або належать йому.
                 for role in session.party_types:
+                    owner = session.party_users.get(role)
+                    if owner and owner != x_client_id:
+                        logger.error(f"Role {role} owned by {owner}, client {x_client_id} cannot sign all")
+                        raise HTTPException(status_code=403, detail="You cannot sign for other participants.")
+                    # Прив'язуємо роль до клієнта, якщо ще не зайнята
+                    session.party_users.setdefault(role, x_client_id)
                     session.signatures[role] = True
             elif user_role:
                 session.signatures[user_role] = True
             else:
                 # Cannot determine who to sign for
-                # Check if there's only one role and no party_users assigned yet
+                # Якщо одна роль визначена у схемі і ще не зайнята — призначаємо її клієнту та підписуємо.
                 if len(session.party_types) == 1 and not session.party_users:
-                    # Single role session with no users assigned - sign for that role
                     single_role = list(session.party_types.keys())[0]
+                    session.party_users[single_role] = x_client_id
                     session.signatures[single_role] = True
-                    logger.warning(f"Signing for single role {single_role} without client_id for session {session_id}")
+                    logger.warning(f"Signing for single role {single_role} for client {x_client_id}")
                 else:
-                    # Multiple roles or roles already assigned - we need to know who is signing
+                    # Multiple roles або власники інші — вимагаємо прив’язки ролі перед підписом.
                     logger.error(
                         f"Cannot determine signer: client_id={x_client_id}, user_role={user_role}, "
                         f"party_types={list(session.party_types.keys())}, party_users={session.party_users}"
                     )
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"Cannot determine signer identity. client_id: {x_client_id}, party_users: {session.party_users}"
+                        detail="Set party context (role) before signing."
                     )
 
             # Check if fully signed
@@ -1819,22 +1971,17 @@ def get_session_schema(
 
             field_key = f"{role_key}.{pf.field}"
             
-            # Determine value based on data_mode
+            # Determine value based on data_mode using FieldState status
             val = None
+            fs = (session.party_fields.get(role_key, {}) if session.party_fields else {}).get(pf.field)
             if data_mode != "none":
                 current_entry = session.all_data.get(field_key) if session.all_data else None
                 raw_val = current_entry.get("current", "") if current_entry else ""
                 
-                # DEBUG LOG
-                if raw_val:
-                   from src.common.logging import get_logger
-                   logger = get_logger(__name__)
-                   logger.info(f"get_session_schema: Found value for {field_key}: {raw_val}")
-                
                 if data_mode == "values":
-                    val = raw_val
+                    val = raw_val if fs and fs.status == "ok" else None
                 elif data_mode == "status":
-                    val = bool(raw_val) # True if not empty
+                    val = bool(fs and fs.status == "ok")
 
             party_obj["fields"].append({
                 "key": field_key,
@@ -1856,14 +2003,15 @@ def get_session_schema(
 
         # Determine value based on data_mode
         val = None
+        fs = (session.contract_fields or {}).get(entity.field)
         if data_mode != "none":
             current_entry = session.all_data.get(entity.field) if session.all_data else None
             raw_val = current_entry.get("current", "") if current_entry else ""
             
             if data_mode == "values":
-                val = raw_val
+                val = raw_val if fs and fs.status == "ok" else None
             elif data_mode == "status":
-                val = bool(raw_val)
+                val = bool(fs and fs.status == "ok")
 
         response["contract"]["fields"].append({
             "key": entity.field,
@@ -1878,7 +2026,11 @@ def get_session_schema(
 
 
 @app.post("/sessions/{session_id}/order")
-async def order_contract(session_id: str):
+async def order_contract(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+):
     """
     Фіналізує документ:
     1. Перевіряє заповненість.
@@ -1895,9 +2047,14 @@ async def order_contract(session_id: str):
         session = load_session(session_id)
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    client_id = x_client_id or client_id_query
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    check_session_access(session, client_id, require_participant=True)
         
     if not session.template_id:
-         raise HTTPException(status_code=400, detail="Template not selected")
+        raise HTTPException(status_code=400, detail="Template not selected")
     
     # 1. Build contract (it checks required fields internally)
     try:
@@ -1905,10 +2062,10 @@ async def order_contract(session_id: str):
         result = build_contract(session_id, session.template_id)
         temp_path = result["file_path"]
     except ValueError as e:
-         raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-         logger.error(f"Order failed: {e}")
-         raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Order failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     # 2. Move to filled_documents
     # We want a stable path for the ordered document
@@ -1932,9 +2089,13 @@ async def order_contract(session_id: str):
         "is_signed": False
     })
     
+    download_url = f"/sessions/{session_id}/contract/download?final=true"
+    if client_id:
+        download_url = f"{download_url}&client_id={client_id}"
+
     return {
         "ok": True,
         "status": SessionState.READY_TO_SIGN.value,
-        "download_url": f"/sessions/{session_id}/contract/download?final=true",
+        "download_url": download_url,
         "message": "Contract ordered successfully"
     }

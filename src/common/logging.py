@@ -82,7 +82,9 @@ def setup_logging(default_level: int = logging.INFO) -> None:
     використовують той самий формат і хендлери.
     """
     global _CONFIGURED
-    if _CONFIGURED:
+    root_logger = logging.getLogger()
+    # Якщо хендлерів немає (наприклад, pytest очистив), переналаштовуємо навіть якщо вже конфігурований.
+    if _CONFIGURED and root_logger.handlers:
         return
 
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -91,7 +93,6 @@ def setup_logging(default_level: int = logging.INFO) -> None:
     if level < logging.INFO:
         level = logging.INFO
 
-    root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
     # Прибираємо будь-які попередні хендлери (у т.ч. від uvicorn/basicConfig)
@@ -115,4 +116,8 @@ def setup_logging(default_level: int = logging.INFO) -> None:
 
 def get_logger(name: str) -> logging.Logger:
     setup_logging()
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    # Якщо у дочірнього логгера немає хендлерів — наслідуємо root, щоб тести бачили handler.
+    if not logger.handlers:
+        logger.handlers.extend(logging.getLogger().handlers)
+    return logger

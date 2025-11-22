@@ -29,6 +29,10 @@ dist/
 build/
 *.log
 
+# Generated runtime artifacts (sessions, user docs, filled contracts)
+assets/meta_data/meta_data_users/
+assets/documents_files/filled_documents/
+
 .gemini/
 dumps/
 node_modules/

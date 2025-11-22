@@ -26,6 +26,7 @@ def dispatch_tool(
     name: str,
     arguments_json: str,
     tags: Dict[str, str] | None = None,
+    client_id: str | None = None,
 ) -> str:
     """
     Execute tool by name and JSON-encoded arguments.
@@ -42,7 +43,12 @@ def dispatch_tool(
         logger.error("Tool not found: %s", name)
         return json.dumps({"error": f"Tool {name} not found"}, ensure_ascii=False)
 
-    context = {"tags": tags}
+    # Provide tools the full context they expect
+    context = {
+        "tags": tags,
+        "pii_tags": tags or {},
+        "client_id": client_id,
+    }
     
     try:
         result = tool.execute(args, context)
@@ -95,7 +101,7 @@ def tool_set_template(session_id: str, template_id: str) -> Dict[str, Any]:
 def tool_upsert_field(session_id: str, field: str, value: str, tags: Dict[str, str] | None = None, role: Optional[str] = None, _context: Dict[str, Any] | None = None) -> Dict[str, Any]:
     tool = tool_registry.get("upsert_field")
     if tool:
-        context = {"tags": tags}
+        context = {"tags": tags, "pii_tags": tags or {}}
         if _context:
             context.update(_context)
         return tool.execute({"session_id": session_id, "field": field, "value": value, "role": role}, context)

@@ -32,7 +32,8 @@ class Registry(Generic[T]):
         """
         Return all registered components.
         """
-        return self._registry.copy()
+        import copy
+        return copy.deepcopy(self._registry)
 
     def clear(self) -> None:
         """

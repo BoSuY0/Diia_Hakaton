@@ -42,7 +42,17 @@ class PartyField:
     required: bool
 
 
-_CATEGORIES_PATH = settings.meta_categories_root / "categories_index.json"
+_CATEGORIES_PATH: Path | None = None
+
+
+def _categories_path() -> Path:
+    """
+    Return path to categories_index.json. Allows test overrides via
+    monkeypatching _CATEGORIES_PATH or by mutating settings.meta_categories_root.
+    """
+    if _CATEGORIES_PATH:
+        return _CATEGORIES_PATH
+    return settings.meta_categories_root / "categories_index.json"
 
 
 class CategoryStore:
@@ -50,11 +60,12 @@ class CategoryStore:
         self._categories: Dict[str, Category] = {}
 
     def load(self) -> None:
-        if not _CATEGORIES_PATH.exists():
-            logger.warning("Categories index not found at %s", _CATEGORIES_PATH)
+        path = _categories_path()
+        if not path.exists():
+            logger.warning("Categories index not found at %s", path)
             self._categories = {}
             return
-        with _CATEGORIES_PATH.open("r", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         self._categories = {}
         for raw in data.get("categories", []):
@@ -199,6 +210,17 @@ def find_category_by_query(query: str) -> Optional[Category]:
         for lt in label_terms:
             if lt and lt in query_norm:
                 label_score += 0.5
+
+        # Додатковий бонус за часткові збіги (перші 5 літер), щоб ловити відмінки
+        for term in query_terms:
+            for kw in keywords:
+                stem = kw[:5]
+                if stem and stem in term:
+                    kw_score += 1
+            for lt in label_terms:
+                stem = lt[:5]
+                if stem and stem in term:
+                    label_score += 0.5
         
         total_score = kw_score + label_score
         
