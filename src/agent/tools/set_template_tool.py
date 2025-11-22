@@ -58,11 +58,21 @@ def set_template_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         }
 
     templates = {t.id: t for t in list_templates(session.category_id)}
+    # Resolve template_id: allow passing name instead of ID
     if template_id not in templates:
-        return {
-            "ok": False,
-            "error": "Шаблон не належить до обраної категорії.",
-        }
+        # Try to match by name (case-insensitive)
+        matched = None
+        for t in list_templates(session.category_id):
+            if t.name.lower() == template_id.lower():
+                matched = t.id
+                break
+        if matched:
+            template_id = matched
+        else:
+            return {
+                "ok": False,
+                "error": "Шаблон не належить до обраної категорії.",
+            }
 
     session.template_id = template_id
     session.state = SessionState.TEMPLATE_SELECTED

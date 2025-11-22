@@ -161,9 +161,12 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     "idle": [
         "route_message",
         "find_category_by_query",
+        "set_category",
     ],
     "category_selected": [
         "route_message",
+        "find_category_by_query",
+        "set_category",
         "get_category_roles",
         "set_party_context",
         "get_templates_for_category",
@@ -172,6 +175,8 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     ],
     "template_selected": [
         "route_message",
+        "find_category_by_query",
+        "set_category",
         "get_category_entities",
         "get_party_fields_for_session",
         "set_party_context",
@@ -182,6 +187,8 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     ],
     "collecting_fields": [
         "route_message",
+        "find_category_by_query",
+        "set_category",
         "set_party_context",
         "upsert_field",
         "get_session_summary",
@@ -189,11 +196,15 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     ],
     "ready_to_build": [
         "route_message",
+        "find_category_by_query",
+        "set_category",
         "get_session_summary",
         "build_contract",
     ],
     "built": [
         "route_message",
+        "find_category_by_query",
+        "set_category",
         "get_session_summary",
     ],
 }
@@ -640,7 +651,7 @@ def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     Це безпечно, оскільки стан сесії (заповнені поля) зберігається в БД,
     і модель отримує його через тул get_session_summary.
     """
-    MAX_CONTEXT_MESSAGES = 12  # Кількість останніх повідомлень для збереження
+    MAX_CONTEXT_MESSAGES = 30  # Increased from 12 to prevent losing user message during tool loops
     
     if len(messages) <= MAX_CONTEXT_MESSAGES + 1:
         return messages
@@ -727,30 +738,32 @@ def _format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
             if templates:
                 lines.append("Available templates:")
                 for tid, name in templates:
-                    lines.append(f"- {tid} — {name}")
+                    lines.append(f"- {name}")
             if entities:
                 lines.append("Fields to fill:")
                 for field, label, required in entities:
                     flag = "(required)" if required else "(optional)"
-                    lines.append(f"- {field}: {label} {flag}")
-            lines.append(
-                "Reply with the template id you choose, "
-                "or send the first field as field=value."
-            )
+                    lines.append(f"- {label} ({field}) {flag}")
+            
+            if templates:
+                lines.append("Please choose a template by providing its ID (e.g., act_transfer).")
+            elif entities:
+                lines.append("Please provide the required information in the format <field>=<value>.")
         else:
             if templates:
                 lines.append("Доступні шаблони:")
                 for tid, name in templates:
-                    lines.append(f"- {tid} — {name}")
+                    lines.append(f"- {name} ({tid})")
             if entities:
                 lines.append("Потрібно заповнити такі поля:")
                 for field, label, required in entities:
                     flag = "(обов'язкове)" if required else "(необов'язкове)"
-                    lines.append(f"- {field}: {label} {flag}")
-            lines.append(
-                "Напишіть, який шаблон обираєте (id), "
-                "або надішліть перше поле у форматі field=value."
-            )
+                    lines.append(f"- {label} ({field}) {flag}")
+            
+            if templates:
+                lines.append("Будь ласка, оберіть шаблон, вказавши його ID (наприклад, act_transfer).")
+            elif entities:
+                lines.append("Будь ласка, надайте необхідну інформацію.")
         return "\n".join(lines)
 
     # Якщо навіть VSC-відповідей немає — повертаємо коротку підказку.
@@ -1599,7 +1612,7 @@ def order_contract(session_id: str):
     except Exception as e:
         logger.error(f"Failed to save final document: {e}")
         raise HTTPException(status_code=500, detail="Failed to save document")
-
+# Trigger reload for metadata update (v3)
     # 3. Update session state
     session.state = SessionState.READY_TO_SIGN
     save_session(session)

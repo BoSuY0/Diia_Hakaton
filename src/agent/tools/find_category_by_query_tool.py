@@ -60,7 +60,10 @@ def find_category_by_query_tool(args: Dict[str, Any], context: Dict[str, Any]) -
                  return {
                      "category_id": category.id,
                      "label": category.label,
-                     "info": "Category already selected. Please proceed to get_category_roles."
+                     "already_configured": True,
+                     "role": session.role,
+                     "person_type": session.person_type,
+                     "info": f"Category '{category.label}' already selected with role='{session.role}' and person_type='{session.person_type}'. Ask user if they want to continue or start fresh."
                  }
 
             session.category_id = category.id

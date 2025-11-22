@@ -40,6 +40,7 @@ class PartyField:
     field: str
     label: str
     required: bool
+    type: str = "text"
 
 
 _CATEGORIES_PATH = settings.meta_categories_root / "categories_index.json"
@@ -99,7 +100,7 @@ def list_entities(category_id: str) -> List[Entity]:
             entities.append(
                 Entity(
                     field=raw["field"],
-                    type="text",
+                    type=raw.get("type", "text"),
                     label=raw.get("label", raw["field"]),
                     required=bool(raw.get("required", True)),
                 )
@@ -135,7 +136,6 @@ def list_templates(category_id: str) -> List[TemplateInfo]:
         )
     return templates
 
-
 def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
     """
     Повертає перелік полів сторони договору (name, address, тощо)
@@ -156,6 +156,7 @@ def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
                 field=raw["field"],
                 label=raw.get("label", raw["field"]),
                 required=bool(raw.get("required", True)),
+                type=raw.get("type", "text"),
             )
         )
     return fields

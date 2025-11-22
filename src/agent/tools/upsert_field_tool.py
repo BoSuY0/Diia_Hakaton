@@ -83,6 +83,10 @@ def _recalculate_session_state(session) -> None:
                 "type": "string",
                 "minLength": 1,
             },
+            "role": {
+                "type": "string",
+                "description": "Роль сторони (lessor, lessee тощо). Якщо вказано, поле буде збережено для цієї ролі.",
+            },
         },
         "required": ["session_id", "field", "value"],
         "additionalProperties": False,
@@ -92,6 +96,7 @@ def upsert_field_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
     session_id = args["session_id"]
     field = args["field"]
     value = args["value"]
+    role_arg = args.get("role")  # Optional role parameter
     tags = context.get("tags")
 
     session = load_session(session_id)
@@ -101,19 +106,39 @@ def upsert_field_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
             "error": "Спочатку потрібно обрати категорію (set_category).",
         }
 
+    # LAZY INITIALIZATION: If role is provided but not initialized, set it up automatically
+    if role_arg:
+        if role_arg not in session.party_types:
+            # Auto-initialize with default person_type
+            logger.info(
+                "tool=upsert_field lazy_init_party role=%s default_person_type=individual",
+                role_arg
+            )
+            session.party_types[role_arg] = "individual"
+            session.party_fields[role_arg] = {}
+            
+        # Use the provided role for this field
+        target_role = role_arg
+        target_person_type = session.party_types[role_arg]
+    else:
+        # Use session's current role (backward compatibility)
+        target_role = session.role
+        target_person_type = session.person_type
+
     entities = {e.field: e for e in list_entities(session.category_id)}
     entity = entities.get(field)
     is_party_field = False
     
     if entity is None:
-        if not session.person_type:
+        # Check if it's a party field
+        if not target_person_type:
             return {
                 "ok": False,
                 "error": "Спочатку потрібно обрати тип особи (set_party_context).",
             }
         party_fields = {
             f.field: f
-            for f in list_party_fields(session.category_id, session.person_type)
+            for f in list_party_fields(session.category_id, target_person_type)
         }
         party_meta = party_fields.get(field)
         if party_meta is None:
@@ -126,25 +151,32 @@ def upsert_field_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
     raw_value = _unmask_value(value, tags)
     
     logger.info(
-        "tool=upsert_field session_id=%s field=%s raw_value_length=%d",
+        "tool=upsert_field session_id=%s field=%s role=%s is_party=%s raw_value_length=%d",
         session_id,
         field,
+        target_role,
+        is_party_field,
         len(raw_value),
     )
 
-    value_type = entity.type if entity is not None else "text"
+    if entity is not None:
+        value_type = entity.type
+    elif is_party_field and party_meta:
+        value_type = party_meta.type
+    else:
+        value_type = "text"
     normalized, error = validate_value(value_type, raw_value)
 
     if is_party_field:
-        if not session.role:
+        if not target_role:
             return {
                 "ok": False,
                 "error": "Спочатку потрібно обрати роль (set_party_context).",
             }
-        if session.role not in session.party_fields:
-            session.party_fields[session.role] = {}
+        if target_role not in session.party_fields:
+            session.party_fields[target_role] = {}
         
-        fs = session.party_fields[session.role].get(field) or FieldState()
+        fs = session.party_fields[target_role].get(field) or FieldState()
     else:
         fs = session.contract_fields.get(field) or FieldState()
     
@@ -158,15 +190,15 @@ def upsert_field_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         ok = True
 
     if is_party_field:
-        session.party_fields[session.role][field] = fs
+        session.party_fields[target_role][field] = fs
     else:
         session.contract_fields[field] = fs
 
     # History logic
     all_data = session.all_data or {}
     key = field
-    if is_party_field and session.role:
-        key = f"{session.role}.{field}"
+    if is_party_field and target_role:
+        key = f"{target_role}.{field}"
 
     entry = all_data.get(key) or {}
     history = entry.get("history") or []
@@ -196,3 +228,4 @@ def upsert_field_tool(args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         "can_build_contract": session.can_build_contract,
         "state": session.state.value,
     }
+

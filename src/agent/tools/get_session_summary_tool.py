@@ -71,6 +71,8 @@ def get_session_summary_tool(args: Dict[str, Any], context: Dict[str, Any]) -> A
         "session_id": session_id,
         "category_id": session.category_id,
         "template_id": session.template_id,
+        "role": session.role,
+        "person_type": session.person_type,
         "state": session.state.value,
         "can_build_contract": session.can_build_contract,
         "contract_fields": contract_summary,
