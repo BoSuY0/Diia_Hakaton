@@ -48,7 +48,7 @@ def test_update_blocks_signed_role_and_invalidates_other_signatures(mock_setting
     # Own signature present -> editing blocked
     ok, err, fs = update_session_field(s, "name", "New Name", role="lessor")
     assert ok is False
-    assert "підписали" in err.lower()
+    assert "підписан" in err.lower()
     assert fs.status == "error"
 
     # Remove own signature but keep other -> editing should invalidate other signature
@@ -98,3 +98,19 @@ def test_update_session_field_history_and_current_on_error(mock_settings, mock_c
     history = s.all_data["cf1"]["history"]
     assert history[-1]["valid"] is False
     assert s.all_data["cf1"]["current"] == "Valid"
+
+
+def test_update_session_field_history_includes_actor(mock_settings, mock_categories_data):
+    s = _base_session("history_actor_session", mock_categories_data)
+    ok, _, _ = update_session_field(
+        s,
+        "cf1",
+        "Valid",
+        role=None,
+        context={"client_id": "user1"},
+    )
+    assert ok is True
+    entry = s.all_data["cf1"]["history"][-1]
+    assert entry["client_id"] == "user1"
+    assert entry["role"] == "lessor"
+    assert entry["timestamp"].endswith("Z")

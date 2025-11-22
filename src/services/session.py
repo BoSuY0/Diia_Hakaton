@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
+from datetime import datetime
 
 from src.common.logging import get_logger
 from src.sessions.models import Session, FieldState, SessionState
@@ -15,7 +16,8 @@ def update_session_field(
     field: str,
     value: str,
     role: Optional[str] = None,
-    tags: Optional[Dict[str, str]] = None
+    tags: Optional[Dict[str, str]] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str], FieldState]:
     """
     Updates a single field in the session with validation, history tracking, and state recalculation.
@@ -26,12 +28,22 @@ def update_session_field(
         value: The raw value to set.
         role: Optional role override. If None, uses session.role.
         tags: Optional PII tags for history tracking.
+        context: Optional context (client_id, source, etc.) for audit logging.
 
     Returns:
         Tuple[success, error_message, field_state]
     """
     
+    ctx = context or {}
     raw_value = "" if value is None else str(value)
+
+    # Block any edits once the contract is fully signed (immutability after completion)
+    if session.is_fully_signed:
+        return (
+            False,
+            "Документ вже повністю підписаний. Редагування неможливе.",
+            FieldState(status="error", error="Fully signed"),
+        )
 
     # 1. Determine Context (Entity vs Party Field)
     if not session.category_id:
@@ -148,11 +160,14 @@ def update_session_field(
     # Add history entry
     history.append(
         {
-            "source": "chat" if tags is not None else "api",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "client_id": ctx.get("client_id"),
+            "role": effective_role or session.role,
+            "source": ctx.get("source", "chat" if tags is not None else "api"),
             "value": value,
             "normalized": normalized if error is None else None,
             "valid": error is None,
-            "tags": tags # Store tags if available
+            "tags": tags,  # Store tags if available
         }
     )
     

@@ -124,6 +124,9 @@ def _from_dict(data: dict) -> Session:
     progress = data.get("progress")
     if isinstance(progress, dict):
         session.progress = progress
+    sign_history = data.get("sign_history")
+    if isinstance(sign_history, list):
+        session.sign_history = sign_history
     return session
 
 
@@ -175,6 +178,7 @@ def save_session(session: Session, locked_by_caller: bool = False) -> None:
     data["party_types"] = session.party_types
     data["filling_mode"] = session.filling_mode
     data["signatures"] = session.signatures
+    data["sign_history"] = session.sign_history
     
     # Serialize datetime
     data["updated_at"] = session.updated_at.isoformat()

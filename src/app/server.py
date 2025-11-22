@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 import inspect
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -1315,22 +1316,6 @@ def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str, Any]
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/documents/{filename}")
-def get_document(filename: str) -> FileResponse:
-    safe_name = filename.split("/")[-1]
-    path = settings.output_root / safe_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Document not found")
-    return FileResponse(
-        path=str(path),
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
-        filename=safe_name,
-    )
-
-
-
 class PartyData(BaseModel):
     person_type: str
     fields: Dict[str, str]
@@ -1428,7 +1413,8 @@ def sync_session(
                     session=session,
                     field=field_name,
                     value=value,
-                    role=role_id
+                    role=role_id,
+                    context={"client_id": client_id, "source": "api"},
                 )
                 # We ignore errors here? Or should we report them?
                 # The sync endpoint usually expects valid data or "best effort".
@@ -1821,6 +1807,7 @@ async def sign_contract(
             # Or if filling_mode is FULL?
             
             from src.common.enums import FillingMode
+            signed_roles: List[str] = []
             
             if session.filling_mode == FillingMode.FULL:
                 # У режимі FULL дозволяємо клієнту підписати всі ролі, які або пусті, або належать йому.
@@ -1832,8 +1819,10 @@ async def sign_contract(
                     # Прив'язуємо роль до клієнта, якщо ще не зайнята
                     session.party_users.setdefault(role, x_client_id)
                     session.signatures[role] = True
+                    signed_roles.append(role)
             elif user_role:
                 session.signatures[user_role] = True
+                signed_roles.append(user_role)
             else:
                 # Cannot determine who to sign for
                 # Якщо одна роль визначена у схемі і ще не зайнята — призначаємо її клієнту та підписуємо.
@@ -1842,6 +1831,7 @@ async def sign_contract(
                     session.party_users[single_role] = x_client_id
                     session.signatures[single_role] = True
                     logger.warning(f"Signing for single role {single_role} for client {x_client_id}")
+                    signed_roles.append(single_role)
                 else:
                     # Multiple roles або власники інші — вимагаємо прив’язки ролі перед підписом.
                     logger.error(
@@ -1856,6 +1846,15 @@ async def sign_contract(
             # Check if fully signed
             if session.is_fully_signed:
                 session.state = SessionState.COMPLETED
+            if signed_roles:
+                session.sign_history.append(
+                    {
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "client_id": x_client_id,
+                        "roles": signed_roles,
+                        "state": session.state.value,
+                    }
+                )
 
             # Capture state for broadcast
             is_signed = session.is_fully_signed
@@ -2023,6 +2022,29 @@ def get_session_schema(
         })
 
     return response
+
+
+@app.get("/sessions/{session_id}/history")
+def get_session_history(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+) -> Dict[str, Any]:
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    client_id = x_client_id or client_id_query
+    check_session_access(session, client_id, require_participant=True)
+
+    return {
+        "session_id": session.session_id,
+        "state": session.state.value,
+        "updated_at": session.updated_at.isoformat(),
+        "all_data": session.all_data,
+        "sign_history": session.sign_history,
+    }
 
 
 @app.post("/sessions/{session_id}/order")

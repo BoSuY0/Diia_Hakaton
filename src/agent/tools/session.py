@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from src.agent.tools.base import BaseTool
 from src.agent.tools.registry import register_tool
@@ -414,7 +415,8 @@ class UpsertFieldTool(BaseTool):
                 field=field,
                 value=real_value,
                 role=role_arg,
-                tags=tags # Pass tags for history tracking
+                tags=tags, # Pass tags for history tracking
+                context=context,
             )
 
             if not ok:
@@ -694,6 +696,15 @@ class SignContractTool(BaseTool):
                 session.state = SessionState.COMPLETED
             else:
                 session.state = SessionState.READY_TO_SIGN
+
+            session.sign_history.append(
+                {
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "client_id": context.get("client_id"),
+                    "roles": [role],
+                    "state": session.state.value,
+                }
+            )
 
             return {
                 "ok": True,

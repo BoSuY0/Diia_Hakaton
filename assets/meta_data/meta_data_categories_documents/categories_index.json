@@ -2,7 +2,7 @@
   "categories": [
     {
       "id": "lease_living",
-      "label": "Договори оренди житла (квартири, будинки)",
+      "label": "Договори оренди нерухомого житла",
       "meta_filename": "lease_living.json"
     }
   ]

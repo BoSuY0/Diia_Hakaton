@@ -58,6 +58,8 @@ class Session:
 
     # Підписи сторін: Role -> Signed (True/False)
     signatures: Dict[str, bool] = field(default_factory=dict)
+    # Історія підписів
+    sign_history: List[Dict[str, Any]] = field(default_factory=list)
 
     # Прив'язка користувачів до ролей: Role -> UserID (client_id)
     party_users: Dict[str, str] = field(default_factory=dict)

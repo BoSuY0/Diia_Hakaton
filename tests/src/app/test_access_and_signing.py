@@ -143,3 +143,43 @@ def test_set_party_context_requires_category_and_allowed_type(mock_settings, moc
     assert res["ok"] is True
     s = load_session(session_id)
     assert s.party_users["lessor"] == "user_ctx"
+
+
+def test_sign_contract_records_history(mock_settings, mock_categories_data):
+    session_id = _bootstrap_session(mock_categories_data)
+    s = load_session(session_id)
+    s.state = SessionState.BUILT
+    s.filling_mode = FillingMode.FULL
+    save_session(s)
+
+    resp = client.post(
+        f"/sessions/{session_id}/contract/sign",
+        headers={"X-Client-ID": "user_history"},
+    )
+    assert resp.status_code == 200
+    signed_session = load_session(session_id)
+    assert signed_session.sign_history
+    entry = signed_session.sign_history[-1]
+    assert entry["client_id"] == "user_history"
+    assert set(entry["roles"]) == {"lessor", "lessee"}
+    assert entry["state"] in {SessionState.BUILT.value, SessionState.READY_TO_SIGN.value, SessionState.COMPLETED.value}
+
+
+def test_session_history_endpoint_requires_auth(mock_settings, mock_categories_data):
+    session_id = _bootstrap_session(mock_categories_data)
+    s = load_session(session_id)
+    s.state = SessionState.BUILT
+    save_session(s)
+
+    resp = client.get(f"/sessions/{session_id}/history")
+    assert resp.status_code == 401
+
+    resp = client.get(
+        f"/sessions/{session_id}/history",
+        headers={"X-Client-ID": "user_history"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["session_id"] == session_id
+    assert "all_data" in payload
+    assert "sign_history" in payload
