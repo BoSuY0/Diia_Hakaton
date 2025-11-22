@@ -102,5 +102,24 @@ def get_redis():
 
     if not settings.redis_url:
         raise RuntimeError("REDIS_URL is not set")
-    _redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    
+    # Determine if SSL/TLS is needed based on URL scheme
+    use_ssl = settings.redis_url.startswith("rediss://")
+    
+    # Build connection parameters
+    connection_kwargs = {
+        "decode_responses": True,
+        "socket_connect_timeout": 5,
+        "socket_keepalive": True,
+        "health_check_interval": 30
+    }
+    
+    # Add SSL parameters only for secure connections
+    if use_ssl:
+        connection_kwargs["ssl_cert_reqs"] = None  # Accept AWS certificates
+        logger.info("Using standard Redis client (with SSL/TLS support)")
+    else:
+        logger.info("Using standard Redis client (non-SSL)")
+    
+    _redis = redis.Redis.from_url(settings.redis_url, **connection_kwargs)
     return _redis
