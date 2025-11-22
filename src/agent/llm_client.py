@@ -28,6 +28,8 @@ def _disable_litellm_logging_workers() -> None:
     LiteLLM occasionally spawns async logging workers that raise
     'coroutine ... was never awaited' warnings. We replace all known
     GLOBAL_LOGGING_WORKER references with a no-op stub.
+    Additionally, we patch async logging helpers to no-op to bypass
+    background logging entirely.
     """
     try:
         class _NoopWorker:
@@ -64,6 +66,17 @@ def _disable_litellm_logging_workers() -> None:
                     target.GLOBAL_LOGGING_HANDLER = _noop  # type: ignore
             except Exception:
                 pass
+
+        # Patch utils async logging helper to a no-op coroutine
+        try:
+            import litellm.utils as _u  # type: ignore
+
+            async def _no_async_log(*args, **kwargs):
+                return None
+
+            _u._client_async_logging_helper = _no_async_log  # type: ignore
+        except Exception:
+            pass
     except Exception:
         pass
 

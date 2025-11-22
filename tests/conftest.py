@@ -144,7 +144,8 @@ def pytest_pyfunc_call(pyfuncitem):
     Run all sync tests inside an asyncio event loop so they execute in async mode
     without manual rewrite of each test. Coroutine tests are left to pytest-asyncio.
     """
-    if inspect.iscoroutinefunction(pyfuncitem.obj):
+    # Let pytest-asyncio/anyio handle native async tests or tests marked with asyncio
+    if inspect.iscoroutinefunction(pyfuncitem.obj) or "asyncio" in pyfuncitem.keywords:
         return None  # let pytest-asyncio handle native async tests
 
     testargs = {

@@ -1623,6 +1623,38 @@ async def get_my_sessions(x_client_id: Optional[str] = Header(None, alias="X-Cli
     return results
 
 
+@app.get("/users/{user_id}/sessions")
+async def get_user_sessions(user_id: str):
+    """
+    Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (party_users).
+    """
+    from src.categories.index import list_templates
+
+    sessions = await alist_user_sessions(user_id)
+    results = []
+    for s in sessions:
+        title = s.template_id
+        if s.category_id:
+            try:
+                templates = list_templates(s.category_id)
+                for t in templates:
+                    if t.id == s.template_id:
+                        title = t.name
+                        break
+            except Exception:
+                pass
+
+        results.append({
+            "session_id": s.session_id,
+            "template_id": s.template_id,
+            "title": title,
+            "updated_at": s.updated_at,
+            "state": s.state.value,
+            "is_signed": s.is_fully_signed
+        })
+    return results
+
+
 @app.get("/sessions/{session_id}/contract")
 async def get_contract_info(
     session_id: str,

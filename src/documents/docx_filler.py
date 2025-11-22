@@ -37,6 +37,26 @@ def _fill_docx_template_sync(
     keep_placeholders: bool = False,
     log_context: tuple[str, str] | None = None,
 ) -> Path:
+    def _replace_text(text: str) -> str:
+        updated = text
+        for field_id, value in values.items():
+            patterns = [
+                rf"{{{{\s*{re.escape(field_id)}\s*}}}}",
+                rf"\[\[\s*{re.escape(field_id)}\s*\]\]",
+            ]
+            for pattern in patterns:
+                updated = re.sub(pattern, lambda _: value, updated)
+
+        if not keep_placeholders:
+            updated = re.sub(r"\{\{[^}]+\}\}", "", updated)
+            updated = re.sub(r"\[\[[^]]]+\]\]", "", updated)
+        return updated
+
+    def _replace_in_paragraph(paragraph) -> None:
+        # Preserve formatting by replacing text inside runs instead of resetting paragraph.text
+        for run in paragraph.runs:
+            run.text = _replace_text(run.text)
+
     if template_path.exists():
         # Розширюємо словник полів синонімами для деяких party-полів,
         # щоб підтримати існуючі плейсхолдери у DOCX:
@@ -56,38 +76,7 @@ def _fill_docx_template_sync(
 
         doc = Document(str(template_path))
         for paragraph in _iter_paragraphs(doc):
-            text = paragraph.text
-            for field_id, value in values.items():
-                # Підтримуємо два формати плейсхолдерів:
-                # {{field}} та [[field]] (зі/без пропусків усередині)
-                patterns = [
-                    rf"{{{{\s*{re.escape(field_id)}\s*}}}}",
-                    rf"\[\[\s*{re.escape(field_id)}\s*\]\]",
-                ]
-                for pattern in patterns:
-                    text = re.sub(pattern, lambda _: value, text)
-
-            if not keep_placeholders:
-                # Якщо плейсхолдер був порожній, після заміни можуть лишитися
-                # "паспорт: ,", "РНОКПП:", "тел.: ," або "e-mail:" без значення.
-                # Приберемо такі блоки.
-                labels_to_clean = ["паспорт", "РНОКПП", "тел.", "e-mail"]
-
-                for label in labels_to_clean:
-                    safe_label = re.escape(label)
-                    text = re.sub(rf"{safe_label}:\s*,\s*", "", text)
-                    text = re.sub(rf"{safe_label}:\s*$", "", text)
-
-                # Clean up any remaining placeholders that weren't filled
-                # (e.g. fields from other person types)
-                text = re.sub(r"\{\{[^}]+\}\}", "", text)
-                text = re.sub(r"\[\[[^]]]+\]\]", "", text)
-
-                # Drop порожні дужки та зайві пробіли, що лишилися від плейсхолдерів
-                text = re.sub(r"\s*\(\s*[_\-\.,]*\s*\)\s*", " ", text)
-                text = re.sub(r"\s{2,}", " ", text).strip()
-
-            paragraph.text = text
+            _replace_in_paragraph(paragraph)
     else:
         # Fallback: simple document with fields
         doc = Document()

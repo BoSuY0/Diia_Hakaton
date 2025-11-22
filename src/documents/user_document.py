@@ -93,9 +93,13 @@ def build_user_document(session: Session) -> Dict[str, Any]:
                 "email": None,
             }
 
+        # Прив'язка користувача до ролі (для пошуку/фільтрації поза сесією)
+        user_id = (session.party_users or {}).get(role_key)
+
         parties[role_key] = {
             "person_type": person_type,
             "source": "manual",
+            "user_id": user_id,
             "data": data,
         }
 
