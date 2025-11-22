@@ -6,7 +6,7 @@ from datetime import datetime
 from src.common.logging import get_logger
 from src.sessions.models import Session, FieldState, SessionState
 from src.validators.core import validate_value
-from src.categories.index import list_entities, list_party_fields
+from src.categories.index import list_entities, list_party_fields, store as category_store, _load_meta
 from src.services.fields import validate_session_readiness, get_required_fields
 
 logger = get_logger(__name__)
@@ -67,7 +67,27 @@ def update_session_field(
             effective_person_type = session.person_type
 
         if not effective_person_type:
-            return False, f"Невідомий тип особи для ролі {effective_role}. Встановіть контекст або тип особи.", FieldState(status="error", error="Person type unknown")
+            # Спробувати підставити дефолтний тип з метаданих ролі, щоб не блокувати введення
+            fallback_type = None
+            try:
+                category = category_store.get(session.category_id)
+                if category:
+                    meta = _load_meta(category)
+                    role_meta = (meta.get("roles") or {}).get(effective_role) or {}
+                    allowed = role_meta.get("allowed_person_types") or []
+                    if allowed:
+                        fallback_type = allowed[0]
+            except Exception:
+                fallback_type = None
+
+            if not fallback_type:
+                fallback_type = "individual"
+
+            effective_person_type = fallback_type
+            if session.party_types is None:
+                session.party_types = {}
+            # Записуємо дефолт, якщо раніше тип не був встановлений для цієї ролі
+            session.party_types.setdefault(effective_role, effective_person_type)
 
         party_fields_map = {
             f.field: f

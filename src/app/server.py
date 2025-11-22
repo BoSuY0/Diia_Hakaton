@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 import inspect
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -997,21 +998,25 @@ def check_session_access(
     client_id: Optional[str],
     *,
     require_participant: bool = False,
+    allow_owner: bool = False,
 ):
     """
     Enforces strict access control:
     - If session is full (all roles taken), only participants can access.
-    - If session is not full, anyone can access (to claim a role).
-    - If require_participant=True, enforce participant header even if session is not full.
+    - If session is not full, allow read access so new users can claim a free role.
+    - If require_participant=True, enforce participant header even if session is not full (for sensitive endpoints).
+    - allow_owner: treat session.user_id як учасника.
     """
+    is_owner = bool(allow_owner and client_id and session.user_id and client_id == session.user_id)
+
     # If participant-level access is required, enforce header presence early
     if require_participant and not client_id:
         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
 
     # 1. If no category, we can't determine roles, so allow access (setup phase)
     if not session.category_id:
-        # If some roles are already claimed, still enforce participant ownership
-        if session.party_users and client_id not in session.party_users.values():
+        # If some roles are already claimed, still enforce participant ownership when explicitly required
+        if require_participant and session.party_users and client_id not in session.party_users.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
@@ -1021,11 +1026,6 @@ def check_session_access(
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # Reuse _load_meta helper (defined below, but python allows forward ref if function called later? No.)
-    # We need to move _load_meta up or duplicate logic.
-    # Let's duplicate logic for now or move _load_meta.
-    # Or just use the one in server.py if it's available in scope.
-    # It is defined at module level.
     try:
         meta = _load_meta(cat)
     except Exception:
@@ -1034,21 +1034,20 @@ def check_session_access(
     roles = meta.get("roles", {})
     expected_roles_count = len(roles) if roles else max(len(session.party_types), len(session.party_users))
     
-    # 3. Check if full
-    # We count unique users? Or just occupied roles?
-    # party_users is Role -> UserID.
     occupied_roles = len(session.party_users)
     is_full = expected_roles_count > 0 and occupied_roles >= expected_roles_count
-    
-    if require_participant or is_full or session.party_users:
-        # Session is full OR participant-only endpoint OR someone already claimed a role.
+
+    # Enforce participant-only access when explicitly required or when session is already full
+    if require_participant or is_full:
         if not client_id:
             raise HTTPException(status_code=401, detail="Missing X-Client-ID")
 
-        # Check if client is a participant
-        if session.party_users and client_id not in session.party_users.values():
+        if session.party_users and client_id not in session.party_users.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
-        pass
+        return
+
+    # Session is not full: allow access even if some roles are already claimed, so new users can observe free roles
+    return
 
 
 @app.get("/sessions/{session_id}")
@@ -1064,7 +1063,7 @@ def get_session(
         from src.sessions.store import load_session
         session = load_session(session_id)
         
-        check_session_access(session, x_client_id)
+        check_session_access(session, x_client_id, allow_owner=True)
         
         return tool_get_session_summary(session_id)
     except SessionNotFoundError as exc:
@@ -1088,7 +1087,7 @@ def get_user_document_api(
     if not x_client_id:
         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
 
-    check_session_access(session, x_client_id, require_participant=True)
+    check_session_access(session, x_client_id, require_participant=True, allow_owner=True)
 
     try:
         return load_user_document(session_id)
@@ -1230,7 +1229,13 @@ async def stream_session_events(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    check_session_access(session, client_id, require_participant=True)
+    # Дозволяємо підключення навіть якщо клієнт ще не учасник (щоб бачити зміни ролей у реальному часі)
+    try:
+        check_session_access(session, client_id, require_participant=False, allow_owner=True)
+    except HTTPException as exc:
+        # 401/403 пропускаємо саме для стріму, щоб "новачок" міг підслухати зміни ролей
+        if exc.status_code not in (401, 403):
+            raise
 
     queue = await stream_manager.connect(session_id, client_id)
     
@@ -1367,7 +1372,7 @@ def sync_session(
     if not client_id:
          raise HTTPException(status_code=401, detail="Missing X-Client-ID")
     session_for_acl = load_session(session_id)
-    check_session_access(session_for_acl, client_id, require_participant=True)
+    check_session_access(session_for_acl, client_id, require_participant=True, allow_owner=True)
 
     # Під час тестів метадані можуть змінюватися на льоту — перезавантажуємо індекс
     category_store.load()
@@ -1635,7 +1640,7 @@ def get_contract_info(
     if not client_id:
         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
 
-    check_session_access(session, client_id, require_participant=True)
+    check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
@@ -1679,31 +1684,38 @@ def preview_contract(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     client_id = x_client_id or client_id_query
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
-    check_session_access(session, client_id, require_participant=True)
+    # Дозволяємо перегляд усім, але власника/учасника не блокуємо помилкою
+    try:
+        check_session_access(session, client_id, require_participant=False, allow_owner=True)
+    except HTTPException as exc:
+        # Якщо немає client_id, пропускаємо обмеження для превʼю
+        if exc.status_code not in (401, 403):
+            raise
 
     if not session.template_id:
          raise HTTPException(status_code=400, detail="Template not selected")
 
     from src.storage.fs import output_document_path
     from src.common.config import settings
+    from src.documents.builder import build_contract
 
-    # Prefer final document if ordered, otherwise the last built draft
-    final_doc = settings.filled_documents_root / f"contract_{session_id}.docx"
-    draft_doc = output_document_path(session.template_id, session_id, ext="docx")
-    doc_path = final_doc if final_doc.exists() else draft_doc
-
-    if not doc_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Document not built yet. Згенеруйте договір перед переглядом.",
-        )
+    # Завжди будуємо тимчасовий docx з плейсхолдерами (partial=True) для превʼю
+    try:
+        build_result = build_contract(session_id, session.template_id, partial=True)
+        doc_path = Path(build_result["file_path"])
+    except Exception as e:
+        logger.error(f"Preview auto-build failed: {e}")
+        # fallback: спробувати існуючий драфт/фінальний файл
+        final_doc = settings.filled_documents_root / f"contract_{session_id}.docx"
+        draft_doc = output_document_path(session.template_id, session_id, ext="docx")
+        doc_path = final_doc if final_doc.exists() else draft_doc
+        if not Path(doc_path).exists():
+            raise HTTPException(status_code=500, detail="Failed to build preview")
 
     # HTML Preview (Fast, Cross-Platform)
     from src.documents.converter import convert_to_html
     try:
-        html_content = convert_to_html(doc_path)
+        html_content = convert_to_html(Path(doc_path))
     except Exception as e:
         logger.error(f"HTML conversion failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate preview")
@@ -1731,7 +1743,7 @@ def download_contract(
     client_id = x_client_id or client_id_query
     if not client_id:
         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
-    check_session_access(session, client_id, require_participant=True)
+        check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
     # The test verify_contract_api expects 403 if not signed.
@@ -1907,7 +1919,7 @@ def get_session_schema(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    check_session_access(session, x_client_id)
+    check_session_access(session, x_client_id, allow_owner=True)
 
     if not session.category_id:
         return {"sections": []}
@@ -2051,7 +2063,7 @@ def get_session_requirements(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     client_id = x_client_id or client_id_query
-    check_session_access(session, client_id, require_participant=True)
+    check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     missing = collect_missing_fields(session)
     return {
@@ -2074,7 +2086,7 @@ def get_session_history(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     client_id = x_client_id or client_id_query
-    check_session_access(session, client_id, require_participant=True)
+    check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     return {
         "session_id": session.session_id,
@@ -2111,7 +2123,7 @@ async def order_contract(
     client_id = x_client_id or client_id_query
     if not client_id:
         raise HTTPException(status_code=401, detail="Missing X-Client-ID")
-    check_session_access(session, client_id, require_participant=True)
+    check_session_access(session, client_id, require_participant=True, allow_owner=True)
         
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")

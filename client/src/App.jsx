@@ -30,6 +30,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   const [schema, setSchema] = useState(null);
+  const [templateName, setTemplateName] = useState(null);
   const [formValues, setFormValues] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
   const [missingRequirements, setMissingRequirements] = useState(null);
@@ -121,6 +122,18 @@ function App() {
     init();
   }, []);
 
+  // Reset state when switching sessions to avoid leaking roles/fields from previous one
+  useEffect(() => {
+    if (!sessionId) return;
+    setSchema(null);
+    setFormValues({});
+    setFieldErrors({});
+    setMissingRequirements(null);
+    setSelectedRole(null);
+    setSelectedMode(null);
+    setTemplateName(null);
+  }, [sessionId]);
+
   // Network Status Listeners
   useEffect(() => {
     const handleOnline = () => {
@@ -154,7 +167,23 @@ function App() {
         setFieldErrors(extractErrorsFromSchema(data));
         setMissingRequirements(null);
         if (data.filling_mode) {
-          setSelectedMode(data.filling_mode === 'full' ? 'full' : 'single');
+          setSelectedMode(data.filling_mode === 'full' ? 'full' : (data.filling_mode === 'ai' ? 'ai' : 'single'));
+        }
+        if (data.category_id && !selectedCategory) {
+          setSelectedCategory(data.category_id);
+        }
+        // Resolve template name if we know template_id
+        if (data.category_id && data.template_id) {
+          try {
+            const tmplList = await api.getTemplates(data.category_id);
+            const tmplArr = Array.isArray(tmplList) ? tmplList : (tmplList.templates || []);
+            const found = tmplArr.find(t => t.id === data.template_id);
+            if (found) {
+              setTemplateName(found.name);
+            }
+          } catch (e) {
+            console.error("Failed to resolve template name", e);
+          }
         }
 
         const initialValues = {};
@@ -175,20 +204,25 @@ function App() {
         setFormValues(prev => ({ ...prev, ...initialValues }));
 
         // Check if I have a role
-        const myRole = data.parties.find(p => p.claimed_by === clientId)?.role;
-
+        const myRole = data.parties.find(p => p.claimed_by === clientId)?.role || null;
         if (myRole) {
-          if (data.filling_mode) {
-            setStep('role');
-          } else {
-            setStep('mode');
-          }
+          setSelectedRole(myRole);
+        }
+
+        const mode = data.filling_mode ? (data.filling_mode === 'full' ? 'full' : (data.filling_mode === 'ai' ? 'ai' : 'single')) : null;
+
+        if (!mode) {
+          setStep('mode');
+        } else if (mode === 'ai') {
+          setStep('ai_chat');
+        } else if (mode === 'full') {
+          setStep('form');
         } else {
-          // No role yet
-          if (data.filling_mode) {
-            setStep('role');
+          // single mode
+          if (myRole) {
+            setStep('form');
           } else {
-            setStep('mode');
+            setStep('role');
           }
         }
       } else {
@@ -254,8 +288,13 @@ function App() {
     setStep('template');
   };
 
-  const handleTemplateSelect = async (templateId) => {
+  const handleTemplateSelect = async (template) => {
+    const templateId = typeof template === 'string' ? template : template?.id;
+    const templateLabel = typeof template === 'string' ? null : template?.name;
     setSelectedTemplate(templateId);
+    if (templateLabel) {
+      setTemplateName(templateLabel);
+    }
 
     let sid = sessionId;
     if (!sid) {
@@ -319,40 +358,57 @@ function App() {
 
     setSelectedRole(role);
 
-    if (selectedMode === 'full') {
-      // Try to claim all known roles dynamically
-      if (schema && schema.parties) {
-        for (const party of schema.parties) {
-          const defaultType = party.allowed_types && party.allowed_types.length > 0 ? party.allowed_types[0].value : 'individual';
-          try {
-            await api.setPartyContext(sessionId, party.role, defaultType, clientId);
-          } catch (e) {
-            console.error(`Failed to set context for ${party.role}`, e);
-          }
-        }
-      }
-    } else {
-      // Partial mode: claim only selected
-      const party = schema && schema.parties ? schema.parties.find(p => p.role === role) : null;
-      const defaultType = party && party.allowed_types && party.allowed_types.length > 0 ? party.allowed_types[0].value : 'individual';
+    const getDefaultType = (targetRole) => {
+      const party = schema && schema.parties ? schema.parties.find(p => p.role === targetRole) : null;
+      return (party && party.allowed_types && party.allowed_types.length > 0)
+        ? party.allowed_types[0].value
+        : 'individual';
+    };
 
+    const ensureContext = async (targetRole, soft = false) => {
+      const defaultType = getDefaultType(targetRole);
       try {
-        const res = await api.setPartyContext(sessionId, role, defaultType, clientId);
-        if (res.data && !res.data.ok) {
-          alert(res.data.error || "Не вдалося обрати роль. Можливо, вона вже зайнята.");
-          await fetchSchema(sessionId);
-          return;
+        const res = await api.setPartyContext(sessionId, targetRole, defaultType, clientId);
+        const data = res?.data || res;
+        if (data && data.ok === false) {
+          if (!soft) {
+            alert(data.error || "Не вдалося обрати роль. Можливо, вона вже зайнята.");
+          }
+          throw new Error(data.error || 'setPartyContext failed');
         }
       } catch (error) {
-        console.error("Role selection error:", error);
-        if (error.response && error.response.data && error.response.data.detail) {
-          alert(`Помилка: ${error.response.data.detail}`);
-        } else {
-          alert("Не вдалося обрати роль. Спробуйте оновити сторінку.");
+        console.error(`Role selection error for ${targetRole}:`, error);
+        if (!soft) {
+          const detail = error.response?.data?.detail;
+          const friendly = detail ? (typeof detail === 'string' ? detail : detail.message || detail) : null;
+          alert(`Помилка: ${friendly || "Не вдалося обрати роль. Спробуйте оновити сторінку."}`);
         }
-        await fetchSchema(sessionId);
-        return;
+        if (!soft) {
+          await fetchSchema(sessionId);
+          throw error;
+        }
       }
+    };
+
+    try {
+      if (selectedMode === 'full') {
+        // Гарантуємо контекст для обраної ролі навіть якщо schema ще не прийшла
+        await ensureContext(role);
+        // Далі намагаємось виставити контекст для інших ролей (якщо вже знаємо метадані)
+        if (schema && schema.parties) {
+          for (const party of schema.parties) {
+            // Не падаємо, якщо інша роль вже зайнята/недоступна
+            if (party.role !== role) {
+              await ensureContext(party.role, true);
+            }
+          }
+        }
+      } else {
+        // Partial mode: claim only selected
+        await ensureContext(role);
+      }
+    } catch {
+      return;
     }
 
     await fetchSchema(sessionId);
@@ -467,6 +523,13 @@ function App() {
     await saveFieldValue(sessionId, fieldName, value, role, key);
   };
 
+  // Автодовантаження схеми, якщо ми на формі без схеми (щоб уникнути вічного "Loading form...")
+  useEffect(() => {
+    if (step === 'form' && !schema && sessionId && !isLoading) {
+      fetchSchema(sessionId);
+    }
+  }, [step, schema, sessionId, isLoading]);
+
   const handlePartyTypeChange = async (role, newType) => {
     if (!sessionId) return;
     try {
@@ -551,15 +614,12 @@ function App() {
   const renderForm = () => {
     if (!schema) return <div>Loading form...</div>;
 
-    // Logic for Contract Conditions Optionality
-    const allRoles = schema.parties.map(p => p.role);
-    const otherRoles = allRoles.filter(r => r !== selectedRole);
-    const areAllOtherRolesTaken = otherRoles.every(r => takenRoles.includes(r));
-
     const isSingleMode = selectedMode === 'single';
-    // If single mode, optional ONLY if there are still open roles.
-    // If full mode, always mandatory.
-    const isContractOptional = isSingleMode && !areAllOtherRolesTaken;
+    const isFullMode = selectedMode === 'full';
+    const hasLessor = myRoles.includes('lessor') || selectedRole === 'lessor';
+    // Контракт обов'язково заповнює орендодавець або заповнюємо всі (full).
+    const isContractOptional = !(isFullMode || hasLessor);
+    const canEditContract = isFullMode || hasLessor;
 
     const canSubmit = () => {
       if (!schema) return false;
@@ -632,10 +692,12 @@ function App() {
         })}
 
         <SectionCard
-          title={`${schema.contract.title} ${isContractOptional ? '(за бажанням)' : ''}`}
-          subtitle={isContractOptional
-            ? "Ви можете заповнити умови зараз або залишити це для іншої сторони."
-            : schema.contract.subtitle}
+          title={schema.contract.title}
+          subtitle={
+            canEditContract
+              ? "Заповніть умови договору."
+              : "Умови договору заповнює Орендодавець."
+          }
         >
           {schema.contract.fields.map(field => (
             <InputField
@@ -646,7 +708,7 @@ function App() {
               onChange={(val) => handleChange(field.key, field.field_name, val, null)}
               onBlur={() => handleBlur(field.key, field.field_name, formValues[field.key], null)}
               required={field.required}
-              disabled={!isOnline}
+              disabled={!isOnline || !canEditContract}
               error={fieldErrors[field.key]}
             />
           ))}
@@ -682,7 +744,7 @@ function App() {
             disabled={!isOnline || !canSubmit()}
             title={!isOnline ? "Немає зв'язку" : "Заповніть всі обов'язкові поля"}
           >
-            {isContractOptional ? 'Зберегти та продовжити' : 'Замовити договір'}
+            {isContractOptional ? 'Зберегти та продовжити' : 'Зберегти дані'}
           </button>
         )}
           <button className="btn-secondary" onClick={handlePreview}>
@@ -774,6 +836,8 @@ function App() {
     }
   };
 
+  const headerTitle = templateName || "Договір оренди житла";
+
   return (
     <div className="app-container">
       {!isOnline && (
@@ -794,7 +858,7 @@ function App() {
         {step !== 'category' && step !== 'dashboard' && (
           <button className="back-button" onClick={handleBack}>←</button>
         )}
-        <h1 className="title">Договір оренди житла</h1>
+        <h1 className="title">{headerTitle}</h1>
       </header>
 
       <div className="content-area">

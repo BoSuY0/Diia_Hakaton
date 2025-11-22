@@ -371,21 +371,34 @@ class UpsertFieldTool(BaseTool):
             entities = {e.field: e for e in list_entities(session.category_id)} if session.category_id else {}
             entity = entities.get(field)
 
-            # Доступ до умов договору (contract fields) — лише орендодавець
+            # Доступ до умов договору (contract fields)
             lessor_id = session.party_users.get("lessor")
             if entity is not None:
-                # Контрактні поля
-                if session.role and session.role != "lessor":
-                    return {"ok": False, "error": "Умови договору може змінювати лише орендодавець."}
-                if lessor_id:
-                    if not client_id and not str(lessor_id).startswith("anon_"):
+                from src.common.enums import FillingMode
+                is_full_mode = session.filling_mode == FillingMode.FULL
+
+                # 1) Якщо власник орендодавця вже визначений і це не поточний клієнт — блокуємо (крім anon_ -> reassignment)
+                if lessor_id and not str(lessor_id).startswith("anon_"):
+                    if not client_id:
                         return {"ok": False, "error": "Потрібен X-Client-ID орендодавця для редагування умов."}
-                    # Якщо власник anon_* і прийшов реальний користувач — перезакріплюємо
-                    if str(lessor_id).startswith("anon_") and client_id:
-                        session.party_users["lessor"] = client_id
-                        lessor_id = client_id
                     if client_id != lessor_id:
                         return {"ok": False, "error": "Редагувати умови може лише орендодавець."}
+
+                # 2) Якщо власник anon_ і прийшов реальний користувач — перезакріплюємо
+                if lessor_id and str(lessor_id).startswith("anon_") and client_id:
+                    session.party_users["lessor"] = client_id
+                    lessor_id = client_id
+
+                # 3) Якщо власник ще не встановлений і є client_id — прив'язуємо
+                if not lessor_id and client_id:
+                    session.party_users["lessor"] = client_id
+                    lessor_id = client_id
+
+                # 4) Дозвіл на редагування: повний режим або активна роль орендодавця, або клієнт = власник орендодавця
+                is_lessor_owner = client_id and lessor_id and client_id == lessor_id
+                role_is_lessor = session.role == "lessor"
+                if not (is_full_mode or role_is_lessor or is_lessor_owner):
+                    return {"ok": False, "error": "Умови договору може змінювати лише орендодавець."}
             elif client_id and session.category_id:
                 # It is a party field
                 effective_role = role_arg or session.role

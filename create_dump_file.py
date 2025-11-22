@@ -12,6 +12,7 @@ import fnmatch
 BASE_DIR = Path(__file__).resolve().parent
 DUMPS_DIR = BASE_DIR / "dumps"
 DEFAULT_EXCLUDES = {".git"}
+GIT_META_ALLOWED_PREFIXES = (".github", ".gitlab", ".gitpod")
 
 
 def ensure_dumps_dir() -> Path:
@@ -42,6 +43,26 @@ def create_dump_file(
 
     file_path.write_text(content, encoding="utf-8")
     return file_path
+
+
+def _is_git_metadata(rel: Path, *, is_dir: bool = False) -> bool:
+    """
+    Відфільтровує git-службові файли та директорії:
+    - усе, що містить компонент .git у шляху;
+    - файли/директорії з префіксом .git*, окрім загальновживаних
+      конфігів на кшталт .github/, .gitlab*, .gitpod*.
+    """
+    if any(part == ".git" for part in rel.parts):
+        return True
+
+    name = rel.name
+    if not name.startswith(".git"):
+        return False
+
+    if any(name.startswith(prefix) for prefix in GIT_META_ALLOWED_PREFIXES):
+        return False
+
+    return True
 
 
 def _load_gitignore_patterns(base_dir: Path) -> tuple[list[str], object | None]:
@@ -87,13 +108,22 @@ def collect_project_files() -> list[Path]:
                     return True
 
         for pat in patterns:
+            anchored = pat.startswith("/")
+            pat_body = pat[1:] if anchored else pat
             # Директорія: 'dir/' → будь-що всередині
-            if pat.endswith("/"):
-                prefix = pat[:-1]
-                if rel_str == prefix or rel_str.startswith(prefix + "/"):
-                    return True
+            if pat_body.endswith("/"):
+                prefix = pat_body[:-1]
+                if anchored:
+                    if rel_str == prefix or rel_str.startswith(prefix + "/"):
+                        return True
+                else:
+                    parts = rel_str.split("/")
+                    if prefix in parts:
+                        return True
+                    if rel_str.startswith(prefix + "/"):
+                        return True
             # Звичайний glob-патерн
-            elif fnmatch.fnmatch(rel_str, pat):
+            elif fnmatch.fnmatch(rel_str, pat_body):
                 return True
         return False
 
@@ -103,15 +133,24 @@ def collect_project_files() -> list[Path]:
         rel_root = root_path.relative_to(BASE_DIR)
 
         # Drop default excluded directories early (e.g. .git)
-        dirs[:] = [d for d in dirs if d not in DEFAULT_EXCLUDES]
+        pruned_dirs = []
+        for d in dirs:
+            rel_dir = rel_root / d
+            if d in DEFAULT_EXCLUDES or _is_git_metadata(rel_dir, is_dir=True):
+                continue
+            pruned_dirs.append(d)
+        dirs[:] = pruned_dirs
 
         # Не заходимо в директорії, які ігноруються .gitignore
         dirs[:] = [d for d in dirs if not is_ignored(rel_root / d, is_dir=True)]
 
         for file_name in files:
             rel = rel_root / file_name
+            rel_str = rel.as_posix()
+            if _is_git_metadata(rel):
+                continue
             # Не включаємо файли у dumps, навіть якщо не прописані в .gitignore
-            if str(rel).startswith("dumps/"):
+            if rel_str.startswith("dumps/"):
                 continue
             if is_ignored(rel):
                 continue
@@ -139,6 +178,10 @@ def create_full_project_dump(file_name: Optional[str] = None) -> Path:
     parts: list[str] = []
     for rel in files:
         parts.append(f"===== FILE: {rel} =====")
+        if rel.suffix.lower() == ".docx":
+            parts.append("<<binary .docx skipped (tracked in tree)>>")
+            parts.append("")
+            continue
         try:
             parts.append(
                 (BASE_DIR / rel).read_text(encoding="utf-8", errors="replace")

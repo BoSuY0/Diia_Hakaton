@@ -37,7 +37,7 @@ export function TemplateSelector({ categoryId, onSelect }) {
             <div className="selection-grid">
                 {templates.length > 0 ? (
                     templates.map(tmpl => (
-                        <div key={tmpl.id} className="selection-card" onClick={() => onSelect(tmpl.id)}>
+                        <div key={tmpl.id} className="selection-card" onClick={() => onSelect(tmpl)}>
                             <h3>{tmpl.name}</h3>
                         </div>
                     ))
