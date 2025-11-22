@@ -51,8 +51,8 @@ def test_pii_persistence():
     # Let's call the tool endpoint directly to verify unmasking works using the session state.
     
     # First, we need to set category to enable upsert
-    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_living"})
-    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_living_simple"})
+    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"})
+    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"})
     client.post("/chat", json={"session_id": session_id, "message": "set role to lessor and person type to individual"})
     
     # Now call upsert_field with the tag
@@ -107,7 +107,7 @@ def test_contract_api():
     # 2. Sync Session (Category, Template, Parties, Fields)
     # This replaces the chat interactions which are mocked out
     sync_data = {
-        "category_id": "lease_living",
+        "category_id": "lease_real_estate",
         "template_id": "lease_flat",
         "parties": {
             "lessor": {

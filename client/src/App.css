@@ -120,6 +120,17 @@ body {
   color: #9CA3AF;
 }
 
+.input-group.has-error .text-input {
+  border-color: #DC2626;
+}
+
+.input-error {
+  color: #DC2626;
+  font-size: 12px;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
 .info-banner {
   background-color: #7AC3FF;
   border-radius: 20px;
@@ -149,6 +160,33 @@ body {
 
 .actions {
   text-align: center;
+}
+
+.validation-banner {
+  background: #FEF3C7;
+  border: 1px solid #F59E0B;
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin: 12px 0 18px;
+  text-align: left;
+}
+
+.validation-title {
+  font-weight: 700;
+  color: #92400E;
+  margin-bottom: 6px;
+}
+
+.validation-list {
+  margin: 0;
+  padding-left: 16px;
+  color: #92400E;
+  line-height: 1.4;
+}
+
+.validation-list li {
+  margin-bottom: 4px;
+  font-size: 14px;
 }
 
 .btn-primary {
@@ -449,6 +487,79 @@ body {
   border-radius: 16px;
   padding: 16px;
   margin: 24px 0;
+}
+
+.tab-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab-button {
+  border: 1px solid #E5E7EB;
+  background: #F9FAFB;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #1F2937;
+}
+
+.tab-button.active {
+  background: #111827;
+  color: #fff;
+  border-color: #111827;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.history-card {
+  background: #F9FAFB;
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid #E5E7EB;
+}
+
+.history-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.history-row:last-child {
+  border-bottom: none;
+}
+
+.history-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-pill {
+  background: #E0F2FE;
+  color: #1D4ED8;
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.history-timestamp {
+  color: #6B7280;
+  font-size: 12px;
+}
+
+.history-detail {
+  margin-top: 4px;
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .signature-row {
@@ -769,6 +880,7 @@ body {
   font-size: 15px;
   line-height: 1.5;
   position: relative;
+  white-space: pre-wrap;
 }
 
 .chat-message.user .message-bubble {

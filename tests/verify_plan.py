@@ -57,7 +57,7 @@ def test_pii_persistence():
     # We will mock the LLM response to call upsert_field with the tag
     
     # First, setup context so upsert_field is allowed
-    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_living"})
+    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"})
     client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"})
     client.post("/chat", json={"session_id": session_id, "message": "set role to lessor and person type to individual"})
     
@@ -130,7 +130,7 @@ def test_explicit_role_upsert():
     session_id = resp.json()["session_id"]
     
     # 2. Setup Category and Template
-    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_living"})
+    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"})
     client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"})
     
     # 3. Define Party Types (REQUIRED before upserting party fields)
@@ -192,7 +192,7 @@ def test_contract_api_flow():
     
     # 2. Sync Session to be ready
     sync_data = {
-        "category_id": "lease_living",
+        "category_id": "lease_real_estate",
         "template_id": "lease_flat",
         "parties": {
             "lessor": {

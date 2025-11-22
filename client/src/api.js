@@ -17,6 +17,14 @@ export const api = {
         return axios.post(`${API_URL}/sessions/${sessionId}/template`, { template_id: templateId });
     },
 
+    async buildContract(sessionId, templateId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        return axios.post(`${API_URL}/sessions/${sessionId}/build`, { template_id: templateId }, config);
+    },
+
     async setPartyContext(sessionId, role, personType, clientId) {
         const config = {};
         if (clientId) {
@@ -96,6 +104,24 @@ export const api = {
 
     async getTemplates(categoryId) {
         const res = await axios.get(`${API_URL}/categories/${categoryId}/templates`);
+        return res.data;
+    },
+
+    async getHistory(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.get(`${API_URL}/sessions/${sessionId}/history`, config);
+        return res.data;
+    },
+
+    async getRequirements(sessionId, clientId) {
+        const config = {};
+        if (clientId) {
+            config.headers = { 'X-Client-ID': clientId };
+        }
+        const res = await axios.get(`${API_URL}/sessions/${sessionId}/requirements`, config);
         return res.data;
     },
 

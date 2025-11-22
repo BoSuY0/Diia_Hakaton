@@ -11,6 +11,7 @@ import fnmatch
 
 BASE_DIR = Path(__file__).resolve().parent
 DUMPS_DIR = BASE_DIR / "dumps"
+DEFAULT_EXCLUDES = {".git"}
 
 
 def ensure_dumps_dir() -> Path:
@@ -100,6 +101,9 @@ def collect_project_files() -> list[Path]:
     for root, dirs, files in os.walk(BASE_DIR):
         root_path = Path(root)
         rel_root = root_path.relative_to(BASE_DIR)
+
+        # Drop default excluded directories early (e.g. .git)
+        dirs[:] = [d for d in dirs if d not in DEFAULT_EXCLUDES]
 
         # Не заходимо в директорії, які ігноруються .gitignore
         dirs[:] = [d for d in dirs if not is_ignored(rel_root / d, is_dir=True)]

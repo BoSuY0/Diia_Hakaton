@@ -28,3 +28,4 @@ def test_settings_cors_origins_parse(monkeypatch):
     s = Settings()
     assert "http://example.com" in s.cors_origins
     assert "http://foo" in s.cors_origins
+    assert s.cors_allow_credentials is True

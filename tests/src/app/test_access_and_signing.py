@@ -183,3 +183,21 @@ def test_session_history_endpoint_requires_auth(mock_settings, mock_categories_d
     assert payload["session_id"] == session_id
     assert "all_data" in payload
     assert "sign_history" in payload
+
+
+def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_categories_data):
+    session_id = _bootstrap_session(mock_categories_data)
+
+    # Requires participant header
+    resp = client.get(f"/sessions/{session_id}/requirements")
+    assert resp.status_code == 401
+
+    resp = client.get(
+        f"/sessions/{session_id}/requirements",
+        headers={"X-Client-ID": "user_requirements"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == session_id
+    assert data["can_build_contract"] is False
+    assert data["missing"]["contract"] or data["missing"]["roles"]

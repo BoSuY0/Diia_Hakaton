@@ -31,6 +31,8 @@ function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [schema, setSchema] = useState(null);
   const [formValues, setFormValues] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [missingRequirements, setMissingRequirements] = useState(null);
 
   const [clientId] = useState(() => {
     const stored = localStorage.getItem('diia_client_id');
@@ -52,6 +54,38 @@ function App() {
     });
     return taken;
   }, [schema, clientId]);
+
+  const extractErrorsFromSchema = (schemaData) => {
+    const errors = {};
+    if (!schemaData) return errors;
+
+    if (schemaData.parties) {
+      schemaData.parties.forEach(party => {
+        (party.fields || []).forEach(field => {
+          if (field.status === 'error') {
+            errors[field.key] = field.error || 'Некоректне значення';
+          }
+        });
+      });
+    }
+
+    if (schemaData.contract && schemaData.contract.fields) {
+      schemaData.contract.fields.forEach(field => {
+        if (field.status === 'error') {
+          errors[field.key] = field.error || 'Некоректне значення';
+        }
+      });
+    }
+    return errors;
+  };
+
+  const extractErrorMessage = (error, fallback = 'Сталася помилка') => {
+    const detail = error?.response?.data?.detail;
+    if (!detail) return fallback;
+    if (typeof detail === 'string') return detail;
+    if (typeof detail === 'object') return detail.message || detail.error || fallback;
+    return fallback;
+  };
 
   // Selections
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -117,6 +151,8 @@ function App() {
 
       if (data && data.contract) {
         setSchema(data);
+        setFieldErrors(extractErrorsFromSchema(data));
+        setMissingRequirements(null);
         if (data.filling_mode) {
           setSelectedMode(data.filling_mode === 'full' ? 'full' : 'single');
         }
@@ -357,11 +393,40 @@ function App() {
 
   // --- Form Logic ---
 
+  const saveFieldValue = useCallback(async (sid, fieldName, value, role, fieldKey, options = {}) => {
+    if (!sid) return;
+    const { silent = false } = options;
+    try {
+      const res = await api.upsertField(sid, fieldName, value, role, clientId);
+      const data = res?.data || res;
+      const status = data?.status || data?.field_state?.status;
+      const errorText = data?.error || data?.field_state?.error;
+
+      setFieldErrors(prev => {
+        const next = { ...prev };
+        if (status === 'error') {
+          next[fieldKey] = errorText || 'Некоректне значення';
+        } else {
+          delete next[fieldKey];
+        }
+        return next;
+      });
+    } catch (error) {
+      const message = extractErrorMessage(error, 'Не вдалося зберегти значення');
+      setFieldErrors(prev => ({ ...prev, [fieldKey]: message }));
+      if (!silent) {
+        console.error(`Failed to save ${fieldName}`, error);
+      }
+    }
+  }, [clientId]);
+
   const fetchSchema = async (sid) => {
     try {
       setIsLoading(true);
       const data = await api.getSchema(sid, 'all', 'values', clientId);
       setSchema(data);
+      setFieldErrors(extractErrorsFromSchema(data));
+      setMissingRequirements(null);
 
       // Populate initial form values
       const initialValues = {};
@@ -384,35 +449,29 @@ function App() {
   };
 
   const debouncedUpsert = useCallback(
-    debounce(async (sid, field, value, role, cid) => {
-      if (!sid) return;
-      try {
-        await api.upsertField(sid, field, value, role, cid);
-      } catch (e) {
-        console.error(`Failed to save ${field}`, e);
-      }
+    debounce(async (sid, field, value, role, fieldKey) => {
+      await saveFieldValue(sid, field, value, role, fieldKey, { silent: true });
     }, 1000),
-    []
+    [saveFieldValue]
   );
 
   const handleChange = (key, fieldName, value, role = null) => {
+    setMissingRequirements(null);
     setFormValues(prev => ({ ...prev, [key]: value }));
-    debouncedUpsert(sessionId, fieldName, value, role, clientId);
+    debouncedUpsert(sessionId, fieldName, value, role, key);
   };
 
   const handleBlur = async (key, fieldName, value, role = null) => {
     if (!sessionId) return;
-    try {
-      await api.upsertField(sessionId, fieldName, value, role, clientId);
-    } catch (e) {
-      console.error(`Failed to save ${fieldName} on blur`, e);
-    }
+    setMissingRequirements(null);
+    await saveFieldValue(sessionId, fieldName, value, role, key);
   };
 
   const handlePartyTypeChange = async (role, newType) => {
     if (!sessionId) return;
     try {
       setIsLoading(true);
+      setMissingRequirements(null);
       await api.setPartyContext(sessionId, role, newType, clientId);
       await fetchSchema(sessionId);
     } catch (e) {
@@ -423,7 +482,18 @@ function App() {
 
   const handlePreview = () => {
     if (!sessionId) return;
-    setShowPreview(true);
+    const tpl = schema?.template_id || selectedTemplate;
+    if (!tpl) {
+      alert("Спочатку оберіть шаблон договору.");
+      return;
+    }
+    api.buildContract(sessionId, tpl, clientId)
+      .catch((e) => {
+        console.error("Failed to build before preview", e);
+      })
+      .finally(() => {
+        setShowPreview(true);
+      });
   };
 
   const handleOrder = async (isOptional = false) => {
@@ -436,14 +506,35 @@ function App() {
 
     try {
       setIsLoading(true);
+      setMissingRequirements(null);
       const res = await api.orderContract(sessionId, clientId);
       if (res.ok) {
         await fetchSchema(sessionId);
+        setMissingRequirements(null);
         setStep('success');
       }
     } catch (e) {
       console.error("Order failed", e);
-      alert("Order failed: " + (e.response?.data?.detail || e.message));
+      let message = extractErrorMessage(e, 'Не вдалося сформувати договір');
+      let missing = null;
+      const detail = e.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.missing) {
+        missing = detail.missing;
+      }
+
+      if (!missing) {
+        try {
+          const reqInfo = await api.getRequirements(sessionId, clientId);
+          missing = reqInfo?.missing;
+        } catch (reqErr) {
+          console.error("Failed to fetch requirements", reqErr);
+        }
+      }
+
+      if (missing) {
+        setMissingRequirements(missing);
+      }
+      alert("Не вдалося замовити договір: " + message);
     } finally {
       setIsLoading(false);
     }
@@ -475,12 +566,18 @@ function App() {
       for (const party of schema.parties) {
         if (selectedMode === 'single' && party.role !== selectedRole) continue;
         for (const field of party.fields) {
-          if (field.required && !formValues[field.key]) return false;
+          if (field.required) {
+            if (!formValues[field.key]) return false;
+            if (fieldErrors[field.key]) return false;
+          }
         }
       }
       if (!isContractOptional) {
         for (const field of schema.contract.fields) {
-          if (field.required && !formValues[field.key]) return false;
+          if (field.required) {
+            if (!formValues[field.key]) return false;
+            if (fieldErrors[field.key]) return false;
+          }
         }
       }
       return true;
@@ -527,6 +624,7 @@ function App() {
                   onBlur={() => handleBlur(field.key, field.field_name, formValues[field.key], party.role)}
                   required={field.required}
                   disabled={!isEditable || !isOnline}
+                  error={fieldErrors[field.key]}
                 />
               ))}
             </SectionCard>
@@ -549,9 +647,28 @@ function App() {
               onBlur={() => handleBlur(field.key, field.field_name, formValues[field.key], null)}
               required={field.required}
               disabled={!isOnline}
+              error={fieldErrors[field.key]}
             />
           ))}
         </SectionCard>
+
+        {missingRequirements && (
+          <div className="validation-banner">
+            <div className="validation-title">Заповніть обов'язкові поля перед замовленням</div>
+            <ul className="validation-list">
+              {missingRequirements.contract?.map(item => (
+                <li key={`contract-${item.key}`}>Умова договору: {item.label || item.field}</li>
+              ))}
+              {Object.values(missingRequirements.roles || {}).map(role => (
+                role.missing_fields?.map(f => (
+                  <li key={`${role.role}-${f.key}`}>
+                    {role.role_label || role.role}: {f.label || f.field}
+                  </li>
+                ))
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="actions">
           {schema.status === 'completed' ? (

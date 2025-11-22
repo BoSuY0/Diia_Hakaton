@@ -25,3 +25,4 @@ def test_cors_origins_default(monkeypatch):
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     s = Settings()
     assert "*" in s.cors_origins
+    assert s.cors_allow_credentials is False

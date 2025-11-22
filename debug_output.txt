@@ -1,6 +1,0 @@
-Test VE: <class 'src.common.errors.ValidationError'>
-Test VE module: src.common.errors
-sys.modules['src.common.errors']: <module 'src.common.errors' from 'C:\\Users\\bodys\\Desktop\\Projects\\Test\\src\\common\\errors.py'>
-Caught: <class 'src.common.errors.ValidationError'>
-Caught module: src.common.errors
-Is instance? True

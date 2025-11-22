@@ -1,0 +1,95 @@
+{
+  "category_id": "lease_real_estate",
+
+  "templates": [
+    {
+      "id": "lease_flat",
+      "name": "Договір оренди нерухомого майна",
+      "file": "lease_real_estate.docx"
+    }
+  ],
+
+  "roles": {
+    "lessor": {
+      "label": "Орендодавець",
+      "allowed_person_types": ["individual", "fop", "company"]
+    },
+    "lessee": {
+      "label": "Орендар",
+      "allowed_person_types": ["individual", "fop", "company"]
+    }
+  },
+
+  "party_modules": {
+    "individual": {
+      "label": "Фізична особа",
+      "fields": [
+        { "field": "name",    "label": "ПІБ",                               "required": true  },
+        { "field": "address", "label": "Адреса проживання/реєстрації",      "required": true  },
+        { "field": "representative","label": "Представник",                 "required": false },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "id_code", "label": "РНОКПП",                            "required": false },
+        { "field": "iban",    "label": "IBAN рахунку (за наявності)",       "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "fop": {
+      "label": "ФОП",
+      "fields": [
+        { "field": "name",    "label": "ПІБ ФОП",                           "required": true  },
+        { "field": "address", "label": "Адреса реєстрації ФОП",             "required": true  },
+        { "field": "representative","label": "Представник",                 "required": false },
+        { "field": "id_code", "label": "РНОКПП",                            "required": true  },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "iban",    "label": "IBAN рахунку",                      "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "company": {
+      "label": "Юридична особа",
+      "fields": [
+        { "field": "name",          "label": "Повна назва юр. особи",        "required": true  },
+        { "field": "address",       "label": "Юридична адреса",              "required": true  },
+        { "field": "id_code",       "label": "Код ЄДРПОУ",                   "required": true  },
+        { "field": "representative","label": "ПІБ директора / представника","required": false },
+        { "field": "id_doc",        "label": "Документ представника",        "required": false },
+        { "field": "iban",          "label": "IBAN рахунку",                 "required": false },
+        { "field": "phone",         "label": "Телефон",                      "required": false },
+        { "field": "email",         "label": "Email",                        "required": false }
+      ]
+    }
+  },
+
+  "contract_fields": [
+    { "field": "document_number",        "label": "Номер договору",                              "required": true  },
+    { "field": "city",                   "label": "Місто",                                       "required": true  },
+    { "field": "contract_date",          "label": "Дата договору",                               "required": true  },
+    { "field": "purpose",                "label": "Призначення приміщення",                      "required": true  },
+    { "field": "object_address",         "label": "Адреса приміщення",                           "required": true  },
+    { "field": "start_date",             "label": "Дата початку оренди",                         "required": true  },
+    { "field": "end_date",               "label": "Дата закінчення оренди",                      "required": true  },
+    { "field": "total_area_sqm",         "label": "Загальна площа приміщення, м²",               "required": true  },
+    { "field": "area_sqm",               "label": "Площа в оренді, м²",                          "required": true  },
+    { "field": "notice_period_days",     "label": "Строк повідомлення для візиту (днів)",        "required": true  },
+    { "field": "repair_notice_days",     "label": "Повідомлення про ремонт (днів)",              "required": true  },
+    { "field": "handover_period",        "label": "Строк передачі приміщення (робочі дні)",      "required": true  },
+    { "field": "access_schedule",        "label": "Графік доступу до приміщення",                "required": true  },
+    { "field": "improvement_consent_type","label": "Порядок згоди на поліпшення",                "required": true  },
+    { "field": "lock_change_notice",     "label": "Повідомлення про зміну замків (днів)",        "required": true  },
+    { "field": "sublease_consent_type",  "label": "Порядок згоди на суборенду",                  "required": true  },
+    { "field": "act_signing_period",     "label": "Строк підписання акта прийм.-передачі (днів)", "required": true  },
+    { "field": "term_change_consent",    "label": "Порядок зміни строку оренди",                 "required": true  },
+    { "field": "rent_price_month",       "label": "Сума оренди за місяць",                       "required": true  },
+    { "field": "first_payment_date",     "label": "Дата першого платежу",                        "required": true  },
+    { "field": "payment_currency",       "label": "Валюта платежу",                              "required": true  },
+    { "field": "payment_form",           "label": "Форма оплати",                                "required": true  },
+    { "field": "payment_due_day",        "label": "День місяця для оплати",                      "required": true  },
+    { "field": "penalty_rate",           "label": "Пеня за прострочення, %/день",                "required": true  },
+    { "field": "payment_delay_days",     "label": "Граничний строк прострочення (днів)",         "required": true  },
+    { "field": "premises_return_deadline","label": "Строк повернення приміщення після закінчення","required": true  }
+  ]
+}

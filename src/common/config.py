@@ -88,6 +88,10 @@ class Settings:
                 "*"
             ]
 
+        # У прод-оточенні не використовуємо креденшли з wildcard.
+        # Якщо дозволено "*", вимикаємо allow_credentials.
+        self.cors_allow_credentials: bool = "*" not in self.cors_origins
+
 
 settings = Settings()
 
@@ -134,3 +138,4 @@ else:
         "http://127.0.0.1:3000",
         "*"
     ]
+Settings.cors_allow_credentials = "*" not in Settings.cors_origins

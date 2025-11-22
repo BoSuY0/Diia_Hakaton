@@ -68,7 +68,7 @@ def test_validation():
     
     session = Session(
         session_id="test_session", 
-        category_id="lease_living",
+        category_id="lease_real_estate",
         role="lessee",
         person_type="individual",
         party_types={"lessee": "individual"}
@@ -80,7 +80,7 @@ def test_validation():
     # But validation check is BEFORE entity check? 
     # Let's check the code order.
     # Code: load_session -> category check -> entity check -> ... -> validation.
-    # So we need a valid category. "lease_living" exists in the project.
+    # So we need a valid category. "lease_real_estate" exists in the project.
     
     try:
         result = tool.execute(args_invalid, context)

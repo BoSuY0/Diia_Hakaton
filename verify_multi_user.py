@@ -11,7 +11,7 @@ def verify_multi_user():
     # 1. Create Session
     print(f"\n1. Creating session '{session_id}'...")
     session = get_or_create_session(session_id)
-    session.category_id = "lease_living" # Assuming this category exists from previous steps or default
+    session.category_id = "lease_real_estate" # Assuming this category exists from previous steps or default
     session.save_session = lambda: None # Mock save for now? No, we need real save.
     # We rely on real store
     from src.sessions.store import save_session

@@ -18,7 +18,7 @@ def test_signature_logic():
     # Setup Session
     session = Session(
         session_id="test_sig_session",
-        category_id="lease_living",
+        category_id="lease_real_estate",
         role="lessor",
         person_type="individual",
         party_types={"lessor": "individual", "lessee": "individual"},

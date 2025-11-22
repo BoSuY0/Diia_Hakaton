@@ -35,6 +35,7 @@ from src.common.config import settings
 from src.documents.user_document import load_user_document
 from src.sessions.store import get_or_create_session, load_session, save_session, transactional_session
 from src.sessions.models import Session, SessionState
+from src.services.fields import collect_missing_fields
 from src.storage.fs import ensure_directories
 from src.validators.pii_tagger import sanitize_typed
 
@@ -101,9 +102,14 @@ async def lifespan(app: FastAPI):
                     await asyncio.wait_for(stop_event.wait(), timeout=60)
                 except asyncio.TimeoutError:
                     continue
+                except asyncio.CancelledError:
+                    # Graceful exit on cancellation
+                    logger.info("Cleanup loop cancelled; exiting quietly")
+                    return
         except asyncio.CancelledError:
-            # Graceful exit on cancellation
-            return
+            logger.info("Cleanup loop cancelled (outer); exiting")
+        except Exception as e:
+            logger.error(f"Cleanup loop stopped with error: {e}")
 
     cleanup_task = asyncio.create_task(cleanup_loop())
         
@@ -125,7 +131,7 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
     except asyncio.CancelledError:
-        pass
+        logger.info("Cleanup task cancelled during shutdown; exiting quietly")
     except Exception as e:
         logger.error(f"Error waiting for cleanup task: {e}")
 
@@ -145,7 +151,7 @@ app = FastAPI(title="Contract Builder ChatBot", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1291,7 +1297,15 @@ async def upsert_session_field(
 
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
     if not result.get("ok", False) and result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": result["error"],
+                "field": req.field,
+                "role": req.role,
+                "field_state": result.get("field_state"),
+            },
+        )
     return result
 
 
@@ -1570,17 +1584,6 @@ def chat(req: ChatRequest) -> ChatResponse:
     conv.messages = pruned_messages
     reply_text = _format_reply_from_messages(pruned_messages)
 
-    # Додаємо стислий знімок сесії у першому повідомленні розмови
-    if is_first_turn:
-        try:
-            session = load_session(req.session_id)
-        except Exception:
-            session = None
-        if session:
-            intro = _initial_session_summary_text(session)
-            if intro:
-                reply_text = f"{intro}\n{reply_text}" if reply_text else intro
-
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
 
@@ -1682,23 +1685,25 @@ def preview_contract(
 
     if not session.template_id:
          raise HTTPException(status_code=400, detail="Template not selected")
-    
+
     from src.storage.fs import output_document_path
-    path = output_document_path(session.template_id, session_id, ext="docx")
-    
-    # Always try to build with partial=True for preview
-    # We import build_contract directly to bypass LLM tool wrapper and use partial arg
-    from src.documents.builder import build_contract as build_contract_direct
-    try:
-        build_contract_direct(session_id, session.template_id, partial=True)
-    except Exception as e:
-        logger.error(f"Preview build failed: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-             
+    from src.common.config import settings
+
+    # Prefer final document if ordered, otherwise the last built draft
+    final_doc = settings.filled_documents_root / f"contract_{session_id}.docx"
+    draft_doc = output_document_path(session.template_id, session_id, ext="docx")
+    doc_path = final_doc if final_doc.exists() else draft_doc
+
+    if not doc_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Document not built yet. Згенеруйте договір перед переглядом.",
+        )
+
     # HTML Preview (Fast, Cross-Platform)
     from src.documents.converter import convert_to_html
     try:
-        html_content = convert_to_html(path)
+        html_content = convert_to_html(doc_path)
     except Exception as e:
         logger.error(f"HTML conversion failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate preview")
@@ -1778,16 +1783,13 @@ async def sign_contract(
             logger.info(f"Session state: {session.state}, filling_mode: {session.filling_mode}, party_users: {session.party_users}, party_types: {session.party_types}")
             
             # Якщо контракт ще не зібрано, але всі обов'язкові поля готові — пробуємо зібрати.
-            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN] and session.can_build_contract and session.template_id:
-                try:
-                    tool_build_contract(session.session_id, session.template_id)
-                    session.state = SessionState.BUILT
-                except Exception as e:
-                    logger.error(f"Auto-build before sign failed: {e}")
-                    raise HTTPException(status_code=400, detail="Contract must be generated before signing.")
-
             # Дозволяємо підпис лише коли договір зібраний/готовий до підпису.
             if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN]:
+                if session.can_build_contract:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Contract content has changed. Please rebuild before signing.",
+                    )
                 raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
 
             # Identify role
@@ -1982,13 +1984,18 @@ def get_session_schema(
                 elif data_mode == "status":
                     val = bool(fs and fs.status == "ok")
 
+            status = fs.status if fs else "empty"
+            error_msg = fs.error if fs else None
+
             party_obj["fields"].append({
                 "key": field_key,
                 "field_name": pf.field,
                 "label": pf.label,
                 "placeholder": pf.label, # Or add placeholder to metadata
                 "required": pf.required,
-                "value": val
+                "value": val,
+                "status": status,
+                "error": error_msg,
             })
         
         response["parties"].append(party_obj)
@@ -2012,16 +2019,47 @@ def get_session_schema(
             elif data_mode == "status":
                 val = bool(fs and fs.status == "ok")
 
+        status = fs.status if fs else "empty"
+        error_msg = fs.error if fs else None
+
         response["contract"]["fields"].append({
             "key": entity.field,
             "field_name": entity.field,
             "label": entity.label,
             "placeholder": entity.label,
             "required": entity.required,
-            "value": val
+            "value": val,
+            "status": status,
+            "error": error_msg,
         })
 
     return response
+
+
+@app.get("/sessions/{session_id}/requirements")
+def get_session_requirements(
+    session_id: str,
+    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    client_id_query: Optional[str] = Query(None, alias="client_id"),
+) -> Dict[str, Any]:
+    """
+    Повертає список незаповнених обов'язкових полів для відображення на фронті.
+    """
+    try:
+        session = load_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    client_id = x_client_id or client_id_query
+    check_session_access(session, client_id, require_participant=True)
+
+    missing = collect_missing_fields(session)
+    return {
+        "session_id": session.session_id,
+        "state": session.state.value,
+        "can_build_contract": session.can_build_contract,
+        "missing": missing,
+    }
 
 
 @app.get("/sessions/{session_id}/history")
@@ -2077,6 +2115,16 @@ async def order_contract(
         
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
+
+    missing = collect_missing_fields(session)
+    if not missing.get("is_ready", False):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Не всі обов'язкові поля заповнені.",
+                "missing": missing,
+            },
+        )
     
     # 1. Build contract (it checks required fields internally)
     try:
@@ -2084,7 +2132,13 @@ async def order_contract(
         result = build_contract(session_id, session.template_id)
         temp_path = result["file_path"]
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": str(e),
+                "missing": collect_missing_fields(load_session(session_id)),
+            },
+        )
     except Exception as e:
         logger.error(f"Order failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

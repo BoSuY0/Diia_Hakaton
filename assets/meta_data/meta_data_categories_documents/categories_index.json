@@ -1,9 +1,9 @@
 {
   "categories": [
     {
-      "id": "lease_living",
-      "label": "Договори оренди нерухомого житла",
-      "meta_filename": "lease_living.json"
+      "id": "lease_real_estate",
+      "label": "Нерухомість. Рухоме майно",
+      "meta_filename": "lease_real_estate.json"
     }
   ]
 }

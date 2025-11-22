@@ -17,8 +17,8 @@ def demo():
     print("=== Demo: Registering 'Lease Flat' Document ===")
     
     # 1. Create a new category for this demo
-    cat_id = "demo_lease_living"
-    cat_label = "Демо: Оренда Житла"
+    cat_id = "demo_lease_real_estate"
+    cat_label = "Демо: Оренда житла"
     
     print(f"\n1. Creating category '{cat_label}'...")
     if not run_command(["add-category", "--id", cat_id, "--label", cat_label]):
@@ -34,7 +34,7 @@ def demo():
     if not run_command(["add-template", "--category", cat_id, "--id", tmpl_id, "--name", tmpl_name, "--file", tmpl_file]):
         return
 
-    # 3. Add some fields that match the real document structure (based on lease_living.json)
+    # 3. Add some fields that match the real document structure (based on lease_real_estate.json)
     print("\n3. Adding contract fields...")
     fields = [
         ("object_address", "Адреса житла", True),
