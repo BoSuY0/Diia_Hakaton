@@ -196,8 +196,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("APP_PORT", "8000")),
-        help="Порт для HTTP-сервера (за замовчуванням APP_PORT або 8000).",
+        default=int(os.getenv("APP_PORT", os.getenv("PORT", "8000"))),
+        help="Порт для HTTP-сервера (APP_PORT, PORT або 8000).",
     )
     parser.add_argument(
         "--reload",
