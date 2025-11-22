@@ -237,6 +237,8 @@ def find_category_by_query(query: str) -> Optional[Category]:
     best_score = 0
 
     for category in store.categories.values():
+        if category.id == "custom":
+            continue
         # Check keywords
         keywords = {k.lower() for k in (category.keywords or [])}
         kw_score = len(query_terms & keywords) * 2
@@ -261,10 +263,5 @@ def find_category_by_query(query: str) -> Optional[Category]:
 
     if best:
         return best
-
-    # Якщо немає точного збігу, повертаємо кастомну категорію як дефолтну, якщо вона існує
-    custom = store.categories.get("custom")
-    if custom:
-        return custom
 
     return None

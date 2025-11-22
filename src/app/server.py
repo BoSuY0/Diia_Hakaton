@@ -924,6 +924,8 @@ async def list_categories() -> List[Dict[str, str]]:
 
     categories = []
     for category in category_store.categories.values():
+        if category.id == "custom":
+            continue
         categories.append({"id": category.id, "label": category.label})
     return categories
 
