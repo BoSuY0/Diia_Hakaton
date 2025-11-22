@@ -315,7 +315,6 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     "ready_to_build": [
         "route_message",
         "get_session_summary",
-        "build_contract",
         # Allow editing (will invalidate signatures if any)
         "set_party_context",
         "upsert_field",
@@ -328,8 +327,6 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
         "set_party_context",
         "upsert_field",
         "set_filling_mode",
-        # Re-build is allowed if still valid
-        "build_contract",
         "sign_contract",
     ],
     "ready_to_sign": [
@@ -1550,9 +1547,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
         logger.error("LLM error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Fallback: якщо модель не викликала build_contract, але користувач явно
-    # просить сформувати договір і всі обов'язкові поля заповнені — будуємо
-    # договір на бекенді без додаткового кроку моделі.
+    # Fallback: якщо користувач просить сформувати договір і всі обов'язкові поля готові,
+    # просто повідомляємо, не генеруючи файл (LLM не викликає build_contract).
     last_user = _last_user_message_text(final_messages)
     try:
         session = await aload_session(req.session_id)
@@ -1563,25 +1559,20 @@ async def chat(req: ChatRequest) -> ChatResponse:
         text_norm = (last_user or "").lower()
         if any(kw in text_norm for kw in ["сформуй", "створи", "згенеруй"]):
             logger.info(
-                "fallback_build: session_id=%s template_id=%s",
+                "fallback_build_skip: session_id=%s template_id=%s",
                 req.session_id,
                 session.template_id,
             )
-            result = await tool_build_contract_async(
-                session_id=req.session_id,
-                template_id=session.template_id,
-            )
-            filename = result.get("filename") or result.get("file_path")
             lang = conv.last_lang or "uk"
             if lang == "en":
                 reply = (
-                    "The contract has been generated.\n"
-                    f"You can download it as: {filename}"
+                    "The contract is ready.\n"
+                    "Please go to the All Contracts page to view or proceed."
                 )
             else:
                 reply = (
                     "Договір сформовано.\n"
-                    f"Його можна завантажити як файл: {filename}"
+                    "Перейдіть на сторінку \"Усі договори\", щоб переглянути або продовжити."
                 )
             return ChatResponse(session_id=req.session_id, reply=reply)
 
