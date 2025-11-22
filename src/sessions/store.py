@@ -31,8 +31,7 @@ _init_logged = False
 def _redis_allowed() -> bool:
     backend = getattr(settings, "session_backend", "redis").lower()
     has_redis_url = bool(getattr(settings, "redis_url", None))
-    use_glide = getattr(settings, "valkey_use_glide", False)
-    return backend == "redis" and (has_redis_url or use_glide) and not _redis_disabled
+    return backend == "redis" and has_redis_url and not _redis_disabled
 
 
 def _with_redis(func, *args, **kwargs):

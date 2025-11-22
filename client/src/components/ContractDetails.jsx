@@ -110,7 +110,9 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
                     ) : signEvents.map((evt, idx) => (
                         <div key={`${evt.timestamp}-${idx}`} className="history-row">
                             <div className="history-meta">
-                                <span className="history-pill">{(evt.roles || []).join(', ') || 'роль'}</span>
+                                <span className="history-pill">
+                                    {(evt.roles || []).map((r) => labelForRole(r)).join(', ') || 'роль'}
+                                </span>
                                 <span className="history-timestamp">{formatTimestamp(evt.timestamp)}</span>
                             </div>
                             <div className="history-detail">
@@ -127,7 +129,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
                     ) : fieldEvents.map((evt, idx) => (
                         <div key={`${evt.key}-${idx}`} className="history-row">
                             <div className="history-meta">
-                                <span className="history-pill">{evt.role || '—'}</span>
+                                <span className="history-pill">{labelForRole(evt.role) || '—'}</span>
                                 <span className="history-timestamp">{formatTimestamp(evt.timestamp)}</span>
                             </div>
                             <div className="history-detail">
@@ -142,6 +144,11 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
 
     if (isLoading && !info) return <div>Loading...</div>;
     if (!info) return <div>Failed to load info</div>;
+
+    const labelForRole = (role) => {
+        if (!role) return role;
+        return (info.role_labels && info.role_labels[role]) || role;
+    };
 
     // Determine my role based on server-side mapping (does not expose other users)
     const myRole = info.client_roles && info.client_roles.length > 0 ? info.client_roles[0] : null;
@@ -190,7 +197,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
                               const signed = info.signatures?.[role];
                               return (
                                 <div key={role} className="signature-row">
-                                  <span className="role-name">{role}</span>
+                                  <span className="role-name">{labelForRole(role)}</span>
                                   <span className={`signature-status ${signed ? 'signed' : 'pending'}`}>
                                     {signed ? "✅ Підписано" : "⏳ Очікується"}
                                   </span>

@@ -13,7 +13,7 @@ from src.categories.index import (
     list_templates,
     store as category_store,
 )
-from src.common.enums import ContractRole, PersonType, FillingMode
+from src.common.enums import PersonType, FillingMode
 from src.common.logging import get_logger
 from src.documents.builder import build_contract as build_contract_document
 from src.sessions.models import FieldState, SessionState
@@ -131,7 +131,7 @@ class SetPartyContextTool(BaseTool):
                 },
                 "role": {
                     "type": "string",
-                    "enum": [r.value for r in ContractRole],
+                    "minLength": 1,
                 },
                 "person_type": {
                     "type": "string",
@@ -146,15 +146,6 @@ class SetPartyContextTool(BaseTool):
         session_id = args["session_id"]
         role = args["role"]
         person_type = args["person_type"]
-
-        # Validation via Enum
-        try:
-            ContractRole(role)
-        except ValueError:
-             return {
-                "ok": False,
-                "error": f"Невідома роль. Допустимі: {', '.join([r.value for r in ContractRole])}",
-            }
 
         try:
             PersonType(person_type)
@@ -174,7 +165,10 @@ class SetPartyContextTool(BaseTool):
             if not cat:
                  return {"ok": False, "error": "Невідома категорія."}
             meta = _load_meta(cat)
-            role_meta = (meta.get("roles") or {}).get(role)
+            roles_meta = (meta.get("roles") or {})
+            role_meta = roles_meta.get(role)
+            if not role_meta:
+                 return {"ok": False, "error": "Невідома роль для цієї категорії."}
             allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
             if allowed_types and person_type not in allowed_types:
                  return {"ok": False, "error": "Невірний тип особи для ролі."}
@@ -324,7 +318,7 @@ class UpsertFieldTool(BaseTool):
                 },
                 "role": {
                     "type": "string",
-                    "enum": [r.value for r in ContractRole],
+                    "minLength": 1,
                     "description": "Optional. Explicitly specify which party this field belongs to. If not provided, uses the current session role.",
                 },
                 "field": {
@@ -360,8 +354,6 @@ class UpsertFieldTool(BaseTool):
         with transactional_session(session_id) as session:
             # Access Control Check
             client_id = context.get("client_id")
-            target_role = role_arg or session.role
-            owner_for_role = session.party_users.get(target_role) if session.party_users else None
 
             # Дозволяємо роботу без client_id лише якщо всі ролі наразі anon_ (тимчасові сесії)
             all_anon = bool(session.party_users) and all(str(v).startswith("anon_") for v in session.party_users.values())
@@ -372,33 +364,18 @@ class UpsertFieldTool(BaseTool):
             entity = entities.get(field)
 
             # Доступ до умов договору (contract fields)
-            lessor_id = session.party_users.get("lessor")
             if entity is not None:
                 from src.common.enums import FillingMode
                 is_full_mode = session.filling_mode == FillingMode.FULL
-
-                # 1) Якщо власник орендодавця вже визначений і це не поточний клієнт — блокуємо (крім anon_ -> reassignment)
-                if lessor_id and not str(lessor_id).startswith("anon_"):
-                    if not client_id:
-                        return {"ok": False, "error": "Потрібен X-Client-ID орендодавця для редагування умов."}
-                    if client_id != lessor_id:
-                        return {"ok": False, "error": "Редагувати умови може лише орендодавець."}
-
-                # 2) Якщо власник anon_ і прийшов реальний користувач — перезакріплюємо
-                if lessor_id and str(lessor_id).startswith("anon_") and client_id:
-                    session.party_users["lessor"] = client_id
-                    lessor_id = client_id
-
-                # 3) Якщо власник ще не встановлений і є client_id — прив'язуємо
-                if not lessor_id and client_id:
-                    session.party_users["lessor"] = client_id
-                    lessor_id = client_id
-
-                # 4) Дозвіл на редагування: повний режим або активна роль орендодавця, або клієнт = власник орендодавця
-                is_lessor_owner = client_id and lessor_id and client_id == lessor_id
-                role_is_lessor = session.role == "lessor"
-                if not (is_full_mode or role_is_lessor or is_lessor_owner):
-                    return {"ok": False, "error": "Умови договору може змінювати лише орендодавець."}
+                participant_roles = []
+                if client_id:
+                    participant_roles = [
+                        role_key for role_key, owner in (session.party_users or {}).items() if owner == client_id
+                    ]
+                if session.party_users and not is_full_mode and client_id and not participant_roles:
+                    return {"ok": False, "error": "Редагувати умови можуть лише учасники цієї сесії."}
+                if session.party_users and not is_full_mode and not client_id and not all_anon:
+                    return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
             elif client_id and session.category_id:
                 # It is a party field
                 effective_role = role_arg or session.role

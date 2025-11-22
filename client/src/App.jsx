@@ -92,8 +92,18 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedMode, setSelectedMode] = useState(null); // 'single', 'full', 'ai'
-  const [selectedRole, setSelectedRole] = useState(null); // 'lessor', 'lessee'
+  const [selectedRole, setSelectedRole] = useState(null); // role id from schema
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  const updateUrl = (sid, role = null, { replace = true } = {}) => {
+    const params = new URLSearchParams();
+    if (sid) params.set('session_id', sid);
+    if (role) params.set('role', role);
+    const query = params.toString();
+    const newUrl = query ? `/?${query}` : '/';
+    const fn = replace ? 'replaceState' : 'pushState';
+    window.history[fn]({ path: newUrl }, '', newUrl);
+  };
 
   // Initialize session on mount
   const initialized = React.useRef(false);
@@ -110,10 +120,14 @@ function App() {
 
       const params = new URLSearchParams(window.location.search);
       const sid = params.get('session_id');
+      const roleFromUrl = params.get('role');
 
       if (sid) {
         console.log("Found session_id in URL:", sid);
         setSessionId(sid);
+        if (roleFromUrl) {
+          setSelectedRole(roleFromUrl);
+        }
         await restoreSession(sid);
       } else {
         setIsLoading(false);
@@ -207,6 +221,9 @@ function App() {
         const myRole = data.parties.find(p => p.claimed_by === clientId)?.role || null;
         if (myRole) {
           setSelectedRole(myRole);
+          if (sid) {
+            updateUrl(sid, myRole, { replace: true });
+          }
         }
 
         const mode = data.filling_mode ? (data.filling_mode === 'full' ? 'full' : (data.filling_mode === 'ai' ? 'ai' : 'single')) : null;
@@ -303,8 +320,7 @@ function App() {
         const session = await api.createSession();
         sid = session.session_id;
         setSessionId(sid);
-        const newUrl = `/?session_id=${sid}`;
-        window.history.pushState({ path: newUrl }, '', newUrl);
+        updateUrl(sid, null, { replace: false });
 
         // Set category and template
         await api.setCategory(sid, selectedCategory);
@@ -413,6 +429,9 @@ function App() {
 
     await fetchSchema(sessionId);
     setStep('form');
+    if (sessionId) {
+      updateUrl(sessionId, role, { replace: true });
+    }
   };
 
   const clearUrlSession = () => {
@@ -616,10 +635,10 @@ function App() {
 
     const isSingleMode = selectedMode === 'single';
     const isFullMode = selectedMode === 'full';
-    const hasLessor = myRoles.includes('lessor') || selectedRole === 'lessor';
-    // Контракт обов'язково заповнює орендодавець або заповнюємо всі (full).
-    const isContractOptional = !(isFullMode || hasLessor);
-    const canEditContract = isFullMode || hasLessor;
+    const hasAnyRole = myRoles.length > 0 || (selectedRole && schema.parties.some(p => p.role === selectedRole));
+    // Якщо користувач не має жодної ролі і не в повному режимі — умови договору для нього опційні.
+    const isContractOptional = !isFullMode && !hasAnyRole;
+    const canEditContract = isFullMode || hasAnyRole;
 
     const canSubmit = () => {
       if (!schema) return false;
@@ -693,10 +712,10 @@ function App() {
 
         <SectionCard
           title={schema.contract.title}
-          subtitle={
+              subtitle={
             canEditContract
               ? "Заповніть умови договору."
-              : "Умови договору заповнює Орендодавець."
+              : "Умови договору заповнить інша сторона."
           }
         >
           {schema.contract.fields.map(field => (
