@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import abc
+import inspect
 from typing import Any, Dict, Optional
+
+from src.common.async_utils import run_sync
 
 
 class BaseTool(abc.ABC):
@@ -44,10 +47,19 @@ class BaseTool(abc.ABC):
     @abc.abstractmethod
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         """
-        Execute the tool logic.
+        Execute the tool logic (sync by default).
         Context may contain session_id, user_id, etc.
         """
         pass
+
+    async def execute_async(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+        """
+        Async wrapper that runs sync tools in the threadpool
+        and awaits native-async implementations if present.
+        """
+        if inspect.iscoroutinefunction(self.execute):
+            return await self.execute(args, context)  # type: ignore[misc]
+        return await run_sync(self.execute, args, context)
 
     def format_result(self, result: Any) -> str:
         """

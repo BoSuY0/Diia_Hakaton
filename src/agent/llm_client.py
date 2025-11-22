@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -11,11 +12,15 @@ from src.common.logging import get_logger
 
 
 logger = get_logger(__name__)
+_SYSTEM_PROMPT_CACHE: str | None = None
 
 
 def load_system_prompt() -> str:
-    path = Path(__file__).with_name("system_prompt.txt")
-    return path.read_text(encoding="utf-8")
+    global _SYSTEM_PROMPT_CACHE
+    if _SYSTEM_PROMPT_CACHE is None:
+        path = Path(__file__).with_name("system_prompt.txt")
+        _SYSTEM_PROMPT_CACHE = path.read_text(encoding="utf-8")
+    return _SYSTEM_PROMPT_CACHE
 
 
 def _ensure_api_key() -> None:
@@ -41,7 +46,41 @@ def _ensure_api_key() -> None:
             os.environ["OPENAI_API_KEY"] = api_key
 
 
-def chat_with_tools(
+def _filter_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Фільтрує orphaned tool відповіді, залишаючи тільки валідні пари tool_call ↔ tool.
+    """
+    valid_messages = []
+    tool_call_ids = set()
+
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                for tc in tool_calls:
+                    # tc might be a dict or an object depending on how it was stored
+                    if isinstance(tc, dict):
+                        t_id = tc.get("id")
+                    else:
+                        t_id = getattr(tc, "id", None)
+
+                    if t_id:
+                        tool_call_ids.add(t_id)
+            valid_messages.append(msg)
+        elif role == "tool":
+            # Only include tool response if we saw the call
+            t_id = msg.get("tool_call_id")
+            if t_id and t_id in tool_call_ids:
+                valid_messages.append(msg)
+            else:
+                logger.warning(f"Dropping orphaned tool response: {t_id}")
+        else:
+            valid_messages.append(msg)
+    return valid_messages
+
+
+async def chat_with_tools_async(
     messages: List[Dict[str, Any]],
     tools: List[Dict[str, Any]],
     *,
@@ -49,10 +88,8 @@ def chat_with_tools(
     max_completion_tokens: int = 256,
 ) -> Any:
     """
-    Обгортка над LiteLLM, яка викликає чат-модель з підтримкою tools.
-
-    API сумісний зі структурою OpenAI ChatCompletion, тому
-    код у server.py може й надалі працювати з response.choices[0].message.
+    Asynchronous wrapper over LiteLLM chat with tools.
+    API remains OpenAI-compatible.
     """
     import time
 
@@ -72,42 +109,9 @@ def chat_with_tools(
     )
 
     started = time.perf_counter()
-    # Не задаємо штучний ліміт max_completion_tokens — дозволяємо моделі
-    # повністю сформувати відповідь у межах її власного ліміту.
-    # Filter messages to ensure tool roles are valid
-    # LiteLLM/OpenAI requires that a message with role 'tool' MUST follow a message with 'tool_calls'
-    # and match the tool_call_id.
-    # We also need to ensure that if we have a tool call, we provide the result.
-    
-    valid_messages = []
-    tool_call_ids = set()
-    
-    for msg in messages:
-        role = msg.get("role")
-        if role == "assistant":
-            tool_calls = msg.get("tool_calls")
-            if tool_calls:
-                for tc in tool_calls:
-                    # tc might be a dict or an object depending on how it was stored
-                    if isinstance(tc, dict):
-                        t_id = tc.get("id")
-                    else:
-                        t_id = getattr(tc, "id", None)
-                    
-                    if t_id:
-                        tool_call_ids.add(t_id)
-            valid_messages.append(msg)
-        elif role == "tool":
-            # Only include tool response if we saw the call
-            t_id = msg.get("tool_call_id")
-            if t_id and t_id in tool_call_ids:
-                 valid_messages.append(msg)
-            else:
-                logger.warning(f"Dropping orphaned tool response: {t_id}")
-        else:
-            valid_messages.append(msg)
+    valid_messages = _filter_messages(messages)
 
-    response = litellm.completion(
+    response = await litellm.acompletion(
         model=settings.llm_model,
         messages=valid_messages,
         tools=tools,
@@ -152,3 +156,24 @@ def chat_with_tools(
     )
 
     return response
+
+
+def chat_with_tools(
+    messages: List[Dict[str, Any]],
+    tools: List[Dict[str, Any]],
+    *,
+    require_tools: bool = False,
+    max_completion_tokens: int = 256,
+) -> Any:
+    """
+    Backward-compatible synchronous entrypoint that runs the async version.
+    Use chat_with_tools_async from async contexts.
+    """
+    return asyncio.run(
+        chat_with_tools_async(
+            messages,
+            tools,
+            require_tools=require_tools,
+            max_completion_tokens=max_completion_tokens,
+        )
+    )

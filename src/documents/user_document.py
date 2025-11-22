@@ -6,7 +6,7 @@ from typing import Any, Dict
 from src.categories.index import list_entities, list_party_fields
 from src.common.config import settings
 from src.sessions.models import Session, SessionState
-from src.storage.fs import read_json, write_json
+from src.storage.fs import read_json, write_json, read_json_async, write_json_async
 
 
 def build_user_document(session: Session) -> Dict[str, Any]:
@@ -129,6 +129,16 @@ def save_user_document(session: Session) -> Path:
     return path
 
 
+async def save_user_document_async(session: Session) -> Path:
+    """
+    Асинхронне збереження user-document.
+    """
+    doc = build_user_document(session)
+    path = settings.meta_users_documents_root / f"{session.session_id}.json"
+    await write_json_async(path, doc)
+    return path
+
+
 def load_user_document(session_id: str) -> Dict[str, Any]:
     """
     Завантажує user-document JSON за session_id.
@@ -137,4 +147,14 @@ def load_user_document(session_id: str) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"User document for session '{session_id}' not found")
     return read_json(path)
+
+
+async def load_user_document_async(session_id: str) -> Dict[str, Any]:
+    """
+    Асинхронне завантаження user-document.
+    """
+    path = settings.meta_users_documents_root / f"{session_id}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"User document for session '{session_id}' not found")
+    return await read_json_async(path)
 

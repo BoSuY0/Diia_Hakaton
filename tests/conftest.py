@@ -3,6 +3,8 @@ from pathlib import Path
 import shutil
 
 import pytest
+import asyncio
+import inspect
 
 # Додаємо корінь проєкту в sys.path, щоб імпорти src.* працювали без інсталяції пакету
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -134,3 +136,24 @@ def mock_categories_data(mock_settings, monkeypatch):
     store.load() # Reload index
     
     return cat_id
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    """
+    Run all sync tests inside an asyncio event loop so they execute in async mode
+    without manual rewrite of each test. Coroutine tests are left to pytest-asyncio.
+    """
+    if inspect.iscoroutinefunction(pyfuncitem.obj):
+        return None  # let pytest-asyncio handle native async tests
+
+    testargs = {
+        arg: pyfuncitem.funcargs[arg]
+        for arg in pyfuncitem._fixtureinfo.argnames
+    }
+
+    async def _run():
+        pyfuncitem.obj(**testargs)
+
+    asyncio.run(_run())
+    return True

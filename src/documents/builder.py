@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from typing import Dict
+import sys
 
 from src.categories.index import Category, list_templates, store
 from src.common.errors import MetaNotFoundError, SessionNotFoundError
 from src.common.logging import get_logger
-from src.documents.docx_filler import fill_docx_template
-from src.sessions.store import load_session
+from src.documents.docx_filler import fill_docx_template_async
+from src.sessions.store import aload_session
 from src.storage.fs import output_document_path
 from src.services.fields import get_required_fields
 from src.common.config import settings
-import sys
 
 
 logger = get_logger(__name__)
@@ -18,25 +18,18 @@ logger = get_logger(__name__)
 sys.modules["src.documents.builder.settings"] = settings
 
 
-def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
+async def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
     logger.info(
-        "builder=build_contract session_id=%s template_id=%s partial_arg=%s", 
-        session_id, template_id, partial
+        "builder=build_contract session_id=%s template_id=%s partial_arg=%s",
+        session_id,
+        template_id,
+        partial,
     )
     try:
-        session = load_session(session_id)
+        session = await aload_session(session_id)
     except SessionNotFoundError as exc:
-        logger.error(
-            "builder=build_contract session_not_found session_id=%s", session_id
-        )
+        logger.error("builder=build_contract session_not_found session_id=%s", session_id)
         raise MetaNotFoundError(str(exc))
-
-    # Infer partial mode from session if not explicitly set
-    # REMOVED: We want strict validation if partial=False is passed (default), 
-    # regardless of filling_mode. order_contract relies on this.
-    # if not partial and session.filling_mode == "partial":
-    #    partial = True
-    #    logger.info("builder=build_contract inferred_partial=True from session.filling_mode")
 
     if session.template_id and session.template_id != template_id:
         logger.error(
@@ -66,21 +59,17 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         )
     template = templates[template_id]
 
-    # 1. Validate missing fields using shared service
-    # We get ALL required fields.
     required_fields = get_required_fields(session)
     missing_required = []
 
     for field in required_fields:
         is_ok = False
         if field.role:
-            # Check party fields
             role_fields = session.party_fields.get(field.role) or {}
             fs = role_fields.get(field.field_name)
             if fs and fs.status == "ok":
                 is_ok = True
         else:
-            # Check contract fields
             fs = session.contract_fields.get(field.field_name)
             if fs and fs.status == "ok":
                 is_ok = True
@@ -99,16 +88,19 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         )
         raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
 
-    # 2. Collect values for template
     field_values: Dict[str, str] = {}
-    # Видимий плейсхолдер для превʼю (не видаляється в docx_filler з keep_placeholders=True)
     PLACEHOLDER = "(                 )"
 
-    from src.categories.index import list_entities, list_party_fields, _load_meta, store as cat_store, Entity, PartyField
+    from src.categories.index import (
+        list_entities,
+        list_party_fields,
+        _load_meta,
+        store as cat_store,
+        Entity,
+        PartyField,
+    )
 
-    # Contract fields
     entities = list_entities(session.category_id)
-
     for entity in entities:
         entry = (session.all_data or {}).get(entity.field)
         value = None
@@ -116,32 +108,26 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             value = entry.get("current")
         else:
             value = entry
-        
+
         if value is None or str(value).strip() == "":
-            # Only use placeholder if it's partial build (preview)
             field_values[entity.field] = PLACEHOLDER if partial else ""
         else:
             field_values[entity.field] = str(value)
 
-    # Party fields
     category_def = cat_store.get(session.category_id)
     meta = _load_meta(category_def) if category_def else {}
     roles = meta.get("roles") or {}
     modules = meta.get("party_modules") or {}
 
     for role_key in roles.keys():
-        # Determine person type
         p_type = None
         if session.party_types and role_key in session.party_types:
             p_type = session.party_types[role_key]
         elif session.role == role_key and session.person_type:
-            # Fallback for backward compatibility
             p_type = session.person_type
-
         if not p_type:
             p_type = "individual"
 
-        # Get fields for this type
         party_fields_list = []
         module = modules.get(p_type)
         if module:
@@ -182,7 +168,7 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         if fallback.exists():
             template_path = fallback
 
-    fill_docx_template(
+    await fill_docx_template_async(
         template_path,
         field_values,
         output_path,
@@ -199,3 +185,7 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         "filename": output_path.name,
         "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
+
+
+# Backward-compatible alias for code paths expecting build_contract_async
+build_contract_async = build_contract

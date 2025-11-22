@@ -5,6 +5,8 @@ from typing import Dict
 import re
 
 from docx import Document  # type: ignore
+import asyncio
+from src.common.async_utils import run_sync
 
 
 def _iter_paragraphs(doc: Document):
@@ -23,6 +25,17 @@ def fill_docx_template(
     output_path: Path,
     *,
     keep_placeholders: bool = False,
+) -> Path:
+    return _fill_docx_template_sync(template_path, field_values, output_path, keep_placeholders=keep_placeholders)
+
+
+def _fill_docx_template_sync(
+    template_path: Path,
+    field_values: Dict[str, str],
+    output_path: Path,
+    *,
+    keep_placeholders: bool = False,
+    log_context: tuple[str, str] | None = None,
 ) -> Path:
     if template_path.exists():
         # Розширюємо словник полів синонімами для деяких party-полів,
@@ -85,3 +98,20 @@ def fill_docx_template(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     return output_path
+
+
+async def fill_docx_template_async(
+    template_path: Path,
+    field_values: Dict[str, str],
+    output_path: Path,
+    *,
+    keep_placeholders: bool = False,
+) -> Path:
+    # python-docx is sync; run in threadpool
+    return await run_sync(
+        _fill_docx_template_sync,
+        template_path,
+        field_values,
+        output_path,
+        keep_placeholders=keep_placeholders,
+    )

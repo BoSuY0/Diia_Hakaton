@@ -117,7 +117,6 @@ def setup_logging(default_level: int = logging.INFO) -> None:
 def get_logger(name: str) -> logging.Logger:
     setup_logging()
     logger = logging.getLogger(name)
-    # Якщо у дочірнього логгера немає хендлерів — наслідуємо root, щоб тести бачили handler.
-    if not logger.handlers:
-        logger.handlers.extend(logging.getLogger().handlers)
+    # Використовуємо хендлери root через propagate, щоб уникнути дублювання.
+    logger.propagate = True
     return logger

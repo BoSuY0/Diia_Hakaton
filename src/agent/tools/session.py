@@ -17,7 +17,11 @@ from src.common.enums import PersonType, FillingMode
 from src.common.logging import get_logger
 from src.documents.builder import build_contract as build_contract_document
 from src.sessions.models import FieldState, SessionState
-from src.sessions.store import load_session, transactional_session
+from src.sessions.store import (
+    aload_session,
+    atransactional_session,
+    aget_or_create_session,
+)
 from src.validators.core import validate_value
 from src.services.fields import validate_session_readiness
 
@@ -74,11 +78,11 @@ class SetTemplateTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         template_id = args["template_id"]
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             logger.info(
                 "tool=set_template session_id=%s category_id=%s template_id=%s",
                 session_id,
@@ -102,7 +106,6 @@ class SetTemplateTool(BaseTool):
             from src.services.session import set_session_template
             set_session_template(session, template_id)
 
-            # Return specific values, session is auto-saved
             return {
                 "ok": True,
                 "category_id": session.category_id,
@@ -142,7 +145,7 @@ class SetPartyContextTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         role = args["role"]
         person_type = args["person_type"]
@@ -157,7 +160,7 @@ class SetPartyContextTool(BaseTool):
 
         # Validate person_type against category metadata
         try:
-            session = load_session(session_id)
+            session = await aload_session(session_id)
             if not session.category_id:
                  return {"ok": False, "error": "Спочатку оберіть категорію."}
             from src.categories.index import store as category_store, _load_meta
@@ -190,7 +193,7 @@ class SetPartyContextTool(BaseTool):
              # Let's generate a temporary one if missing, but warn.
              client_id = "anon_" + session_id # Fallback
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             from src.services.session import set_party_type, claim_session_role
             
             # Claim role
@@ -235,10 +238,10 @@ class GetPartyFieldsForSessionTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         # Read-only, use load_session
-        session = load_session(session_id)
+        session = await aload_session(session_id)
 
         if not session.category_id:
             return {
@@ -333,7 +336,7 @@ class UpsertFieldTool(BaseTool):
             "required": ["session_id", "field", "value"],
             "additionalProperties": False,
         }
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         field = args["field"]
         value = args["value"]
@@ -351,7 +354,7 @@ class UpsertFieldTool(BaseTool):
         # Actually, we want to store the REAL value, so we unmask.
         real_value = self._unmask_value(value, tags)
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             # Access Control Check
             client_id = context.get("client_id")
 
@@ -460,10 +463,10 @@ class GetSessionSummaryTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         # Read-only
-        session = load_session(session_id)
+        session = await aload_session(session_id)
         logger.info(
             "tool=get_session_summary session_id=%s category_id=%s template_id=%s state=%s",
             session_id,
@@ -537,18 +540,18 @@ class SetFillingModeTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         mode = args["mode"]
         client_id = context.get("client_id")
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             # Access check
             if session.party_users:
-                 if not client_id:
-                      return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
-                 if client_id not in session.party_users.values():
-                      return {"ok": False, "error": "Ви не є учасником цієї сесії."}
+                if not client_id:
+                    return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
+                if client_id not in session.party_users.values():
+                    return {"ok": False, "error": "Ви не є учасником цієї сесії."}
 
             session.filling_mode = mode
             return {
@@ -592,31 +595,16 @@ class BuildContractTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         template_id = args["template_id"]
         logger.info(
             "tool=build_contract session_id=%s template_id=%s", session_id, template_id
         )
-        # Build contract is READ ONLY operation on session data usually,
-        # but it updates session state to BUILT.
-        # build_contract_document might fail if we lock session inside it using load_session?
-        # Let's check builder.py. It calls load_session.
-        # If we wrap this call in transactional_session, and build_contract calls load_session (no lock), it works (reentrancy is fine for read vs write lock? No, load_session has NO lock).
-        # But we want to update session state.
+        # build_contract_document is async; call it directly to avoid wrapping a coroutine in run_sync
+        result = await build_contract_document(session_id=session_id, template_id=template_id)
 
-        # Ideally:
-        # 1. Build document (read session)
-        # 2. Update session state (write session)
-
-        # If build_contract_document takes long time, holding lock is bad?
-        # But we need consistency.
-
-        # Let's look at builder.py.
-
-        result = build_contract_document(session_id=session_id, template_id=template_id)
-
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             session.state = SessionState.BUILT
 
         return result
@@ -650,11 +638,11 @@ class SignContractTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         role_arg = args.get("role")
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
             # Determine role
             role = role_arg or session.role
             if not role:

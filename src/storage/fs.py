@@ -10,6 +10,8 @@ from typing import Any, Optional
 from contextlib import contextmanager
 
 from src.common.config import settings
+from src.common.async_utils import run_sync
+import aiofiles
 
 
 def ensure_directories() -> None:
@@ -201,6 +203,37 @@ def _write_atomic(path: Path, data: Any) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+# Async wrappers to avoid blocking event loop
+async def read_json_async(path: Path) -> Any:
+    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+        content = await f.read()
+    return json.loads(content)
+
+
+async def write_json_async(path: Path, data: Any, locked_by_caller: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if locked_by_caller:
+        await _write_atomic_async(path, data)
+    else:
+        # FileLock is sync; use threadpool to avoid blocking loop
+        await run_sync(write_json, path, data, locked_by_caller=locked_by_caller)
+
+
+async def _write_atomic_async(path: Path, data: Any) -> None:
+    tmp_path = path.with_suffix(".tmp")
+    try:
+        async with aiofiles.open(tmp_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            await f.flush()
+        await run_sync(os.replace, tmp_path, path)
     finally:
         if os.path.exists(tmp_path):
             try:

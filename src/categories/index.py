@@ -174,6 +174,59 @@ def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
     return fields
 
 
+def get_party_schema(category_id: str) -> Dict[str, Any]:
+    """
+    Повертає опис ролей договору та поля для кожного типу особи
+    у межах категорії. Використовується для побудови форм на фронтенді
+    без жорсткого кодування сторін і полів.
+    """
+    category = store.get(category_id)
+    if not category:
+        raise ValueError(f"Unknown category_id: {category_id}")
+
+    data = _load_meta(category)
+    roles_raw = data.get("roles") or {}
+    modules_raw = data.get("party_modules") or {}
+
+    roles: List[Dict[str, Any]] = []
+    allowed_fallback = list(modules_raw.keys())
+    for role_id, info in roles_raw.items():
+        allowed_types = info.get("allowed_person_types") or allowed_fallback
+        roles.append(
+            {
+                "id": role_id,
+                "label": info.get("label", role_id),
+                "allowed_person_types": allowed_types,
+            }
+        )
+
+    person_types: List[Dict[str, Any]] = []
+    for person_type, info in modules_raw.items():
+        fields: List[Dict[str, Any]] = []
+        for raw in info.get("fields", []):
+            fields.append(
+                {
+                    "field": raw["field"],
+                    "label": raw.get("label", raw["field"]),
+                    "required": bool(raw.get("required", True)),
+                    "type": raw.get("type", "text"),
+                }
+            )
+        person_types.append(
+            {
+                "person_type": person_type,
+                "label": info.get("label", person_type),
+                "fields": fields,
+            }
+        )
+
+    return {
+        "category_id": category_id,
+        "roles": roles,
+        "person_types": person_types,
+    }
+
+
 def find_category_by_query(query: str) -> Optional[Category]:
     """
     Search category by keywords overlap + label overlap.

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-import time
+import asyncio
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Generator
+from typing import Generator, Any
 
 from src.common.config import settings
 from src.common.errors import SessionNotFoundError
-from src.documents.user_document import save_user_document
+from src.documents.user_document import save_user_document_async
 from src.sessions.models import Session
 from src.sessions.store_utils import _from_dict, session_to_dict
 from src.storage.redis_client import get_redis
@@ -41,91 +41,91 @@ def _session_ttl_seconds() -> int:
     return max(ttl_hours * 3600, 1)
 
 
-def save_session(session: Session) -> None:
-    redis = get_redis()
+async def save_session(session: Session) -> None:
+    redis = await get_redis()
     session.updated_at = datetime.now()
 
     data = session_to_dict(session)
     payload = json.dumps(data, ensure_ascii=False)
-    redis.set(_session_key(session.session_id), payload, ex=_session_ttl_seconds())
+    await redis.set(_session_key(session.session_id), payload, ex=_session_ttl_seconds())
 
     party_users = session.party_users or {}
     if party_users:
         ts = session.updated_at.timestamp()
+        mapping = {session.session_id: ts}
         for uid in party_users.values():
             if uid:
-                redis.zadd(_user_index_key(uid), {session.session_id: ts})
+                await redis.zadd(_user_index_key(uid), mapping)
 
-    # Синхронізуємо user-document як і раніше
     try:
-        save_user_document(session)
+        await save_user_document_async(session)
     except Exception:
-        # Не ламаємо основний шлях збереження сесії, якщо побудова user-document впала.
         pass
 
 
-def load_session(session_id: str) -> Session:
-    redis = get_redis()
-    raw = redis.get(_session_key(session_id))
+async def load_session(session_id: str) -> Session:
+    redis = await get_redis()
+    raw = await redis.get(_session_key(session_id))
     if raw is None:
         raise SessionNotFoundError(f"Session '{session_id}' not found")
     data = json.loads(raw)
     return _from_dict(data)
 
 
-def get_or_create_session(session_id: str, user_id: str | None = None) -> Session:
+async def get_or_create_session(session_id: str, user_id: str | None = None) -> Session:
     try:
-        return load_session(session_id)
+        return await load_session(session_id)
     except SessionNotFoundError:
         session = Session(session_id=session_id, user_id=user_id)
-        save_session(session)
+        await save_session(session)
         return session
 
 
-@contextmanager
-def transactional_session(
+@asynccontextmanager
+async def transactional_session(
     session_id: str,
     lock_ttl: int = DEFAULT_LOCK_TTL,
     wait_timeout: int = DEFAULT_LOCK_WAIT_TIMEOUT,
-) -> Generator[Session, None, None]:
-    redis = get_redis()
+):
+    redis = await get_redis()
     token = str(uuid.uuid4())
-    deadline = time.time() + wait_timeout
+    deadline = asyncio.get_event_loop().time() + wait_timeout
     lock_key = _lock_key(session_id)
 
-    while time.time() < deadline:
-        if redis.set(lock_key, token, nx=True, ex=lock_ttl):
+    while asyncio.get_event_loop().time() < deadline:
+        acquired = await redis.set(lock_key, token, nx=True, ex=lock_ttl)
+        if acquired:
             break
-        time.sleep(0.05)
+        await asyncio.sleep(0.05)
     else:
         raise TimeoutError(f"Could not acquire lock for session {session_id}")
 
     try:
-        session = load_session(session_id)
+        session = await load_session(session_id)
         yield session
-        save_session(session)
+        await save_session(session)
     finally:
         try:
-            val = redis.get(lock_key)
+            val = await redis.get(lock_key)
             if val == token:
-                redis.delete(lock_key)
+                await redis.delete(lock_key)
         except Exception:
             pass
 
 
-def list_user_sessions(client_id: str) -> list[Session]:
+async def list_user_sessions(client_id: str) -> list[Session]:
     if not client_id:
         return []
 
-    redis = get_redis()
+    redis = await get_redis()
     key = _user_index_key(client_id)
-    session_ids = redis.zrevrange(key, 0, -1)
+    session_ids = await redis.zrevrange(key, 0, -1)
     sessions: list[Session] = []
     stale_ids: list[str] = []
 
     for session_id in session_ids:
         try:
-            session = load_session(session_id)
+            session = await load_session(session_id)
         except SessionNotFoundError:
             stale_ids.append(session_id)
             continue
@@ -137,7 +137,7 @@ def list_user_sessions(client_id: str) -> list[Session]:
         sessions.append(session)
 
     if stale_ids:
-        redis.zrem(key, *stale_ids)
+        await redis.zrem(key, *stale_ids)
 
     sessions.sort(key=lambda s: s.updated_at, reverse=True)
     return sessions

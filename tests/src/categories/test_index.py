@@ -1,6 +1,5 @@
 import pytest
-import json
-from src.categories.index import store, list_templates, list_entities, list_party_fields
+from src.categories.index import store, list_templates, list_entities, list_party_fields, get_party_schema
 
 
 
@@ -24,3 +23,13 @@ def test_list_party_fields(mock_categories_data):
     pfs = list_party_fields("test_cat", "individual")
     assert len(pfs) == 1
     assert pfs[0].field == "name"
+
+
+def test_get_party_schema(mock_categories_data):
+    schema = get_party_schema("test_cat")
+    assert schema["category_id"] == "test_cat"
+    assert any(r["id"] == "lessor" for r in schema["roles"])
+    assert any(pt["person_type"] == "individual" for pt in schema["person_types"])
+    # Ensure fields are included for person types
+    indiv = next(pt for pt in schema["person_types"] if pt["person_type"] == "individual")
+    assert indiv["fields"]

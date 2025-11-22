@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Generator
 
@@ -11,13 +12,16 @@ from src.common.errors import SessionNotFoundError
 from src.documents.user_document import save_user_document
 from src.sessions.models import Session
 from src.sessions.store_utils import _from_dict, session_to_dict
+from src.common.async_utils import run_sync
 
 _sessions: dict[str, str] = {}
 _expires_at: dict[str, datetime] = {}
 _session_users: dict[str, set[str]] = {}
 _user_index: dict[str, dict[str, int]] = {}
 _locks: dict[str, threading.RLock] = {}
+_async_locks: dict[str, asyncio.Lock] = {}
 _global_lock = threading.RLock()
+_async_global_lock = asyncio.Lock()
 
 
 def _session_ttl_seconds() -> int:
@@ -35,6 +39,13 @@ def _get_lock(session_id: str) -> threading.RLock:
             lock = threading.RLock()
             _locks[session_id] = lock
         return lock
+
+
+def _get_async_lock(session_id: str) -> asyncio.Lock:
+    # This is intentionally not awaited; contention is low and lock creation is cheap.
+    if session_id not in _async_locks:
+        _async_locks[session_id] = asyncio.Lock()
+    return _async_locks[session_id]
 
 
 def _evict_if_expired(session_id: str) -> bool:
@@ -160,3 +171,83 @@ def _reset_for_tests() -> None:
         _session_users.clear()
         _user_index.clear()
         _locks.clear()
+
+
+# Async variants (lightweight locking; reuses same in-memory structures)
+async def asave_session(session: Session) -> None:
+    session.updated_at = datetime.now()
+    data = session_to_dict(session)
+    payload = json.dumps(data, ensure_ascii=False)
+    ttl_seconds = _session_ttl_seconds()
+    expire_at = session.updated_at + timedelta(seconds=ttl_seconds)
+
+    async with _async_global_lock:
+        _sessions[session.session_id] = payload
+        _expires_at[session.session_id] = expire_at
+        _update_indexes(session)
+
+    try:
+        await run_sync(save_user_document, session)
+    except Exception:
+        pass
+
+
+async def aload_session(session_id: str) -> Session:
+    async with _async_global_lock:
+        if _evict_if_expired(session_id):
+            raise SessionNotFoundError(f"Session '{session_id}' not found")
+        payload = _sessions.get(session_id)
+    if payload is None:
+        raise SessionNotFoundError(f"Session '{session_id}' not found")
+    data = json.loads(payload)
+    return _from_dict(data)
+
+
+async def aget_or_create_session(session_id: str, user_id: str | None = None) -> Session:
+    try:
+        return await aload_session(session_id)
+    except SessionNotFoundError:
+        session = Session(session_id=session_id, user_id=user_id)
+        await asave_session(session)
+        return session
+
+
+@asynccontextmanager
+async def atransactional_session(session_id: str):
+    lock = _get_async_lock(session_id)
+    async with lock:
+        session = await aload_session(session_id)
+        yield session
+        await asave_session(session)
+
+
+async def alist_user_sessions(client_id: str) -> list[Session]:
+    if not client_id:
+        return []
+
+    async with _async_global_lock:
+        idx = _user_index.get(client_id, {})
+        session_ids = sorted(idx.keys(), key=lambda sid: idx[sid], reverse=True)
+
+    sessions: list[Session] = []
+    stale_ids: list[str] = []
+    for sid in session_ids:
+        try:
+            s = await aload_session(sid)
+        except SessionNotFoundError:
+            stale_ids.append(sid)
+            continue
+        if client_id not in (s.party_users or {}).values():
+            stale_ids.append(sid)
+            continue
+        sessions.append(s)
+
+    if stale_ids:
+        async with _async_global_lock:
+            for sid in stale_ids:
+                if client_id in _user_index:
+                    _user_index[client_id].pop(sid, None)
+            if client_id in _user_index and not _user_index[client_id]:
+                _user_index.pop(client_id, None)
+
+    return sessions

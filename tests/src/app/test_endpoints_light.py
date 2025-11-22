@@ -1,5 +1,3 @@
-import json
-
 from fastapi.testclient import TestClient
 
 from src.app.server import app
@@ -49,6 +47,11 @@ def test_categories_endpoints(mock_settings, mock_categories_data):
     assert resp3.status_code == 200
     resp4 = client.get(f"/categories/{mock_categories_data}/entities")
     assert resp4.status_code == 200
+    resp5 = client.get(f"/categories/{mock_categories_data}/parties")
+    assert resp5.status_code == 200
+    data = resp5.json()
+    assert data["roles"]
+    assert data["person_types"]
 
 
 def test_chat_endpoint_with_mock_llm(monkeypatch, mock_settings):

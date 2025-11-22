@@ -9,13 +9,18 @@ from src.categories.index import (
     Entity,
     TemplateInfo,
     find_category_by_query,
+    get_party_schema,
     list_entities,
     list_templates,
     store as category_store,
 )
 from src.common.logging import get_logger
 from src.sessions.models import SessionState
-from src.sessions.store import get_or_create_session, save_session, transactional_session, load_session
+from src.sessions.store import (
+    aget_or_create_session,
+    atransactional_session,
+    aload_session,
+)
 
 logger = get_logger(__name__)
 
@@ -54,7 +59,7 @@ class FindCategoryByQueryTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         query = (args.get("query") or "").strip()
         logger.info('tool=find_category_by_query query="%s"', query)
 
@@ -110,7 +115,7 @@ class GetTemplatesForCategoryTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         category_id = args["category_id"]
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
@@ -170,7 +175,7 @@ class GetCategoryEntitiesTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         category_id = args["category_id"]
         logger.info("tool=get_category_entities category_id=%s", category_id)
 
@@ -215,6 +220,43 @@ class GetCategoryEntitiesTool(BaseTool):
 
 
 @register_tool
+class GetCategoryPartiesTool(BaseTool):
+    @property
+    def name(self) -> str:
+        return "get_category_parties"
+
+    @property
+    def description(self) -> str:
+        return "Повертає список ролей договору та полів для доступних типів осіб у категорії."
+
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        ids = _category_ids()
+        return {
+            "type": "object",
+            "properties": {
+                "category_id": (
+                    {
+                        "type": "string",
+                        "enum": ids,
+                    }
+                    if ids
+                    else {
+                        "type": "string",
+                        "minLength": 1,
+                    }
+                )
+            },
+            "required": ["category_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+        category_id = args["category_id"]
+        return get_party_schema(category_id)
+
+
+@register_tool
 class SetCategoryTool(BaseTool):
     @property
     def name(self) -> str:
@@ -250,7 +292,7 @@ class SetCategoryTool(BaseTool):
             "additionalProperties": False,
         }
 
-    def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         category_id = args["category_id"]
 
@@ -259,9 +301,9 @@ class SetCategoryTool(BaseTool):
         from src.sessions.actions import set_session_category
 
         # Гарантуємо, що файл сесії існує, щоб transactional_session не впав із 404
-        get_or_create_session(session_id)
+        await aget_or_create_session(session_id)
 
-        with transactional_session(session_id) as session:
+        async with atransactional_session(session_id) as session:
              ok = set_session_category(session, category_id)
 
         if not ok:
