@@ -9,11 +9,19 @@ from src.sessions.models import SessionState
 
 logger = logging.getLogger(__name__)
 
+
+def _is_filesystem_backend() -> bool:
+    return getattr(settings, "session_backend", "redis").lower() == "fs"
+
 def clean_stale_sessions(max_age_hours: int = 24):
     """
     Видаляє сесії, які не оновлювалися більше max_age_hours годин
     і не перебувають у "важливому" стані (ready_to_sign, completed).
     """
+    if not _is_filesystem_backend():
+        logger.debug("Non-filesystem backend detected; skipping clean_stale_sessions")
+        return
+
     sessions_dir = settings.sessions_root
     if not sessions_dir.exists():
         logger.warning(f"Sessions directory not found: {sessions_dir}")
@@ -72,6 +80,10 @@ def clean_abandoned_sessions(active_session_ids: set[str], grace_period_minutes:
     2. Сесія "порожня" (немає записаних даних в all_data).
     3. Сесія не оновлювалася протягом grace_period_minutes (захист від короткочасних розривів).
     """
+    if not _is_filesystem_backend():
+        logger.debug("Non-filesystem backend detected; skipping clean_abandoned_sessions")
+        return
+
     sessions_dir = settings.sessions_root
     if not sessions_dir.exists():
         return

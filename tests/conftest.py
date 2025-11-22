@@ -35,6 +35,7 @@ def temp_workspace(tmp_path):
 def mock_settings(temp_workspace):
     """Overrides settings to use the temporary workspace."""
     from src.common.config import settings
+    from src.sessions import store_memory, store
     
     # Store original values to restore after test
     original_values = {}
@@ -42,7 +43,8 @@ def mock_settings(temp_workspace):
         "project_root", "assets_root", "documents_root", "meta_root",
         "meta_categories_root", "meta_users_root", "meta_users_documents_root",
         "sessions_root", "documents_files_root", "filled_documents_root",
-        "default_documents_root", "users_documents_root"
+        "default_documents_root", "users_documents_root",
+        "session_backend", "session_ttl_hours", "redis_url",
     ]
     
     for key in keys_to_update:
@@ -66,6 +68,11 @@ def mock_settings(temp_workspace):
     settings.filled_documents_root = settings.documents_files_root / "filled_documents"
     settings.default_documents_root = settings.documents_files_root / "default_documents_files"
     settings.users_documents_root = settings.documents_files_root / "users_documents_files"
+    settings.session_backend = "memory"
+    settings.session_ttl_hours = 24
+    settings.redis_url = None
+    store._redis_disabled = False
+    store_memory._reset_for_tests()
 
     # Ensure directories exist
     settings.meta_categories_root.mkdir(parents=True, exist_ok=True)

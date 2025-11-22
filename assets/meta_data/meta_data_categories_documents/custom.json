@@ -152,5 +152,11 @@
             ]
         }
     },
-    "contract_fields": []
+    "contract_fields": [
+        { "field": "contract_title",  "label": "Назва договору",                 "required": true },
+        { "field": "contract_date",   "label": "Дата договору",                  "required": true },
+        { "field": "contract_city",   "label": "Місто укладення (генерується ЛЛМ)",    "required": false, "ai_required": true },
+        { "field": "contract_subject","label": "Предмет договору (генерується ЛЛМ)",   "required": false, "ai_required": true },
+        { "field": "contract_terms",  "label": "Основні умови (генерується ЛЛМ)",      "required": false, "ai_required": true }
+    ]
 }

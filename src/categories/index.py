@@ -26,6 +26,7 @@ class Entity:
     type: str
     label: str
     required: bool
+    ai_required: bool = False
 
 
 @dataclass
@@ -96,19 +97,6 @@ def _load_meta(category: Category) -> dict:
         return json.load(f)
 
 
-def get_dynamic_template_meta(template_id: str) -> Dict[str, Any]:
-    """
-    Loads metadata for a dynamic template created on the fly.
-    """
-    path = settings.assets_dir / "meta_data" / "dynamic" / f"{template_id}.json"
-    if not path.exists():
-        logger.warning(f"Dynamic template meta not found: {path}")
-        return {}
-    
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 def list_entities(category_id: str) -> List[Entity]:
     category = store.get(category_id)
     if not category:
@@ -126,6 +114,7 @@ def list_entities(category_id: str) -> List[Entity]:
                     type="text",
                     label=raw.get("label", raw["field"]),
                     required=bool(raw.get("required", True)),
+                    ai_required=bool(raw.get("ai_required", False)),
                 )
             )
         return entities
@@ -228,8 +217,12 @@ def find_category_by_query(query: str) -> Optional[Category]:
             best_score = total_score
             best = category
 
-    if best and best.id == "custom":
-        # Категорія 'custom' вимкнена
-        return None
+    if best:
+        return best
 
-    return best
+    # Якщо немає точного збігу, повертаємо кастомну категорію як дефолтну, якщо вона існує
+    custom = store.categories.get("custom")
+    if custom:
+        return custom
+
+    return None

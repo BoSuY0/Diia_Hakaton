@@ -45,6 +45,29 @@ class Settings:
         self.filled_root: Path = self.sessions_root
         self.output_root: Path = self.filled_documents_root
 
+        # Сторедж сесій
+        self.redis_url: str | None = os.getenv("REDIS_URL")
+        self.session_backend: str = os.getenv("SESSION_BACKEND", "redis").lower()
+        try:
+            self.session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "24"))
+        except ValueError:
+            self.session_ttl_hours = 24
+        self.valkey_use_glide: bool = os.getenv("USE_VALKEY_GLIDE", "false").lower() == "true"
+        self.valkey_addresses: list[tuple[str, int]] = []
+        addresses_env = os.getenv("VALKEY_ADDRESSES")
+        if addresses_env:
+            parts = [p.strip() for p in addresses_env.split(",") if p.strip()]
+            for part in parts:
+                if ":" in part:
+                    host, port = part.split(":", 1)
+                    try:
+                        self.valkey_addresses.append((host, int(port)))
+                    except ValueError:
+                        continue
+                else:
+                    self.valkey_addresses.append((part, 6379))
+        self.valkey_use_tls: bool = os.getenv("VALKEY_USE_TLS", "true").lower() == "true"
+
         # LLM (загальні змінні середовища, не прив'язані до провайдера)
         # Основні:
         #   LLM_API_KEY   — ключ до активної модельки (Anthropic / OpenAI / інші через LiteLLM)
@@ -139,3 +162,24 @@ else:
         "*"
     ]
 Settings.cors_allow_credentials = "*" not in Settings.cors_origins
+Settings.redis_url = os.getenv("REDIS_URL")
+Settings.session_backend = os.getenv("SESSION_BACKEND", "redis").lower()
+try:
+    Settings.session_ttl_hours = int(os.getenv("SESSION_TTL_HOURS", "24"))
+except ValueError:
+    Settings.session_ttl_hours = 24
+Settings.valkey_use_glide = os.getenv("USE_VALKEY_GLIDE", "false").lower() == "true"
+Settings.valkey_addresses = []
+_addresses_env = os.getenv("VALKEY_ADDRESSES")
+if _addresses_env:
+    _parts = [p.strip() for p in _addresses_env.split(",") if p.strip()]
+    for _part in _parts:
+        if ":" in _part:
+            _host, _port = _part.split(":", 1)
+            try:
+                Settings.valkey_addresses.append((_host, int(_port)))
+            except ValueError:
+                continue
+        else:
+            Settings.valkey_addresses.append((_part, 6379))
+Settings.valkey_use_tls = os.getenv("VALKEY_USE_TLS", "true").lower() == "true"

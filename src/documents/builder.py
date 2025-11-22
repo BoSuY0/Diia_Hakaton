@@ -55,25 +55,16 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         raise MetaNotFoundError(f"Unknown category_id: {session.category_id}")
 
     templates = {t.id: t for t in list_templates(session.category_id)}
+
+    if template_id.startswith("dynamic_"):
+        logger.error("builder=build_contract dynamic_templates_removed template_id=%s", template_id)
+        raise MetaNotFoundError("Dynamic templates are no longer supported")
+
     if template_id not in templates:
         raise MetaNotFoundError(
             f"Template '{template_id}' not found in category '{session.category_id}'"
         )
     template = templates[template_id]
-
-    # Dynamic Template Handling
-    is_dynamic = template_id.startswith("dynamic_")
-    dynamic_meta = {}
-    
-    if is_dynamic:
-        from src.categories.index import get_dynamic_template_meta
-        dynamic_meta = get_dynamic_template_meta(template_id)
-        if not dynamic_meta:
-             raise MetaNotFoundError(f"Dynamic template meta not found: {template_id}")
-        
-        # Override template object locally
-        from src.categories.index import TemplateInfo
-        template = TemplateInfo(id=template_id, name=dynamic_meta.get("label", "Dynamic Contract"), file=f"{template_id}.docx")
 
     # 1. Validate missing fields using shared service
     # We get ALL required fields.
@@ -93,8 +84,8 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             fs = session.contract_fields.get(field.field_name)
             if fs and fs.status == "ok":
                 is_ok = True
-        
-        if not is_ok:
+
+        if not is_ok and (field.required or field.ai_required):
             missing_required.append(field.key)
 
     if missing_required and not partial:
@@ -116,14 +107,8 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
     from src.categories.index import list_entities, list_party_fields, _load_meta, store as cat_store, Entity, PartyField
 
     # Contract fields
-    if is_dynamic:
-        # Use fields from dynamic meta
-        entities = []
-        for raw in dynamic_meta.get("contract_fields", []):
-             entities.append(Entity(field=raw["field"], type="text", label=raw["label"], required=raw.get("required", True)))
-    else:
-        entities = list_entities(session.category_id)
-        
+    entities = list_entities(session.category_id)
+
     for entity in entities:
         entry = (session.all_data or {}).get(entity.field)
         value = None
@@ -139,17 +124,10 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
             field_values[entity.field] = str(value)
 
     # Party fields
-    if is_dynamic:
-        roles = dynamic_meta.get("roles") or {}
-        # For dynamic templates, we might have custom party fields defined in meta
-        # But usually we stick to standard modules.
-        # Let's check if dynamic meta overrides party modules
-        modules = dynamic_meta.get("party_modules") or {}
-    else:
-        category_def = cat_store.get(session.category_id)
-        meta = _load_meta(category_def) if category_def else {}
-        roles = meta.get("roles") or {}
-        modules = meta.get("party_modules") or {}
+    category_def = cat_store.get(session.category_id)
+    meta = _load_meta(category_def) if category_def else {}
+    roles = meta.get("roles") or {}
+    modules = meta.get("party_modules") or {}
 
     for role_key in roles.keys():
         # Determine person type
@@ -157,7 +135,7 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         if session.party_types and role_key in session.party_types:
             p_type = session.party_types[role_key]
         elif session.role == role_key and session.person_type:
-                # Fallback for backward compatibility
+            # Fallback for backward compatibility
             p_type = session.person_type
 
         if not p_type:
@@ -167,12 +145,17 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
         party_fields_list = []
         module = modules.get(p_type)
         if module:
-             for raw in module.get("fields", []):
-                party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
-        
-        # Add standard fields if not dynamic (or if dynamic uses standard modules logic)
-        if not is_dynamic and not party_fields_list:
-             party_fields_list = list_party_fields(session.category_id, p_type)
+            for raw in module.get("fields", []):
+                party_fields_list.append(
+                    PartyField(
+                        field=raw["field"],
+                        label=raw.get("label", raw["field"]),
+                        required=raw.get("required", True),
+                    )
+                )
+
+        if not party_fields_list:
+            party_fields_list = list_party_fields(session.category_id, p_type)
 
         for pf in party_fields_list:
             key = f"{role_key}.{pf.field}"
@@ -189,18 +172,15 @@ def build_contract(session_id: str, template_id: str, partial: bool = False) -> 
                 field_values[key] = str(value)
 
     output_path = output_document_path(template.id, session_id, ext="docx")
-    if is_dynamic:
-        template_path = settings.assets_dir / "documents" / "templates" / "dynamic" / template.file
-    else:
-        template_path = (
-            settings.default_documents_root
-            / category.id
-            / template.file
-        )
-        if not template_path.exists():
-            fallback = settings.default_documents_root / template.file
-            if fallback.exists():
-                template_path = fallback
+    template_path = (
+        settings.default_documents_root
+        / category.id
+        / template.file
+    )
+    if not template_path.exists():
+        fallback = settings.default_documents_root / template.file
+        if fallback.exists():
+            template_path = fallback
 
     fill_docx_template(
         template_path,

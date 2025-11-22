@@ -13,6 +13,7 @@ class FieldSchema:
     role: Optional[str] # e.g. "lessor" or None
     label: str
     required: bool
+    ai_required: bool = False
     type: str = "text"
 
 def get_required_fields(session: Session) -> List[FieldSchema]:
@@ -25,54 +26,41 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
 
     result: List[FieldSchema] = []
 
-    # Dynamic Template Handling
-    is_dynamic = session.template_id and session.template_id.startswith("dynamic_")
-    dynamic_meta = {}
-    if is_dynamic:
-        from src.categories.index import get_dynamic_template_meta
-        dynamic_meta = get_dynamic_template_meta(session.template_id)
+    if session.template_id and session.template_id.startswith("dynamic_"):
+        raise ValueError("Dynamic templates are no longer supported")
 
     # 1. Contract Fields
-    if is_dynamic:
-        from src.categories.index import Entity
-        entities = []
-        for raw in dynamic_meta.get("contract_fields", []):
-             entities.append(Entity(field=raw["field"], type="text", label=raw["label"], required=raw.get("required", True)))
-    else:
-        entities = list_entities(session.category_id)
+    entities = list_entities(session.category_id)
 
     for e in entities:
-        if e.required:
+        if e.required or getattr(e, "ai_required", False):
             result.append(FieldSchema(
                 key=e.field,
                 field_name=e.field,
                 role=None,
                 label=e.label,
-                required=True,
+                required=bool(e.required),
+                ai_required=getattr(e, "ai_required", False),
                 type=e.type
             ))
 
     # 2. Party Fields
-    if is_dynamic:
-        roles = dynamic_meta.get("roles") or {}
-        modules = dynamic_meta.get("party_modules") or {}
+    category_def = cat_store.get(session.category_id)
+    if category_def:
+        meta = _load_meta(category_def)
+        roles = meta.get("roles") or {}
+        modules = meta.get("party_modules") or {}
     else:
-        category_def = cat_store.get(session.category_id)
-        if category_def:
-            meta = _load_meta(category_def)
-            roles = meta.get("roles") or {}
-            modules = meta.get("party_modules") or {}
-        else:
-            roles = {}
-            modules = {}
+        roles = {}
+        modules = {}
 
     # Filter roles if filling_mode is partial
     target_roles = list(roles.keys())
     if session.filling_mode == "partial" and session.role:
-            # In partial mode, we only require fields for the CURRENT role.
-            # Unless the role is not in the category (which shouldn't happen if validated).
-            if session.role in roles:
-                target_roles = [session.role]
+        # In partial mode, we only require fields for the CURRENT role.
+        # Unless the role is not in the category (which shouldn't happen if validated).
+        if session.role in roles:
+            target_roles = [session.role]
 
     for role_key in target_roles:
         # Determine person type
@@ -80,7 +68,7 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
         if session.party_types and role_key in session.party_types:
             p_type = session.party_types[role_key]
         elif session.role == role_key and session.person_type:
-                # Fallback for backward compatibility
+            # Fallback for backward compatibility
             p_type = session.person_type
 
         # Default to individual if unknown, to ensure we list something
@@ -88,15 +76,14 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
             p_type = "individual"
 
         party_fields_list = []
-        if is_dynamic:
-            module = modules.get(p_type)
-            if module:
-                from src.categories.index import PartyField
-                for raw in module.get("fields", []):
-                    party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
+        module = modules.get(p_type)
+        if module:
+            from src.categories.index import PartyField
+            for raw in module.get("fields", []):
+                party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
         
-        if not is_dynamic and not party_fields_list:
-             party_fields_list = list_party_fields(session.category_id, p_type)
+        if not party_fields_list:
+            party_fields_list = list_party_fields(session.category_id, p_type)
 
         for pf in party_fields_list:
             if pf.required:
@@ -107,6 +94,7 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
                     role=role_key,
                     label=pf.label,
                     required=True,
+                    ai_required=False,
                     type="text" # Party fields usually don't have type in metadata yet, handled by validator heuristic
                 ))
 
@@ -118,6 +106,9 @@ def validate_session_readiness(session: Session) -> bool:
     """
     required = get_required_fields(session)
     for r in required:
+        needs = r.required or r.ai_required
+        if not needs:
+            continue
         if r.role:
             # Check party fields
             role_fields = session.party_fields.get(r.role) or {}
@@ -151,6 +142,10 @@ def collect_missing_fields(session: Session) -> Dict[str, Any]:
 
     required = get_required_fields(session)
     for r in required:
+        needs = r.required or r.ai_required
+        if not needs:
+            continue
+
         is_ok = False
         if r.role:
             role_fields = session.party_fields.get(r.role) or {}

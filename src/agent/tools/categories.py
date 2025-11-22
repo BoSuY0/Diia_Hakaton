@@ -63,10 +63,6 @@ class FindCategoryByQueryTool(BaseTool):
 
         category: Optional[Category] = find_category_by_query(query)
 
-        if category and category.id == "custom":
-            logger.info("tool=find_category_by_query matched disabled category=custom; ignoring")
-            return {"category_id": None}
-
         if not category:
             logger.info("tool=find_category_by_query no_match")
             return {"category_id": None}
@@ -116,13 +112,6 @@ class GetTemplatesForCategoryTool(BaseTool):
 
     def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         category_id = args["category_id"]
-        if category_id == "custom":
-            logger.info("tool=get_templates_for_category blocked disabled category=custom")
-            return {
-                "category_id": category_id,
-                "templates": [],
-                "error": "Категорія 'custom' вимкнена.",
-            }
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
 
@@ -265,11 +254,6 @@ class SetCategoryTool(BaseTool):
         session_id = args["session_id"]
         category_id = args["category_id"]
 
-        if category_id == "custom":
-            return {
-                "ok": False,
-                "error": "Категорія 'custom' вимкнена.",
-            }
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
 
         from src.sessions.actions import set_session_category

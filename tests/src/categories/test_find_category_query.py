@@ -24,7 +24,7 @@ def test_find_category_by_keywords(tmp_path, mock_settings):
     assert best.id == "lease"
 
 
-def test_find_category_returns_none_for_custom_disabled(mock_settings, monkeypatch):
+def test_find_category_returns_custom_when_present(mock_settings, monkeypatch):
     # Prepare store with only custom
     idx = {
         "categories": [
@@ -40,4 +40,5 @@ def test_find_category_returns_none_for_custom_disabled(mock_settings, monkeypat
     category_store.load()
 
     best = find_category_by_query("будь-що")
-    assert best is None
+    assert best is not None
+    assert best.id == "custom"

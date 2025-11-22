@@ -1,26 +1,22 @@
-import json
+import time
 
-from src.sessions.store import list_user_sessions, session_answers_path
-
-
-def _write_session(mock_settings, session_id, party_users, updated_at="2024-01-01T00:00:00"):
-    path = session_answers_path(session_id)
-    data = {
-        "session_id": session_id,
-        "party_users": party_users,
-        "updated_at": updated_at,
-        "state": "idle",
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
+from src.sessions.store import list_user_sessions, get_or_create_session, save_session
 
 
 def test_list_user_sessions_returns_sorted(mock_settings):
-    _write_session(mock_settings, "s1", {"lessor": "user1"}, updated_at="2024-01-01T00:00:00")
-    _write_session(mock_settings, "s2", {"lessee": "user1"}, updated_at="2024-01-02T00:00:00")
-    _write_session(mock_settings, "s3", {"lessor": "other"}, updated_at="2024-01-03T00:00:00")
+    s1 = get_or_create_session("s1")
+    s1.party_users = {"lessor": "user1"}
+    save_session(s1)
+
+    time.sleep(0.01)
+    s2 = get_or_create_session("s2")
+    s2.party_users = {"lessee": "user1"}
+    save_session(s2)
+
+    s3 = get_or_create_session("s3")
+    s3.party_users = {"lessor": "other"}
+    save_session(s3)
 
     sessions = list_user_sessions("user1")
     ids = [s.session_id for s in sessions]
-    # Should include only s1 and s2 sorted by updated_at desc -> s2 first
     assert ids == ["s2", "s1"]

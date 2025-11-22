@@ -34,7 +34,7 @@ from src.common.errors import SessionNotFoundError
 from src.common.logging import get_logger
 from src.common.config import settings
 from src.documents.user_document import load_user_document
-from src.sessions.store import get_or_create_session, load_session, save_session, transactional_session
+from src.sessions.store import get_or_create_session, load_session, save_session, transactional_session, init_store
 from src.sessions.models import Session, SessionState
 from src.services.fields import collect_missing_fields
 from src.storage.fs import ensure_directories
@@ -46,6 +46,7 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_directories()
+    init_store()
     
     import asyncio
     from src.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
@@ -112,7 +113,11 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Cleanup loop stopped with error: {e}")
 
-    cleanup_task = asyncio.create_task(cleanup_loop())
+    cleanup_task = None
+    if settings.session_backend == "fs":
+        cleanup_task = asyncio.create_task(cleanup_loop())
+    else:
+        logger.info("Filesystem cleanup loop skipped (backend=%s)", settings.session_backend)
         
     logger.info("Server started")
     yield
@@ -121,20 +126,21 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down server...")
     stop_event.set()
     
-    try:
-        # Give cleanup task a moment to exit gracefully
-        await asyncio.wait_for(cleanup_task, timeout=2.0)
-    except asyncio.TimeoutError:
-        # Force cancel if it hangs (e.g., during initial sleep)
-        cleanup_task.cancel()
+    if cleanup_task:
         try:
-            await cleanup_task
+            # Give cleanup task a moment to exit gracefully
+            await asyncio.wait_for(cleanup_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            # Force cancel if it hangs (e.g., during initial sleep)
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
         except asyncio.CancelledError:
-            pass
-    except asyncio.CancelledError:
-        logger.info("Cleanup task cancelled during shutdown; exiting quietly")
-    except Exception as e:
-        logger.error(f"Error waiting for cleanup task: {e}")
+            logger.info("Cleanup task cancelled during shutdown; exiting quietly")
+        except Exception as e:
+            logger.error(f"Error waiting for cleanup task: {e}")
 
     try:
         # Force close all SSE streams

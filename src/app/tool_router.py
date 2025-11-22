@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 # Import tools to register them
 import src.agent.tools.categories
 import src.agent.tools.session
-import src.agent.tools.dynamic
 from src.agent.tools.registry import tool_registry
 from src.common.config import settings
 from src.common.logging import get_logger

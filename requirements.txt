@@ -4,9 +4,12 @@ python-docx
 pydantic
 litellm
 python-dotenv
+redis
+valkey-glide
 pathspec
 tenacity
 pytest
+fakeredis
 pytest-asyncio
 httpx
 pytest-cov

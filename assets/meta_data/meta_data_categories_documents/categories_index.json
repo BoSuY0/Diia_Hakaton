@@ -1,9 +1,16 @@
 {
   "categories": [
     {
+      "id": "custom",
+      "label": "Кастомний договір",
+      "meta_filename": "custom.json",
+      "keywords": ["кастом", "власний", "custom", "будь-який", "довільний"]
+    },
+    {
       "id": "lease_real_estate",
       "label": "Нерухомість. Рухоме майно",
-      "meta_filename": "lease_real_estate.json"
+      "meta_filename": "lease_real_estate.json",
+      "keywords": ["оренда", "нерухомість", "приміщення"]
     }
   ]
 }
