@@ -41,6 +41,7 @@ from src.sessions.store import (
     aget_or_create_session,
     aload_session,
     atransactional_session,
+    alist_user_sessions,
     ainit_store,
 )
 from src.sessions.models import Session, SessionState
@@ -773,17 +774,8 @@ def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     Важливо: зберігаємо лише узгоджені пари assistant tool_calls ↔ tool responses,
     щоб уникнути orphaned tool messages після обрізки.
     """
-    MAX_CONTEXT_MESSAGES = 12
-    
-    if len(messages) <= MAX_CONTEXT_MESSAGES + 1:
-        return _strip_orphan_tools(messages)
-
-    system_msg = messages[0]
-    if system_msg.get("role") != "system":
-        return _strip_orphan_tools(messages[-MAX_CONTEXT_MESSAGES:])
-
-    recent_messages = messages[-MAX_CONTEXT_MESSAGES:]
-    return [system_msg] + _strip_orphan_tools(recent_messages)
+    # Нове правило: не обрізати контекст локально, лише прибирати "сироти".
+    return _strip_orphan_tools(messages)
 
 
 def _strip_orphan_tools(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1255,15 +1247,10 @@ async def stream_session_events(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # Дозволяємо підключення навіть якщо клієнт ще не учасник (щоб бачити зміни ролей у реальному часі)
-    try:
-        check_session_access(session, client_id, require_participant=False, allow_owner=True)
-    except HTTPException as exc:
-        # 401/403 пропускаємо саме для стріму, щоб "новачок" міг підслухати зміни ролей
-        if exc.status_code not in (401, 403):
-            raise
+    check_session_access(session, client_id, require_participant=False, allow_owner=True)
 
     queue = await stream_manager.connect(session_id, client_id)
-    
+
     async def event_generator():
         try:
             while True:
@@ -1280,7 +1267,7 @@ async def stream_session_events(
         except Exception as e:
             logger.error(f"SSE stream error for {session_id}: {e}")
         finally:
-             stream_manager.disconnect(session_id, queue)
+            stream_manager.disconnect(session_id, queue)
 
     return SafeStreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -1695,13 +1682,10 @@ async def preview_contract(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     client_id = x_client_id or client_id_query
-    # Дозволяємо перегляд усім, але власника/учасника не блокуємо помилкою
-    try:
-        check_session_access(session, client_id, require_participant=False, allow_owner=True)
-    except HTTPException as exc:
-        # Якщо немає client_id, пропускаємо обмеження для превʼю
-        if exc.status_code not in (401, 403):
-            raise
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    # Превʼю доступне лише учасникам або власнику
+    check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")

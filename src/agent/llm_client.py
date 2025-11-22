@@ -14,6 +14,95 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 _SYSTEM_PROMPT_CACHE: str | None = None
 
+# Disable LiteLLM telemetry/background logging workers to avoid un-awaited coroutine warnings
+try:
+    litellm.telemetry = False  # type: ignore[attr-defined]
+    litellm.turn_off_message_logging = True  # type: ignore[attr-defined]
+    litellm.disable_streaming_logging = True  # type: ignore[attr-defined]
+except Exception:
+    pass
+
+
+def _disable_litellm_logging_workers() -> None:
+    """
+    LiteLLM occasionally spawns async logging workers that raise
+    'coroutine ... was never awaited' warnings. We replace all known
+    GLOBAL_LOGGING_WORKER references with a no-op stub.
+    """
+    try:
+        class _NoopWorker:
+            def ensure_initialized_and_enqueue(self, *args, **kwargs):
+                return None
+
+        _noop = _NoopWorker()
+
+        targets = []
+        try:
+            from litellm.litellm_core_utils import logging_worker as _lw  # type: ignore
+            targets.append(_lw)
+        except Exception:
+            pass
+
+        try:
+            import litellm.utils as _lutils  # type: ignore
+            targets.append(_lutils)
+        except Exception:
+            pass
+
+        for mod_name in ("litellm.logging_worker", "litellm.logging"):
+            try:
+                module = __import__(mod_name, fromlist=["GLOBAL_LOGGING_WORKER"])
+                targets.append(module)
+            except Exception:
+                pass
+
+        for target in targets:
+            try:
+                if hasattr(target, "GLOBAL_LOGGING_WORKER"):
+                    target.GLOBAL_LOGGING_WORKER = _noop  # type: ignore
+                if hasattr(target, "GLOBAL_LOGGING_HANDLER"):
+                    target.GLOBAL_LOGGING_HANDLER = _noop  # type: ignore
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+_disable_litellm_logging_workers()
+
+# Ensure async HTTP clients are closed on exit to avoid
+# "coroutine ... close_litellm_async_clients was never awaited" warnings.
+try:
+    import atexit
+    from litellm import close_litellm_async_clients  # type: ignore
+
+    def _close_litellm_clients() -> None:
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Run from existing loop and wait briefly
+                fut = asyncio.run_coroutine_threadsafe(
+                    close_litellm_async_clients(), loop
+                )
+                try:
+                    fut.result(timeout=2)
+                except Exception:
+                    pass
+            else:
+                loop.run_until_complete(close_litellm_async_clients())
+        except Exception:
+            # Fallback: new loop for cleanup
+            try:
+                asyncio.run(close_litellm_async_clients())
+            except Exception:
+                pass
+
+    atexit.register(_close_litellm_clients)
+except Exception:
+    pass
+
 
 def load_system_prompt() -> str:
     global _SYSTEM_PROMPT_CACHE

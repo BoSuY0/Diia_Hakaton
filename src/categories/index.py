@@ -229,7 +229,7 @@ def get_party_schema(category_id: str) -> Dict[str, Any]:
 
 def find_category_by_query(query: str) -> Optional[Category]:
     """
-    Search category by keywords overlap + label overlap.
+    Search category by keywords overlap only (labels are ignored).
     """
     query_norm = query.lower()
     query_terms = {t for t in query_norm.split() if t.strip()}
@@ -239,19 +239,12 @@ def find_category_by_query(query: str) -> Optional[Category]:
     for category in store.categories.values():
         # Check keywords
         keywords = {k.lower() for k in (category.keywords or [])}
-        label_terms = {t.lower() for t in category.label.split() if t.strip()}
-        
-        # Keywords/label exact term overlap
         kw_score = len(query_terms & keywords) * 2
-        label_score = len(query_terms & label_terms)
 
-        # Substring bonuses (simple stemming-like)
+        # Substring bonuses (simple stemming-like) for keywords only
         for kw in keywords:
             if kw and kw in query_norm:
                 kw_score += 1
-        for lt in label_terms:
-            if lt and lt in query_norm:
-                label_score += 0.5
 
         # Додатковий бонус за часткові збіги (перші 5 літер), щоб ловити відмінки
         for term in query_terms:
@@ -259,12 +252,8 @@ def find_category_by_query(query: str) -> Optional[Category]:
                 stem = kw[:5]
                 if stem and stem in term:
                     kw_score += 1
-            for lt in label_terms:
-                stem = lt[:5]
-                if stem and stem in term:
-                    label_score += 0.5
-        
-        total_score = kw_score + label_score
+
+        total_score = kw_score
         
         if total_score > best_score:
             best_score = total_score

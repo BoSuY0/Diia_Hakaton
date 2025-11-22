@@ -33,8 +33,6 @@ def build_user_document(session: Session) -> Dict[str, Any]:
 
     # Поля сторін (parties)
     parties: Dict[str, Any] = {}
-    # Поля сторін (parties)
-    parties: Dict[str, Any] = {}
     
     # Determine roles dynamically from session or fallback to default
     target_roles = set(session.party_types.keys()) if session.party_types else set()

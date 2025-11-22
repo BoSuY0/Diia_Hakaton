@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 import threading
@@ -151,6 +152,9 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
     setup_logging()
     ensure_directories()
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     if not session_id:
         session_id = f"cli-dev-session-{uuid4().hex[:8]}"
 
@@ -169,7 +173,7 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
                 continue
             req = ChatRequest(session_id=session_id, message=text)
             try:
-                resp = chat(req)
+                resp = loop.run_until_complete(chat(req))
             except Exception as exc:  # pragma: no cover - dev helper
                 logger.exception("CLI chat error: %s", exc)
                 print(f"bot> [error] {exc}")
@@ -177,6 +181,17 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
             print(f"bot> {resp.reply}")
     except KeyboardInterrupt:
         print("\nДо зустрічі!")
+    finally:
+        try:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        loop.call_soon(loop.stop)
+        loop.close()
 
 
 def main(argv: Optional[list[str]] = None) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 
 from src.common.config import settings
@@ -9,7 +10,7 @@ from src.sessions import store_redis
 from src.storage.fs import read_json
 
 
-def migrate(delete_files: bool = False) -> None:
+async def migrate_async(delete_files: bool = False) -> None:
     sessions_dir = settings.sessions_root
     if settings.session_backend != "redis":
         print("SESSION_BACKEND is not set to 'redis'; aborting to avoid accidental writes.", file=sys.stderr)
@@ -28,7 +29,7 @@ def migrate(delete_files: bool = False) -> None:
         try:
             data = read_json(path)
             session = _from_dict(data)
-            store_redis.save_session(session)
+            await store_redis.save_session(session)
             migrated += 1
             if delete_files:
                 path.unlink()
@@ -36,6 +37,10 @@ def migrate(delete_files: bool = False) -> None:
             print(f"Failed to migrate {path.name}: {exc}", file=sys.stderr)
 
     print(f"Migrated {migrated} sessions to Redis")
+
+
+def migrate(delete_files: bool = False) -> None:
+    asyncio.run(migrate_async(delete_files))
 
 
 if __name__ == "__main__":

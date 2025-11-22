@@ -47,12 +47,15 @@ def _redis_allowed() -> bool:
 def _run(coro):
     try:
         asyncio.get_running_loop()
-        raise RuntimeError("Synchronous store call inside running event loop")
     except RuntimeError as exc:
-        if "loop" in str(exc):
-            # No running loop -> run normally
+        msg = str(exc)
+        if "no running event loop" in msg or "no current event loop" in msg:
+            # Safe to run coroutine from sync context
             return asyncio.run(coro)
         raise
+    else:
+        # Prevent accidental nested event loops
+        raise RuntimeError("Synchronous store call inside running event loop")
 
 
 def _with_redis(func, *args, **kwargs):
@@ -221,23 +224,11 @@ def init_store() -> None:
     if _init_logged:
         return
 
-    if _redis_allowed():
-        try:
-            # Проста перевірка доступності
-            from src.storage.redis_client import get_redis
-
-            client = get_redis()
-            try:
-                client.ping()
-            except Exception:
-                # Якщо ping не підтримується (in-memory фейковий) — просто продовжуємо
-                pass
-            logger.info("Session backend: Redis (primary)")
-            _init_logged = True
-            return
-        except Exception as exc:
-            logger.error("Redis session backend unavailable, switching to in-memory: %s", exc)
-            _redis_disabled = True
-
-    logger.info("Session backend: In-Memory (fallback)")
-    _init_logged = True
+    try:
+        _run(ainit_store())
+    except RuntimeError as exc:
+        # Surface clearer error if someone tries to call sync init from an event loop
+        if "Synchronous store call inside running event loop" in str(exc):
+            raise
+        # ainit_store already logs fallbacks; re-raise unexpected runtime errors
+        raise
