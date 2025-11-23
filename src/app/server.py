@@ -47,7 +47,6 @@ from src.sessions.store import (
 from src.sessions.models import Session, SessionState
 from src.services.fields import collect_missing_fields
 from src.storage.fs import ensure_directories
-from src.validators.pii_tagger import sanitize_typed
 from src.common.async_utils import run_sync, ensure_awaitable
 
 
@@ -586,36 +585,10 @@ async def _filter_tools_for_session(
     has_category_tool: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Формує підмножину TOOL_DEFINITIONS, дозволену на поточному етапі сесії.
-    Використовує ToolRegistry для отримання визначень.
+    Повертає всі тулли без state-gating, щоб агент міг викликати будь-який інструмент у будь-який момент.
     """
-    state = await _get_effective_state(
-        session_id,
-        messages,
-        has_category_tool=has_category_tool,
-    )
-    allowed = set(ALLOWED_TOOLS_BY_STATE.get(state, []))
-    
-    # Get all definitions from registry (minified by default)
     from src.agent.tools.registry import tool_registry
-    all_tools = tool_registry.get_definitions(minified=True)
-    
-    if not allowed:
-        return []
-
-    # Filter based on allowed names (checking both name and alias)
-    filtered_tools = []
-    for tool_def in all_tools:
-        func_name = tool_def["function"]["name"]
-        # We need to check if this alias corresponds to an allowed tool
-        # This is a bit tricky because 'allowed' list uses canonical names
-        # but tool_def uses aliases.
-        # Let's reverse lookup the canonical name for the alias
-        tool = tool_registry.get_by_alias(func_name)
-        if tool and tool.name in allowed:
-            filtered_tools.append(tool_def)
-            
-    return filtered_tools
+    return tool_registry.get_definitions(minified=True)
 
 
 
@@ -1525,11 +1498,7 @@ def _load_meta(category) -> dict:
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     """
-    Основна точка входу для діалогу.
-
-    Перед передачею в LLM кожне повідомлення користувача проходить через
-    PII-санітайзер: реальні значення (IBAN, картки, коди тощо) замінюються
-    на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
+    Основна точка входу для діалогу. Повідомлення користувача надсилаються в LLM як є, без маскування PII.
     """
     conv = conversation_store.get(req.session_id)
     is_first_turn = not conv.messages
@@ -1537,9 +1506,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     # get_or_create_session uses lock if creating, so it's safe.
     session = await aget_or_create_session(req.session_id)
 
-    sanitized = sanitize_typed(req.message)
-    conv.tags.update(sanitized["tags"])  # type: ignore[assignment]
-    user_text = sanitized["sanitized_text"]  # type: ignore[assignment]
+    user_text = req.message
 
     # Зберігаємо останню мову користувача для i18n серверних відповідей
     try:

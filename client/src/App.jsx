@@ -353,6 +353,8 @@ function App() {
     if (sessionId) {
       try {
         await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial', clientId);
+        // Завантажуємо схему перед переходом на крок вибору ролі
+        await fetchSchema(sessionId);
       } catch (e) {
         console.error("Failed to set mode", e);
       }

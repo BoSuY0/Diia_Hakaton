@@ -6,14 +6,11 @@ from datetime import datetime
 from src.agent.tools.base import BaseTool
 from src.agent.tools.registry import register_tool
 from src.categories.index import (
-    Entity,
     PartyField,
-    list_entities,
     list_party_fields,
     list_templates,
     store as category_store,
 )
-from src.common.enums import PersonType, FillingMode
 from src.common.logging import get_logger
 from src.documents.builder import build_contract as build_contract_document
 from src.sessions.models import FieldState, SessionState
@@ -116,18 +113,18 @@ class SetTemplateTool(BaseTool):
                 template_id,
             )
 
+            # Якщо категорія ще не вибрана, спробуємо підібрати її за шаблоном
             if not session.category_id:
-                return {
-                    "ok": False,
-                    "error": "Спочатку потрібно обрати категорію (set_category).",
-                }
-
-            templates = {t.id: t for t in list_templates(session.category_id)}
-            if template_id not in templates:
-                return {
-                    "ok": False,
-                    "error": "Шаблон не належить до обраної категорії.",
-                }
+                try:
+                    for cat in category_store.categories.values():
+                        for t in list_templates(cat.id):
+                            if t.id == template_id:
+                                session.category_id = cat.id
+                                break
+                        if session.category_id:
+                            break
+                except Exception:
+                    pass
 
             from src.services.session import set_session_template
             set_session_template(session, template_id)
@@ -164,7 +161,7 @@ class SetPartyContextTool(BaseTool):
                 },
                 "person_type": {
                     "type": "string",
-                    "enum": [p.value for p in PersonType],
+                    "minLength": 1,
                 },
             },
             "required": ["session_id", "role", "person_type"],
@@ -175,54 +172,6 @@ class SetPartyContextTool(BaseTool):
         session_id = args["session_id"]
         role = args["role"]
         person_type = args["person_type"]
-
-        try:
-            PersonType(person_type)
-        except ValueError:
-             return {
-                "ok": False,
-                "error": f"Невідомий тип особи. Допустимі: {', '.join([p.value for p in PersonType])}",
-            }
-
-        # Validate person_type against category metadata
-        from src.categories.index import store as category_store, _load_meta
-        try:
-            session = await aload_session(session_id)
-        except Exception as exc:
-            logger.error("set_party_context: failed to load session %s: %s", session_id, exc)
-            return {"ok": False, "error": "Сесію не знайдено або вона недоступна."}
-
-        if not session.category_id:
-            return {"ok": False, "error": "Спочатку оберіть категорію."}
-
-        # Ensure category metadata is available (reload if needed)
-        if session.category_id not in category_store.categories:
-            try:
-                category_store.load()
-            except Exception as exc:
-                logger.error("set_party_context: failed to load categories: %s", exc)
-                return {"ok": False, "error": "Не вдалося завантажити метадані категорій."}
-
-        cat = category_store.get(session.category_id)
-        if not cat:
-            return {"ok": False, "error": f"Невідома категорія: {session.category_id}."}
-
-        try:
-            meta = _load_meta(cat)
-        except FileNotFoundError:
-            return {"ok": False, "error": "Метадані категорії відсутні."}
-        except Exception as exc:
-            logger.error("set_party_context: failed to read meta for %s: %s", session.category_id, exc)
-            return {"ok": False, "error": "Не вдалося прочитати метадані категорії."}
-
-        roles_meta = (meta.get("roles") or {})
-        role_meta = roles_meta.get(role)
-        if not role_meta:
-            return {"ok": False, "error": "Невідома роль для цієї категорії."}
-
-        allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
-        if allowed_types and person_type not in allowed_types:
-            return {"ok": False, "error": "Невірний тип особи для ролі."}
 
         client_id = context.get("client_id")
         # If not, we can't enforce strict access control properly.
@@ -239,17 +188,12 @@ class SetPartyContextTool(BaseTool):
              client_id = "anon_" + session_id # Fallback
 
         async with atransactional_session(session_id) as session:
-            from src.services.session import set_party_type, claim_session_role
-            
-            # Claim role
-            try:
-                success = claim_session_role(session, role, client_id)
-                if not success:
-                    return {"ok": False, "error": f"Роль '{role}' вже зайнята або ви вже маєте іншу роль."}
-            except ValueError as e:
-                 return {"ok": False, "error": str(e)}
+            from src.services.session import set_party_type
 
-            # Set person type
+            # Вільно закріплюємо роль та тип особи без валідацій
+            if session.party_users is None:
+                session.party_users = {}
+            session.party_users[role] = client_id
             set_party_type(session, role, person_type)
 
             return {
@@ -288,44 +232,29 @@ class GetPartyFieldsForSessionTool(BaseTool):
         # Read-only, use load_session
         session = await aload_session(session_id)
 
-        if not session.category_id:
-            return {
-                "ok": False,
-                "error": "Спочатку потрібно обрати категорію договору.",
-            }
-        # Determine person type for the current role
-        # Fallback to session.person_type if not in party_types (backward compat)
+        # Human labels for role/person_type
+        role_label = None
+        person_type_label = None
+        fields: List[PartyField] = []
         current_person_type = session.person_type
         if session.role and session.party_types and session.role in session.party_types:
             current_person_type = session.party_types[session.role]
 
-        if not current_person_type:
-             return {
-                "ok": False,
-                "error": "Спочатку потрібно обрати тип особи (individual/fop/company).",
-            }
-
-        fields: List[PartyField] = list_party_fields(
-            session.category_id,
-            current_person_type,
-        )
-
-        # Human labels for role/person_type
-        role_label = None
-        person_type_label = None
-        try:
-            cat = category_store.get(session.category_id)
-            if cat:
-                import json
-                meta = json.loads(cat.meta_path.read_text(encoding="utf-8"))
-                role_label = meta.get("roles", {}).get(session.role, {}).get("label")
-                person_type_label = (
-                    meta.get("party_modules", {})
-                    .get(current_person_type, {})
-                    .get("label")
-                )
-        except Exception:
-            pass
+        if session.category_id and current_person_type:
+            try:
+                fields = list_party_fields(session.category_id, current_person_type)
+                cat = category_store.get(session.category_id)
+                if cat:
+                    import json
+                    meta = json.loads(cat.meta_path.read_text(encoding="utf-8"))
+                    role_label = meta.get("roles", {}).get(session.role, {}).get("label")
+                    person_type_label = (
+                        meta.get("party_modules", {})
+                        .get(current_person_type, {})
+                        .get("label")
+                    )
+            except Exception:
+                fields = []
 
         return {
             "ok": True,
@@ -400,62 +329,6 @@ class UpsertFieldTool(BaseTool):
         real_value = self._unmask_value(value, tags)
 
         async with atransactional_session(session_id) as session:
-            # Access Control Check
-            client_id = context.get("client_id")
-
-            # Дозволяємо роботу без client_id лише якщо всі ролі наразі anon_ (тимчасові сесії)
-            all_anon = bool(session.party_users) and all(str(v).startswith("anon_") for v in session.party_users.values())
-            if session.party_users and not client_id and not all_anon:
-                return {"ok": False, "error": "Необхідний заголовок X-Client-ID."}
-
-            entities = {e.field: e for e in list_entities(session.category_id)} if session.category_id else {}
-            entity = entities.get(field)
-
-            # Доступ до умов договору (contract fields)
-            if entity is not None:
-                main_role = _get_main_role(session.category_id)
-                if main_role:
-                    owner = (session.party_users or {}).get(main_role)
-                    if not owner:
-                        return {"ok": False, "error": f"Спочатку закріпіть роль '{main_role}' (set_party_context)."}
-                    if not client_id:
-                        return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
-                    if client_id != owner:
-                        return {"ok": False, "error": "Умови договору може редагувати лише головна роль цієї категорії."}
-
-                from src.common.enums import FillingMode
-                is_full_mode = session.filling_mode == FillingMode.FULL
-                participant_roles = []
-                if client_id:
-                    participant_roles = [
-                        role_key for role_key, owner in (session.party_users or {}).items() if owner == client_id
-                    ]
-                if session.party_users and not is_full_mode and client_id and not participant_roles:
-                    return {"ok": False, "error": "Редагувати умови можуть лише учасники цієї сесії."}
-                if session.party_users and not is_full_mode and not client_id and not all_anon:
-                    return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
-            elif client_id and session.category_id:
-                # It is a party field
-                effective_role = role_arg or session.role
-                if effective_role:
-                    owner = session.party_users.get(effective_role)
-                    if owner:
-                        # Якщо роль прив'язана до anon_* і прийшов реальний користувач — перезакріплюємо
-                        if str(owner).startswith("anon_"):
-                            if client_id:
-                                session.party_users[effective_role] = client_id
-                                owner = client_id
-                            else:
-                                # anon власник, запит без client_id — дозволяємо
-                                owner = client_id
-                        if owner and owner != client_id:
-                             from src.common.enums import FillingMode
-                             if session.filling_mode != FillingMode.FULL:
-                                 return {
-                                     "ok": False, 
-                                     "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
-                                 }
-
             from src.services.session import update_session_field
             
             ok, error, fs = update_session_field(
@@ -588,7 +461,7 @@ class SetFillingModeTool(BaseTool):
                 },
                 "mode": {
                     "type": "string",
-                    "enum": [m.value for m in FillingMode],
+                    "minLength": 1,
                 },
             },
             "required": ["session_id", "mode"],
@@ -598,16 +471,8 @@ class SetFillingModeTool(BaseTool):
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         mode = args["mode"]
-        client_id = context.get("client_id")
 
         async with atransactional_session(session_id) as session:
-            # Access check
-            if session.party_users:
-                if not client_id:
-                    return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
-                if client_id not in session.party_users.values():
-                    return {"ok": False, "error": "Ви не є учасником цієї сесії."}
-
             session.filling_mode = mode
             return {
                 "ok": True,
@@ -698,27 +563,13 @@ class SignContractTool(BaseTool):
         role_arg = args.get("role")
 
         async with atransactional_session(session_id) as session:
-            # Determine role
-            role = role_arg or session.role
-            if not role:
-                 return {
-                    "ok": False,
-                    "error": "Не визначена роль для підпису. Встановіть контекст або передайте роль.",
-                }
-
-            # Check state
-            if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN]:
-                 return {
-                    "ok": False,
-                    "error": f"Не можна підписати договір у стані {session.state.value}. Спочатку сформуйте його.",
-                }
-
-            # Check if already signed
-            if session.signatures.get(role):
-                 return {
-                    "ok": False,
-                    "error": "Ви вже підписали цей договір.",
-                }
+            # Determine role with permissive fallbacks
+            role = (
+                role_arg
+                or session.role
+                or next(iter((session.party_users or {}).keys()), None)
+                or "default_role"
+            )
 
             # Sign
             session.signatures[role] = True
