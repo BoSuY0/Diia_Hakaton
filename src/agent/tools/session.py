@@ -185,25 +185,44 @@ class SetPartyContextTool(BaseTool):
             }
 
         # Validate person_type against category metadata
+        from src.categories.index import store as category_store, _load_meta
         try:
             session = await aload_session(session_id)
-            if not session.category_id:
-                 return {"ok": False, "error": "Спочатку оберіть категорію."}
-            from src.categories.index import store as category_store, _load_meta
-            cat = category_store.get(session.category_id)
-            if not cat:
-                 return {"ok": False, "error": "Невідома категорія."}
+        except Exception as exc:
+            logger.error("set_party_context: failed to load session %s: %s", session_id, exc)
+            return {"ok": False, "error": "Сесію не знайдено або вона недоступна."}
+
+        if not session.category_id:
+            return {"ok": False, "error": "Спочатку оберіть категорію."}
+
+        # Ensure category metadata is available (reload if needed)
+        if session.category_id not in category_store.categories:
+            try:
+                category_store.load()
+            except Exception as exc:
+                logger.error("set_party_context: failed to load categories: %s", exc)
+                return {"ok": False, "error": "Не вдалося завантажити метадані категорій."}
+
+        cat = category_store.get(session.category_id)
+        if not cat:
+            return {"ok": False, "error": f"Невідома категорія: {session.category_id}."}
+
+        try:
             meta = _load_meta(cat)
-            roles_meta = (meta.get("roles") or {})
-            role_meta = roles_meta.get(role)
-            if not role_meta:
-                 return {"ok": False, "error": "Невідома роль для цієї категорії."}
-            allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
-            if allowed_types and person_type not in allowed_types:
-                 return {"ok": False, "error": "Невірний тип особи для ролі."}
-        except Exception:
-            # Fail closed if meta cannot be read
-            return {"ok": False, "error": "Не вдалося перевірити тип особи."}
+        except FileNotFoundError:
+            return {"ok": False, "error": "Метадані категорії відсутні."}
+        except Exception as exc:
+            logger.error("set_party_context: failed to read meta for %s: %s", session.category_id, exc)
+            return {"ok": False, "error": "Не вдалося прочитати метадані категорії."}
+
+        roles_meta = (meta.get("roles") or {})
+        role_meta = roles_meta.get(role)
+        if not role_meta:
+            return {"ok": False, "error": "Невідома роль для цієї категорії."}
+
+        allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
+        if allowed_types and person_type not in allowed_types:
+            return {"ok": False, "error": "Невірний тип особи для ролі."}
 
         client_id = context.get("client_id")
         # If not, we can't enforce strict access control properly.
