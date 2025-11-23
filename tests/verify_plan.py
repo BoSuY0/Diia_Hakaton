@@ -259,7 +259,9 @@ def test_contract_api_flow():
         headers={"X-Client-ID": client_id},
     )
     assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
     
     # Now state might be BUILT because preview calls build_contract if needed?
     # Let's check code:

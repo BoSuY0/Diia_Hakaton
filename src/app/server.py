@@ -1715,10 +1715,9 @@ async def preview_contract(
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
 
+    # Будуємо тимчасовий DOCX з плейсхолдерами (partial=True) і віддаємо файл
     from src.storage.fs import output_document_path
-    from src.common.config import settings
 
-    # Завжди будуємо тимчасовий docx з плейсхолдерами (partial=True) для превʼю
     try:
         build_result = await build_contract_async(session_id, session.template_id, partial=True)
         doc_path = Path(build_result["file_path"])
@@ -1731,16 +1730,11 @@ async def preview_contract(
         if not Path(doc_path).exists():
             raise HTTPException(status_code=500, detail="Failed to build preview")
 
-    # HTML Preview (Fast, Cross-Platform)
-    from src.documents.converter import convert_to_html
-    try:
-        html_content = await run_sync(convert_to_html, Path(doc_path))
-    except Exception as e:
-        logger.error(f"HTML conversion failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate preview")
-
-    from fastapi.responses import HTMLResponse
-    return HTMLResponse(content=html_content)
+    return FileResponse(
+        path=str(doc_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"contract_{session_id}_preview.docx",
+    )
 
 
 @app.get("/sessions/{session_id}/contract/download")
