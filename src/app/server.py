@@ -1384,6 +1384,9 @@ async def sync_session(
     missing_roles: Dict[str, Any] = {}
     is_ready = True
     template_id_local: Optional[str] = None
+    # Для подальшої фільтрації помилок під конкретного клієнта
+    main_role: Optional[str] = None
+    party_users: Dict[str, str] = {}
 
     async with atransactional_session(session_id) as session:
         # 2. Set Category / Template if provided
@@ -1412,6 +1415,7 @@ async def sync_session(
             raise HTTPException(status_code=400, detail="Invalid category_id")
 
         category_meta = _load_meta(category)
+        main_role = category_meta.get("main_role") or category_meta.get("primary_role")
         defined_roles = category_meta.get("roles", {})
 
         # Import service
@@ -1464,8 +1468,22 @@ async def sync_session(
         session.can_build_contract = is_ready
         session.state = SessionState.READY_TO_BUILD if is_ready else SessionState.COLLECTING_FIELDS
         template_id_local = session.template_id
+        party_users = session.party_users.copy()
 
     # End of transaction block. Session is saved to disk.
+
+    # Фільтрація списку missing під роль поточного клієнта
+    if client_id and party_users:
+        current_role = next((r for r, uid in party_users.items() if uid == client_id), None)
+        if current_role:
+            if current_role in missing_roles:
+                missing_roles = {current_role: missing_roles[current_role]}
+            else:
+                missing_roles = {}
+
+            # Якщо клієнт не головна роль — не показуємо контрактні помилки
+            if main_role and current_role != main_role:
+                missing_contract = []
 
     if is_ready and template_id_local:
         try:
@@ -2086,6 +2104,31 @@ async def get_session_requirements(
     check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     missing = collect_missing_fields(session)
+    # Фільтруємо missing за роллю клієнта, щоб не блокувати другорядні ролі
+    from src.categories.index import store as category_store, _load_meta
+
+    main_role = None
+    if session.category_id:
+        cat = category_store.get(session.category_id)
+        if cat:
+            try:
+                meta = _load_meta(cat)
+                main_role = meta.get("main_role") or meta.get("primary_role")
+            except Exception:
+                pass
+
+    if client_id and session.party_users:
+        current_role = next((r for r, uid in session.party_users.items() if uid == client_id), None)
+        if current_role:
+            roles_missing = missing.get("roles", {})
+            if current_role in roles_missing:
+                missing["roles"] = {current_role: roles_missing[current_role]}
+            else:
+                missing["roles"] = {}
+
+            if main_role and current_role != main_role:
+                missing["contract"] = []
+
     return {
         "session_id": session.session_id,
         "state": session.state.value,
