@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from src.agent.tools.registry import tool_registry
@@ -1695,12 +1695,12 @@ async def get_contract_info(
     }
 
 
-@app.get("/sessions/{session_id}/contract/preview")
+@app.get("/sessions/{session_id}/contract/preview", response_class=HTMLResponse)
 async def preview_contract(
     session_id: str,
     x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
     client_id_query: Optional[str] = Query(None, alias="client_id"),
-) -> FileResponse:
+):
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -1715,8 +1715,9 @@ async def preview_contract(
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
 
-    # Будуємо тимчасовий DOCX з плейсхолдерами (partial=True) і віддаємо файл
+    # Будуємо тимчасовий DOCX з плейсхолдерами (partial=True), конвертуємо у HTML
     from src.storage.fs import output_document_path
+    from src.documents.converter import convert_to_html
 
     try:
         build_result = await build_contract_async(session_id, session.template_id, partial=True)
@@ -1730,11 +1731,13 @@ async def preview_contract(
         if not Path(doc_path).exists():
             raise HTTPException(status_code=500, detail="Failed to build preview")
 
-    return FileResponse(
-        path=str(doc_path),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=f"contract_{session_id}_preview.docx",
-    )
+    try:
+        html = convert_to_html(Path(doc_path))
+    except Exception as e:
+        logger.error(f"Failed to convert preview to HTML: {e}")
+        raise HTTPException(status_code=500, detail="Failed to render preview") from e
+
+    return HTMLResponse(content=html, media_type="text/html; charset=utf-8")
 
 
 @app.get("/sessions/{session_id}/contract/download")
