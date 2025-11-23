@@ -28,6 +28,32 @@ from src.services.fields import validate_session_readiness
 logger = get_logger(__name__)
 
 
+def _get_main_role(category_id: str | None) -> str | None:
+    """
+    Визначає головну роль для редагування умов договору з метаданих категорії.
+    - Якщо в meta є main_role/primary_role — використовуємо його.
+    - Інакше беремо першу роль зі списку roles.
+    """
+    if not category_id:
+        return None
+    try:
+        from src.categories.index import store as category_store, _load_meta
+
+        cat = category_store.get(category_id)
+        if not cat:
+            return None
+        meta = _load_meta(cat)
+        main_role = meta.get("main_role") or meta.get("primary_role")
+        if main_role:
+            return str(main_role)
+        roles = meta.get("roles") or {}
+        for role_key in roles.keys():
+            return role_key
+    except Exception:
+        return None
+    return None
+
+
 def _template_ids() -> List[str]:
     # This helper might need to be more efficient or cached,
     # but for now we replicate original logic
@@ -368,6 +394,16 @@ class UpsertFieldTool(BaseTool):
 
             # Доступ до умов договору (contract fields)
             if entity is not None:
+                main_role = _get_main_role(session.category_id)
+                if main_role:
+                    owner = (session.party_users or {}).get(main_role)
+                    if not owner:
+                        return {"ok": False, "error": f"Спочатку закріпіть роль '{main_role}' (set_party_context)."}
+                    if not client_id:
+                        return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
+                    if client_id != owner:
+                        return {"ok": False, "error": "Умови договору може редагувати лише головна роль цієї категорії."}
+
                 from src.common.enums import FillingMode
                 is_full_mode = session.filling_mode == FillingMode.FULL
                 participant_roles = []

@@ -1949,12 +1949,19 @@ async def get_session_schema(
 
     meta = _load_meta(category_def)
     roles = meta.get("roles", {})
+    main_role = meta.get("main_role") or meta.get("primary_role")
+    if not main_role and roles:
+        # default to first role in metadata order
+        for k in roles.keys():
+            main_role = k
+            break
 
     response = {
         "session_id": session.session_id,
         "category_id": session.category_id,
         "template_id": session.template_id,
         "filling_mode": session.filling_mode if session.filling_mode else "partial",
+        "main_role": main_role,
         "parties": [],
         "contract": {
             "title": "Умови договору",
