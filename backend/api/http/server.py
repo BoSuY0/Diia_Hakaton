@@ -8,9 +8,9 @@ import inspect
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Header
+from fastapi import FastAPI, HTTPException, Query, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from backend.agent.tools.registry import tool_registry
@@ -31,7 +31,7 @@ from backend.api.tool_adapter.tool_router import (
     tool_set_party_context_async,
 )
 from backend.shared.errors import SessionNotFoundError
-from backend.shared.logging import get_logger
+from backend.shared.logging import get_logger, setup_logging
 from backend.infra.config.settings import settings
 from backend.domain.documents.user_document import load_user_document_async
 from backend.domain.documents.builder import build_contract_async
@@ -49,6 +49,7 @@ from backend.domain.validation.pii_tagger import sanitize_typed
 from backend.shared.async_utils import run_sync, ensure_awaitable
 
 
+setup_logging()
 logger = get_logger(__name__)
 chat_with_tools = chat_with_tools_async  # backward compatibility for existing patches/tests
 
@@ -173,6 +174,66 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    session_id = request.path_params.get("session_id") if hasattr(request, "path_params") else None
+    user_id = request.headers.get("X-User-ID")
+    role = None
+
+    # Peek into body for additional context
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body_bytes = await request.body()
+            # Re-attach body for downstream handlers
+            request._body = body_bytes
+            if body_bytes:
+                try:
+                    payload = json.loads(body_bytes.decode("utf-8"))
+                    role = payload.get("role")
+                    session_id = session_id or payload.get("session_id") or payload.get("sessionId")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        error_id = str(uuid4())
+        logger.exception(
+            "request_error error_id=%s method=%s path=%s session_id=%s user_id=%s role=%s",
+            error_id,
+            request.method,
+            request.url.path,
+            session_id,
+            user_id,
+            role,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error", "error_id": error_id},
+        )
+
+    status = response.status_code
+    log_fn = logger.info if status < 400 else logger.warning
+    log_fn(
+        "request method=%s path=%s status=%s session_id=%s user_id=%s role=%s",
+        request.method,
+        request.url.path,
+        status,
+        session_id,
+        user_id,
+        role,
+    )
+    return response
+
+
+def _require_user_id(x_user_id: Optional[str]) -> str:
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    return x_user_id
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
@@ -221,6 +282,7 @@ class BuildContractRequest(BaseModel):
 class SetPartyContextRequest(BaseModel):
     role: str
     person_type: str
+    filling_mode: Optional[str] = None
 
 
 SESSION_AWARE_TOOLS = {
@@ -668,7 +730,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                     tool_name,
                     tool_args,
                     tags=getattr(conv, "tags", None),
-                    client_id=None,  # client_id is only known for HTTP endpoints, not chat
+                    client_id=getattr(conv, "client_id", None),
                 )
 
                 if tool_name == "set_category":
@@ -914,17 +976,16 @@ async def get_session_party_fields(session_id: str) -> Dict[str, Any]:
 async def set_session_party_context(
     session_id: str,
     req: SetPartyContextRequest,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
-    # If header is missing, try to use a cookie or something?
-    # Or just fail if strict?
-    # Let's use x_client_id if present.
+    user_id = _require_user_id(x_user_id)
 
     result = await tool_set_party_context_async(
         session_id=session_id,
         role=req.role,
         person_type=req.person_type,
-        _context={"client_id": x_client_id}  # Pass context
+        filling_mode=req.filling_mode,
+        _context={"user_id": user_id},
     )
     if result.get("ok", False):
         await stream_manager.broadcast(session_id, {
@@ -933,19 +994,34 @@ async def set_session_party_context(
         })
 
     if not result.get("ok", False):
-        raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
+        status_code = int(result.get("status_code") or 400)
+        logger.warning(
+            "set_party_context_failed status=%s session_id=%s user_id=%s role=%s error=%s",
+            status_code,
+            session_id,
+            user_id,
+            req.role,
+            result.get("error"),
+        )
+        raise HTTPException(status_code=status_code, detail=result.get("error", "Bad request"))
     return result
 
 
 @app.post("/sessions", response_model=CreateSessionResponse)
-async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
+async def create_session(
+    req: CreateSessionRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+) -> CreateSessionResponse:
     from backend.infra.persistence.store import generate_readable_id
 
     # Якщо ID не передано, генеруємо читабельний.
     # За замовчуванням префікс "new", але якщо клієнт знає шаблон,
     # він може передати його як частину логіки (поки що просто new).
     session_id = req.session_id or generate_readable_id("new")
-    session = await aget_or_create_session(session_id, user_id=req.user_id)
+    creator_user_id = x_user_id or req.user_id
+    if not creator_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    session = await aget_or_create_session(session_id, user_id=creator_user_id)
     return CreateSessionResponse(session_id=session.session_id)
 
 
@@ -961,18 +1037,20 @@ def check_session_access(
     - If session is full (all roles taken), only participants can access.
     - If session is not full, allow read access so new users can claim a free role.
     - If require_participant=True, enforce participant header even if session is not full (for sensitive endpoints).
-    - allow_owner: treat session.user_id як учасника.
+    - allow_owner: treat session.creator_user_id як учасника.
     """
-    is_owner = bool(allow_owner and client_id and session.user_id and client_id == session.user_id)
+    is_owner = bool(
+        allow_owner and client_id and session.creator_user_id and client_id == session.creator_user_id
+    )
 
     # If participant-level access is required, enforce header presence early
     if require_participant and not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
     # 1. If no category, we can't determine roles, so allow access (setup phase)
     if not session.category_id:
         # If some roles are already claimed, still enforce participant ownership when explicitly required
-        if require_participant and session.party_users and client_id not in session.party_users.values() and not is_owner:
+        if require_participant and session.role_owners and client_id not in session.role_owners.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
@@ -988,17 +1066,17 @@ def check_session_access(
         raise HTTPException(status_code=500, detail="Failed to load category metadata")
 
     roles = meta.get("roles", {})
-    expected_roles_count = len(roles) if roles else max(len(session.party_types), len(session.party_users))
+    expected_roles_count = len(roles) if roles else max(len(session.party_types), len(session.role_owners))
     
-    occupied_roles = len(session.party_users)
+    occupied_roles = len(session.role_owners)
     is_full = expected_roles_count > 0 and occupied_roles >= expected_roles_count
 
     # Enforce participant-only access when explicitly required or when session is already full
     if require_participant or is_full:
         if not client_id:
-            raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+            raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
-        if session.party_users and client_id not in session.party_users.values() and not is_owner:
+        if session.role_owners and client_id not in session.role_owners.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
@@ -1009,8 +1087,9 @@ def check_session_access(
 @app.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
+    user_id = _require_user_id(x_user_id)
     try:
         # We need to load session to check access.
         # tool_get_session_summary loads it internally.
@@ -1018,7 +1097,7 @@ async def get_session(
         # So we load it here first.
         session = await aload_session(session_id)
 
-        check_session_access(session, x_client_id, allow_owner=True)
+        check_session_access(session, user_id, allow_owner=True)
 
         return await tool_get_session_summary_async(session_id)
     except SessionNotFoundError as exc:
@@ -1028,7 +1107,7 @@ async def get_session(
 @app.get("/user-documents/{session_id}")
 async def get_user_document_api(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     """
     Повертає user-document JSON у форматі example_user_document.json
@@ -1039,10 +1118,9 @@ async def get_user_document_api(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if not x_client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    user_id = _require_user_id(x_user_id)
 
-    check_session_access(session, x_client_id, require_participant=True, allow_owner=True)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     try:
         return await load_user_document_async(session_id)
@@ -1074,8 +1152,9 @@ class SetFillingModeRequest(BaseModel):
 async def set_session_filling_mode(
     session_id: str,
     req: SetFillingModeRequest,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
+    user_id = _require_user_id(x_user_id)
     from backend.api.tool_adapter.tool_router import tool_registry
     tool = tool_registry.get("set_filling_mode")
     if not tool:
@@ -1083,7 +1162,7 @@ async def set_session_filling_mode(
 
     result = await tool.execute_async(
         {"session_id": session_id, "mode": req.mode},
-        {"client_id": x_client_id},
+        {"client_id": user_id, "user_id": user_id},
     )
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1169,15 +1248,15 @@ stream_manager = StreamManager()
 @app.get("/sessions/{session_id}/stream")
 async def stream_session_events(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
     """
     Server-Sent Events endpoint for real-time session updates.
     """
-    client_id = x_client_id or client_id_query
+    client_id = x_user_id or user_id_query
     if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
     try:
         session = await aload_session(session_id)
@@ -1214,7 +1293,7 @@ async def stream_session_events(
 async def upsert_session_field(
     session_id: str, 
     req: UpsertFieldRequest,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     # Якщо у сесії вже є учасники — вимагаємо автентифікацію через заголовок.
     try:
@@ -1222,8 +1301,7 @@ async def upsert_session_field(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if session.party_users and not x_client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    user_id = _require_user_id(x_user_id)
 
     result = await tool_upsert_field_async(
         session_id=session_id,
@@ -1231,11 +1309,11 @@ async def upsert_session_field(
         value=req.value,
         tags=None,
         role=req.role,
-        _context={"client_id": x_client_id}
+        _context={"client_id": user_id, "user_id": user_id}
     )
     
     if result.get("ok", False):
-        sender_id = x_client_id or req.client_id
+        sender_id = user_id or req.client_id
         field_key = f"{req.role}.{req.field}" if req.role else req.field
         # Broadcast update to all listeners
         await stream_manager.broadcast(
@@ -1295,8 +1373,7 @@ class SyncSessionRequest(BaseModel):
 async def sync_session(
     session_id: str,
     req: SyncSessionRequest,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     """
     Універсальний ендпоінт для пакетного оновлення даних сесії.
@@ -1310,9 +1387,7 @@ async def sync_session(
     await aget_or_create_session(session_id)
 
     # Access control: only participants can sync when roles are claimed/full.
-    client_id = x_client_id or client_id_query
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    client_id = _require_user_id(x_user_id)
     session_for_acl = await aload_session(session_id)
     check_session_access(session_for_acl, client_id, require_participant=True, allow_owner=True)
 
@@ -1325,7 +1400,7 @@ async def sync_session(
     template_id_local: Optional[str] = None
     # Для подальшої фільтрації помилок під конкретного клієнта
     main_role: Optional[str] = None
-    party_users: Dict[str, str] = {}
+    role_owners: Dict[str, str] = {}
 
     async with atransactional_session(session_id) as session:
         # 2. Set Category / Template if provided
@@ -1383,7 +1458,7 @@ async def sync_session(
                     field=field_name,
                     value=value,
                     role=role_id,
-                    context={"client_id": client_id, "source": "api"},
+                    context={"client_id": client_id, "user_id": client_id, "source": "api"},
                 )
 
         # 4. Check Readiness using shared schema helper
@@ -1407,13 +1482,13 @@ async def sync_session(
         session.can_build_contract = is_ready
         session.state = SessionState.READY_TO_BUILD if is_ready else SessionState.COLLECTING_FIELDS
         template_id_local = session.template_id
-        party_users = session.party_users.copy()
+        role_owners = session.role_owners.copy()
 
     # End of transaction block. Session is saved to disk.
 
     # Фільтрація списку missing під роль поточного клієнта
-    if client_id and party_users:
-        current_role = next((r for r, uid in party_users.items() if uid == client_id), None)
+    if client_id and role_owners:
+        current_role = next((r for r, uid in role_owners.items() if uid == client_id), None)
         if current_role:
             if current_role in missing_roles:
                 missing_roles = {current_role: missing_roles[current_role]}
@@ -1462,7 +1537,10 @@ def _load_meta(category) -> dict:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(
+    req: ChatRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+) -> ChatResponse:
     """
     Основна точка входу для діалогу.
 
@@ -1471,6 +1549,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
     на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
     """
     conv = conversation_store.get(req.session_id)
+    user_id = x_user_id
+    if user_id:
+        conv.client_id = user_id
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
     # get_or_create_session uses lock if creating, so it's safe.
     session = await aget_or_create_session(req.session_id)
@@ -1542,12 +1623,15 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 @app.get("/my-sessions")
-async def get_my_sessions(x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
-    if not x_client_id:
+async def get_my_sessions(
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+):
+    user_id = x_user_id
+    if not user_id:
         return []
     from backend.domain.categories.index import list_templates
 
-    sessions = await alist_user_sessions(x_client_id)
+    sessions = await alist_user_sessions(user_id)
     results = []
     for s in sessions:
         title = s.template_id
@@ -1575,7 +1659,7 @@ async def get_my_sessions(x_client_id: Optional[str] = Header(None, alias="X-Cli
 @app.get("/users/{user_id}/sessions")
 async def get_user_sessions(user_id: str):
     """
-    Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (party_users).
+    Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (role_owners).
     """
     from backend.domain.categories.index import list_templates
 
@@ -1607,34 +1691,30 @@ async def get_user_sessions(user_id: str):
 @app.get("/sessions/{session_id}/contract")
 async def get_contract_info(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = x_client_id or client_id_query
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    client_id = _require_user_id(x_user_id)
 
     check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
-        f"/sessions/{session_id}/contract/download"
+        f"/sessions/{session_id}/contract/download?user_id={client_id}"
         if session.state in {SessionState.BUILT, SessionState.COMPLETED, SessionState.READY_TO_SIGN}
         else None
     )
-    if document_url and client_id:
-        document_url = f"{document_url}?client_id={client_id}"
+    preview_url = (
+        f"/sessions/{session_id}/contract/preview?user_id={client_id}"
+        if session.can_build_contract
+        else None
+    )
 
-    preview_url = f"/sessions/{session_id}/contract/preview" if session.can_build_contract else None
-    if preview_url and client_id:
-        preview_url = f"{preview_url}?client_id={client_id}"
-
-    client_roles = [role for role, uid in session.party_users.items() if uid == client_id]
+    client_roles = [role for role, uid in session.role_owners.items() if uid == client_id]
 
     return {
         "session_id": session.session_id,
@@ -1654,17 +1734,17 @@ async def get_contract_info(
 @app.get("/sessions/{session_id}/contract/preview", response_class=HTMLResponse)
 async def preview_contract(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = x_client_id or client_id_query
+    client_id = x_user_id or user_id_query
     if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
     # Превʼю доступне лише учасникам або власнику
     check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
@@ -1700,8 +1780,8 @@ async def preview_contract(
 async def download_contract(
     session_id: str,
     final: bool = False,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
     from backend.infra.storage.fs import output_document_path
     from backend.infra.config.settings import settings
@@ -1711,9 +1791,9 @@ async def download_contract(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    client_id = x_client_id or client_id_query
+    client_id = x_user_id or user_id_query
     if not client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
     check_session_access(session, client_id, require_participant=True, allow_owner=True)
 
     # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
@@ -1756,14 +1836,21 @@ async def download_contract(
 @app.post("/sessions/{session_id}/contract/sign")
 async def sign_contract(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
-    logger.info(f"Sign request: session_id={session_id}, client_id={x_client_id}")
-    if not x_client_id:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    user_id = x_user_id
+    logger.info(f"Sign request: session_id={session_id}, user_id={user_id}")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
     try:
         async with atransactional_session(session_id) as session:
-            logger.info(f"Session state: {session.state}, filling_mode: {session.filling_mode}, party_users: {session.party_users}, party_types: {session.party_types}")
+            logger.info(
+                "Session state: %s, filling_mode: %s, role_owners: %s, party_types: %s",
+                session.state,
+                session.filling_mode,
+                session.role_owners,
+                session.party_types,
+            )
 
             # Якщо контракт ще не зібрано, але всі обов'язкові поля готові — пробуємо зібрати.
             # Дозволяємо підпис лише коли договір зібраний/готовий до підпису.
@@ -1776,53 +1863,27 @@ async def sign_contract(
                 raise HTTPException(status_code=400, detail="Contract is not ready to be signed")
 
             # Identify role
-            user_role = None
-            logger.info(f"Looking for role for client_id={x_client_id} in party_users={session.party_users}")
-            for r, uid in session.party_users.items():
-                logger.info(f"Checking role={r}, uid={uid}, match={uid == x_client_id}")
-                if uid == x_client_id:
-                    user_role = r
-                    logger.info(f"Found role={user_role} for client_id={x_client_id}")
-                    break
+            user_roles = [r for r, uid in (session.role_owners or {}).items() if uid == user_id]
+            logger.info("Roles for signer %s: %s", user_id, user_roles)
 
-            logger.info(f"After search: user_role={user_role}, filling_mode={session.filling_mode}")
-
-            from backend.shared.enums import FillingMode
             signed_roles: List[str] = []
 
-            if session.filling_mode == FillingMode.FULL:
-                # У режимі FULL дозволяємо клієнту підписати всі ролі, які або пусті, або належать йому.
-                for role in session.party_types:
-                    owner = session.party_users.get(role)
-                    if owner and owner != x_client_id:
-                        logger.error(f"Role {role} owned by {owner}, client {x_client_id} cannot sign all")
-                        raise HTTPException(status_code=403, detail="You cannot sign for other participants.")
-                    # Прив'язуємо роль до клієнта, якщо ще не зайнята
-                    session.party_users.setdefault(role, x_client_id)
-                    session.signatures[role] = True
-                    signed_roles.append(role)
-            elif user_role:
-                session.signatures[user_role] = True
-                signed_roles.append(user_role)
+            if user_roles:
+                for user_role in user_roles:
+                    session.signatures[user_role] = True
+                    signed_roles.append(user_role)
             else:
-                # Cannot determine who to sign for
-                # Якщо одна роль визначена у схемі і ще не зайнята — призначаємо її клієнту та підписуємо.
-                if len(session.party_types) == 1 and not session.party_users:
-                    single_role = list(session.party_types.keys())[0]
-                    session.party_users[single_role] = x_client_id
-                    session.signatures[single_role] = True
-                    logger.warning(f"Signing for single role {single_role} for client {x_client_id}")
-                    signed_roles.append(single_role)
-                else:
-                    # Multiple roles або власники інші — вимагаємо прив’язки ролі перед підписом.
-                    logger.error(
-                        f"Cannot determine signer: client_id={x_client_id}, user_role={user_role}, "
-                        f"party_types={list(session.party_types.keys())}, party_users={session.party_users}"
-                    )
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Set party context (role) before signing."
-                    )
+                # Multiple roles або власники інші — вимагаємо прив’язки ролі перед підписом.
+                logger.error(
+                    "Cannot determine signer: user_id=%s, party_types=%s, role_owners=%s",
+                    user_id,
+                    list(session.party_types.keys()),
+                    session.role_owners,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="Set party context (role) before signing."
+                )
 
             # Check if fully signed
             if session.is_fully_signed:
@@ -1831,7 +1892,16 @@ async def sign_contract(
                 session.sign_history.append(
                     {
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "client_id": x_client_id,
+                        "client_id": user_id,
+                        "roles": signed_roles,
+                        "state": session.state.value,
+                    }
+                )
+                session.history.append(
+                    {
+                        "ts": datetime.utcnow().isoformat() + "Z",
+                        "type": "sign",
+                        "user_id": user_id,
                         "roles": signed_roles,
                         "state": session.state.value,
                     }
@@ -1870,7 +1940,7 @@ async def get_session_schema(
     session_id: str,
     scope: str = Query("all", enum=["all", "required"]),
     data_mode: str = Query("values", enum=["values", "status", "none"]),
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ):
     """
     Універсальний ендпоінт для отримання структури форми та даних.
@@ -1889,7 +1959,8 @@ async def get_session_schema(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    check_session_access(session, x_client_id, allow_owner=True)
+    user_id = _require_user_id(x_user_id)
+    check_session_access(session, user_id, allow_owner=True)
 
     if not session.category_id:
         return {"sections": []}
@@ -1947,7 +2018,7 @@ async def get_session_schema(
             "person_type_label": next((x["label"] for x in allowed_types if x["value"] == p_type), p_type),
             "allowed_types": allowed_types,
             "fields": [],
-            "claimed_by": session.party_users.get(role_key)
+            "claimed_by": session.role_owners.get(role_key)
         }
 
         # Get fields for this role + type
@@ -2027,8 +2098,7 @@ async def get_session_schema(
 @app.get("/sessions/{session_id}/requirements")
 async def get_session_requirements(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     """
     Повертає список незаповнених обов'язкових полів для відображення на фронті.
@@ -2038,8 +2108,8 @@ async def get_session_requirements(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = x_client_id or client_id_query
-    check_session_access(session, client_id, require_participant=True, allow_owner=True)
+    user_id = _require_user_id(x_user_id)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     missing = collect_missing_fields(session)
     # Фільтруємо missing за роллю клієнта, щоб не блокувати другорядні ролі
@@ -2055,8 +2125,8 @@ async def get_session_requirements(
             except Exception:
                 pass
 
-    if client_id and session.party_users:
-        current_role = next((r for r, uid in session.party_users.items() if uid == client_id), None)
+    if user_id and session.role_owners:
+        current_role = next((r for r, uid in session.role_owners.items() if uid == user_id), None)
         if current_role:
             roles_missing = missing.get("roles", {})
             if current_role in roles_missing:
@@ -2078,31 +2148,28 @@ async def get_session_requirements(
 @app.get("/sessions/{session_id}/history")
 async def get_session_history(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ) -> Dict[str, Any]:
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = x_client_id or client_id_query
-    check_session_access(session, client_id, require_participant=True, allow_owner=True)
+    user_id = _require_user_id(x_user_id)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     return {
         "session_id": session.session_id,
         "state": session.state.value,
         "updated_at": session.updated_at.isoformat(),
-        "all_data": session.all_data,
-        "sign_history": session.sign_history,
+        "history": session.history,
     }
 
 
 @app.post("/sessions/{session_id}/order")
 async def order_contract(
     session_id: str,
-    x_client_id: Optional[str] = Header(None, alias="X-Client-ID"),
-    client_id_query: Optional[str] = Query(None, alias="client_id"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ):
     """
     Фіналізує документ:
@@ -2119,9 +2186,7 @@ async def order_contract(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    client_id_local = x_client_id or client_id_query
-    if not client_id_local:
-        raise HTTPException(status_code=401, detail="Missing X-Client-ID")
+    client_id_local = _require_user_id(x_user_id)
     check_session_access(session, client_id_local, require_participant=True, allow_owner=True)
 
     if not session.template_id:
@@ -2169,8 +2234,6 @@ async def order_contract(
         session_inner.state = SessionState.READY_TO_SIGN
 
     download_url_local = f"/sessions/{session_id}/contract/download?final=true"
-    if client_id_local:
-        download_url_local = f"{download_url_local}&client_id={client_id_local}"
 
     result = {
         "client_id": client_id_local,

@@ -7,7 +7,7 @@
 
 2. Запустити сервер:
    ```bash
-   uvicorn src.app.server:app --reload
+   uvicorn backend.api.http.server:app --reload
    ```
 
 3. Надіслати запит у `/chat`, наприклад через `curl`:

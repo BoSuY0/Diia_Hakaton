@@ -1,8 +1,8 @@
 
 import pytest
-from src.agent.tools.categories import FindCategoryByQueryTool
-from src.sessions.store import get_or_create_session, load_session
-from src.categories.index import store, Category
+from backend.agent.tools.categories import FindCategoryByQueryTool
+from backend.infra.persistence.store import get_or_create_session, load_session
+from backend.domain.categories.index import store, Category
 from pathlib import Path
 
 # This test verifies that FindCategoryByQueryTool does NOT automatically update the session state.

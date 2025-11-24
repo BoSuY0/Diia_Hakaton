@@ -4,10 +4,10 @@ import argparse
 import asyncio
 import sys
 
-from src.common.config import settings
-from src.sessions.store_utils import _from_dict
-from src.sessions import store_redis
-from src.storage.fs import read_json
+from backend.infra.config.settings import settings
+from backend.infra.persistence.store_utils import _from_dict
+from backend.infra.persistence import store_redis
+from backend.infra.storage.fs import read_json
 
 
 async def migrate_async(delete_files: bool = False) -> None:

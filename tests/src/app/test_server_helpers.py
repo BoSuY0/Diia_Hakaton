@@ -1,4 +1,4 @@
-from src.app import server
+from backend.api.http import server
 
 
 def test_detect_lang_uk_en():
@@ -32,7 +32,7 @@ def test_inject_session_id_adds_and_expands_alias():
 
 
 def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_settings, mock_categories_data):
-    from src.sessions.store import get_or_create_session, save_session
+    from backend.infra.persistence.store import get_or_create_session, save_session
     s = get_or_create_session("eff_state")
     s.category_id = mock_categories_data
     s.state = server.SessionState.TEMPLATE_SELECTED

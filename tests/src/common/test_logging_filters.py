@@ -1,6 +1,6 @@
 import logging
 
-from src.common.logging import PiiRedactionFilter, ColorFormatter, setup_logging, get_logger
+from backend.shared.logging import PiiRedactionFilter, ColorFormatter, setup_logging, get_logger
 
 
 def test_pii_redaction_filter_replaces_message():

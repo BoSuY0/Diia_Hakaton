@@ -1,4 +1,4 @@
-from src.common import vsc
+from backend.shared import vsc
 
 
 def test_vsc_row_escapes():

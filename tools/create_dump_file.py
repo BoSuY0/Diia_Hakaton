@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import fnmatch
+
+TOOLS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = TOOLS_DIR.parent
+DUMPS_DIR = TOOLS_DIR / "dumps"
+DUMPS_RELATIVE_PREFIX = DUMPS_DIR.relative_to(PROJECT_ROOT).as_posix()
+DEFAULT_EXCLUDES = {".git"}
+GIT_META_ALLOWED_PREFIXES = (".github", ".gitlab", ".gitpod")
+
+
+def ensure_dumps_dir() -> Path:
+    DUMPS_DIR.mkdir(parents=True, exist_ok=True)
+    return DUMPS_DIR
+
+
+def create_dump_file(
+    content: str,
+    *,
+    file_name: Optional[str] = None,
+) -> Path:
+    """
+    Створює дамп-файл у директорії /dumps/ з розширенням .txt.
+
+    Вміст файлу (content) визначає розробник, який викликає цей скрипт
+    (через імпорт функції або CLI).
+    """
+    dumps_dir = ensure_dumps_dir()
+
+    suffix = ".txt"
+
+    if file_name:
+        file_path = dumps_dir / f"{file_name}{suffix}"
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        file_path = dumps_dir / f"dump_{timestamp}{suffix}"
+
+    file_path.write_text(content, encoding="utf-8")
+    return file_path
+
+
+def _is_git_metadata(rel: Path, *, is_dir: bool = False) -> bool:
+    """
+    Відфільтровує git-службові файли та директорії:
+    - усе, що містить компонент .git у шляху;
+    - файли/директорії з префіксом .git*, окрім загальновживаних
+      конфігів на кшталт .github/, .gitlab*, .gitpod*.
+    """
+    if any(part == ".git" for part in rel.parts):
+        return True
+
+    name = rel.name
+    if not name.startswith(".git"):
+        return False
+
+    if any(name.startswith(prefix) for prefix in GIT_META_ALLOWED_PREFIXES):
+        return False
+
+    return True
+
+
+def _load_gitignore_patterns(base_dir: Path) -> tuple[list[str], object | None]:
+    """
+    Читає .gitignore в корені проєкту і повертає
+    - список сирих патернів
+    - скомпільований PathSpec (якщо модуль pathspec доступний).
+    """
+    gitignore_path = base_dir / ".gitignore"
+    if not gitignore_path.exists():
+        return [], None
+    lines = gitignore_path.read_text(encoding="utf-8").splitlines()
+    patterns: list[str] = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line)
+    try:
+        from pathspec import PathSpec  # type: ignore
+    except ModuleNotFoundError:
+        return patterns, None
+    return patterns, PathSpec.from_lines("gitwildmatch", patterns)
+
+
+def collect_project_files() -> list[Path]:
+    """
+    Повертає список файлів проєкту, відфільтрованих згідно з .gitignore.
+    Використовує pathspec для точного застосування .gitignore (якщо доступний),
+    і простий fallback у разі відсутності залежності.
+    """
+    patterns, gitignore_spec = _load_gitignore_patterns(PROJECT_ROOT)
+
+    def is_ignored(rel: Path, *, is_dir: bool = False) -> bool:
+        rel_str = rel.as_posix()
+        candidates = [rel_str]
+        if is_dir and not rel_str.endswith("/"):
+            candidates.append(rel_str + "/")
+
+        if gitignore_spec:
+            for candidate in candidates:
+                if gitignore_spec.match_file(candidate):
+                    return True
+
+        for pat in patterns:
+            anchored = pat.startswith("/")
+            pat_body = pat[1:] if anchored else pat
+            # Директорія: 'dir/' → будь-що всередині
+            if pat_body.endswith("/"):
+                prefix = pat_body[:-1]
+                if anchored:
+                    if rel_str == prefix or rel_str.startswith(prefix + "/"):
+                        return True
+                else:
+                    parts = rel_str.split("/")
+                    if prefix in parts:
+                        return True
+                    if rel_str.startswith(prefix + "/"):
+                        return True
+            # Звичайний glob-патерн
+            elif fnmatch.fnmatch(rel_str, pat_body):
+                return True
+        return False
+
+    all_paths: list[Path] = []
+    for root, dirs, files in os.walk(PROJECT_ROOT):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(PROJECT_ROOT)
+
+        # Drop default excluded directories early (e.g. .git)
+        pruned_dirs = []
+        for d in dirs:
+            rel_dir = rel_root / d
+            if (
+                d in DEFAULT_EXCLUDES
+                or _is_git_metadata(rel_dir, is_dir=True)
+                or rel_dir.as_posix() == DUMPS_RELATIVE_PREFIX
+            ):
+                continue
+            pruned_dirs.append(d)
+        dirs[:] = pruned_dirs
+
+        # Не заходимо в директорії, які ігноруються .gitignore
+        dirs[:] = [d for d in dirs if not is_ignored(rel_root / d, is_dir=True)]
+
+        for file_name in files:
+            rel = rel_root / file_name
+            rel_str = rel.as_posix()
+            if _is_git_metadata(rel):
+                continue
+            # Не включаємо файли у dumps, навіть якщо не прописані в .gitignore
+            if rel_str == DUMPS_RELATIVE_PREFIX or rel_str.startswith(
+                f"{DUMPS_RELATIVE_PREFIX}/"
+            ):
+                continue
+            if is_ignored(rel):
+                continue
+            file_path = PROJECT_ROOT / rel
+            try:
+                if not file_path.is_file():
+                    continue
+            except OSError:
+                # Пропускаємо файли/лінки, які неможливо прочитати (наприклад, lib64 у venv на Windows)
+                continue
+            all_paths.append(rel)
+    return sorted(all_paths)
+
+
+def create_full_project_dump(file_name: Optional[str] = None) -> Path:
+    """
+    Створює текстовий дамп у форматі:
+
+    ===== FILE: relative/path =====
+    <вміст файлу>
+
+    для всіх файлів проєкту, які не ігноруються .gitignore.
+    """
+    files = collect_project_files()
+    parts: list[str] = []
+    for rel in files:
+        parts.append(f"===== FILE: {rel} =====")
+        if rel.suffix.lower() == ".docx":
+            parts.append("<<binary .docx skipped (tracked in tree)>>")
+            parts.append("")
+            continue
+        try:
+            parts.append(
+                (PROJECT_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError as exc:
+            parts.append(f"<<unable to read file: {exc}>>")
+        parts.append("")  # порожній рядок між файлами
+
+    content = "\n".join(parts)
+    if not file_name:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        file_name = f"full_project_dump_{timestamp}"
+    return create_dump_file(content=content, file_name=file_name)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Створення дамп-файлу у директорії ./dumps/"
+    )
+    parser.add_argument(
+        "-n",
+        "--name",
+        dest="file_name",
+        help="Ім'я дамп-файлу (без .txt, опційно)",
+    )
+    parser.add_argument(
+        "-c",
+        "--content",
+        dest="content",
+        help="Контент дампа. Якщо не вказано — читається з stdin",
+    )
+    parser.add_argument(
+        "--full-project",
+        action="store_true",
+        help="Зібрати повний дамп проєкту (усі файли, що не ігноруються .gitignore)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv or sys.argv[1:])
+
+    if args.full_project:
+        file_path = create_full_project_dump(file_name=args.file_name)
+        print(str(file_path))
+        return
+
+    if args.content is not None:
+        content = args.content
+    else:
+        # Читаємо з stdin (можна передати будь-який текст/JSON/log)
+        content = sys.stdin.read()
+
+    if not content:
+        print("Немає контенту для дампа (content порожній).", file=sys.stderr)
+        sys.exit(1)
+
+    file_path = create_dump_file(
+        content=content,
+        file_name=args.file_name,
+    )
+    print(str(file_path))
+
+
+if __name__ == "__main__":
+    main()

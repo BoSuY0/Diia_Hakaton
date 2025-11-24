@@ -1,4 +1,4 @@
-from src.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
+from backend.domain.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
 
 
 def test_cleaners_are_noop_for_non_filesystem_backend(mock_settings):

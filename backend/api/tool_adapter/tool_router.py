@@ -30,6 +30,7 @@ def dispatch_tool(
         "tags": tags,
         "pii_tags": tags or {},
         "client_id": client_id,
+        "user_id": client_id,
     }
 
     try:
@@ -58,6 +59,7 @@ async def dispatch_tool_async(
         "tags": tags,
         "pii_tags": tags or {},
         "client_id": client_id,
+        "user_id": client_id,
     }
 
     try:
@@ -152,7 +154,11 @@ def tool_build_contract(session_id: str, template_id: str) -> Dict[str, Any]:
 
 
 def tool_set_party_context(
-    session_id: str, role: str, person_type: str, _context: Dict[str, Any] | None = None
+    session_id: str,
+    role: str,
+    person_type: str,
+    filling_mode: str | None = None,
+    _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     tool = tool_registry.get("set_party_context")
     if not tool:
@@ -160,10 +166,11 @@ def tool_set_party_context(
         return {"ok": False, "error": "Tool set_party_context not found"}
 
     logger.info("tool_set_party_context: Executing for session_id=%s", session_id)
-    return tool.execute(
-        {"session_id": session_id, "role": role, "person_type": person_type},
-        _context or {},
-    )
+    payload: Dict[str, Any] = {"session_id": session_id, "role": role, "person_type": person_type}
+    if filling_mode:
+        payload["filling_mode"] = filling_mode
+
+    return tool.execute(payload, _context or {})
 
 
 def tool_sign_contract(session_id: str, role: Optional[str] = None) -> Dict[str, Any]:
@@ -257,7 +264,11 @@ async def tool_build_contract_async(session_id: str, template_id: str) -> Dict[s
 
 
 async def tool_set_party_context_async(
-    session_id: str, role: str, person_type: str, _context: Dict[str, Any] | None = None
+    session_id: str,
+    role: str,
+    person_type: str,
+    filling_mode: str | None = None,
+    _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     tool = tool_registry.get("set_party_context")
     if not tool:
@@ -265,8 +276,11 @@ async def tool_set_party_context_async(
         return {"ok": False, "error": "Tool set_party_context not found"}
 
     logger.info("tool_set_party_context_async: Executing for session_id=%s", session_id)
+    payload: Dict[str, Any] = {"session_id": session_id, "role": role, "person_type": person_type}
+    if filling_mode:
+        payload["filling_mode"] = filling_mode
+
     return await tool.execute_async(
-        {"session_id": session_id, "role": role, "person_type": person_type},
+        payload,
         _context or {},
     )
-

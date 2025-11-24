@@ -1,11 +1,11 @@
 import pytest
 
-from src.validators.date import normalize_date
-from src.validators.iban import normalize_iban_ua
-from src.validators.money import normalize_money
-from src.validators.person import normalize_person_name
-from src.validators.tax import normalize_rnokpp, normalize_edrpou
-from src.validators.address import normalize_address
+from backend.domain.validation.date import normalize_date
+from backend.domain.validation.iban import normalize_iban_ua
+from backend.domain.validation.money import normalize_money
+from backend.domain.validation.person import normalize_person_name
+from backend.domain.validation.tax import normalize_rnokpp, normalize_edrpou
+from backend.domain.validation.address import normalize_address
 
 
 def test_normalize_date_formats():

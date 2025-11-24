@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.documents.builder import build_contract
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState
+from backend.domain.documents.builder import build_contract
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState
 
 @pytest.fixture
 def ready_session(mock_settings, mock_categories_data):
@@ -33,7 +33,7 @@ def ready_session(mock_settings, mock_categories_data):
 
 def test_build_contract_success(ready_session, mock_settings):
     # Mock fill_docx_template to avoid needing a real docx file
-    with patch("src.documents.builder.fill_docx_template") as mock_fill:
+    with patch("backend.domain.documents.builder.fill_docx_template") as mock_fill:
         # Also ensure the template file check passes
         # The builder checks if template exists.
         # mock_categories_data creates the meta, but maybe not the file?
@@ -57,7 +57,7 @@ def test_build_contract_success(ready_session, mock_settings):
 
 def test_build_contract_missing_field(ready_session):
     # Invalidate a field
-    from src.sessions.store import load_session
+    from backend.infra.persistence.store import load_session
     s = load_session(ready_session)
     s.contract_fields["cf1"].status = "empty"
     save_session(s)
@@ -67,7 +67,7 @@ def test_build_contract_missing_field(ready_session):
 
 def test_build_contract_wrong_template(ready_session):
     with pytest.raises(Exception, match="Template in session does not match"):
-        from src.common.errors import MetaNotFoundError
+        from backend.shared.errors import MetaNotFoundError
         try:
             build_contract(ready_session, "t2")
         except MetaNotFoundError as e:

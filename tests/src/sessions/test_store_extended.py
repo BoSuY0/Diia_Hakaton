@@ -1,7 +1,7 @@
 import time
 
-from src.sessions.store import get_or_create_session, save_session, load_session
-from src.sessions.models import FieldState
+from backend.infra.persistence.store import get_or_create_session, save_session, load_session
+from backend.domain.sessions.models import FieldState
 
 
 def test_get_or_create_returns_session(mock_settings):

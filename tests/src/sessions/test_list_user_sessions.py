@@ -1,6 +1,6 @@
 import time
 
-from src.sessions.store import list_user_sessions, get_or_create_session, save_session
+from backend.infra.persistence.store import list_user_sessions, get_or_create_session, save_session
 
 
 def test_list_user_sessions_returns_sorted(mock_settings):

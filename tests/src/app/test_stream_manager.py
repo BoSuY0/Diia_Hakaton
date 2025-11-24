@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from src.app.server import stream_manager
+from backend.api.http.server import stream_manager
 
 
 @pytest.mark.asyncio

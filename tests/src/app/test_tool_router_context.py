@@ -1,6 +1,6 @@
 import json
 
-from src.app.tool_router import dispatch_tool
+from backend.api.tool_adapter.tool_router import dispatch_tool
 
 
 def test_dispatch_tool_handles_missing():
@@ -26,7 +26,7 @@ def test_dispatch_tool_passes_context(monkeypatch):
             return json.dumps(result, ensure_ascii=False)
 
     monkeypatch.setattr(
-        "src.app.tool_router.tool_registry.get",
+        "backend.api.tool_adapter.tool_router.tool_registry.get",
         lambda name: DummyTool() if name == "dummy" else None,
     )
 

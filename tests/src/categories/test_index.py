@@ -1,5 +1,5 @@
 import pytest
-from src.categories.index import store, list_templates, list_entities, list_party_fields, get_party_schema
+from backend.domain.categories.index import store, list_templates, list_entities, list_party_fields, get_party_schema
 
 
 

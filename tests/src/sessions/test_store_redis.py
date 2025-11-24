@@ -4,17 +4,17 @@ import time
 import fakeredis
 import pytest
 
-from src.common.config import settings
-from src.common.errors import SessionNotFoundError
-from src.sessions.models import FieldState
-from src.sessions.store import (
+from backend.infra.config.settings import settings
+from backend.shared.errors import SessionNotFoundError
+from backend.domain.sessions.models import FieldState
+from backend.infra.persistence.store import (
     get_or_create_session,
     list_user_sessions,
     load_session,
     save_session,
     transactional_session,
 )
-from src.storage import redis_client as redis_client_module
+from backend.infra.storage import redis_client as redis_client_module
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def redis_backend(mock_settings, monkeypatch):
     monkeypatch.setattr(mock_settings, "session_backend", "redis")
     monkeypatch.setattr(mock_settings, "session_ttl_hours", 24)
     monkeypatch.setattr(mock_settings, "redis_url", "redis://localhost:6379/0")
-    from src.sessions import store as store_module
+    from backend.infra.persistence import store as store_module
     store_module._redis_disabled = False
     yield fake
     fake.flushall()
@@ -40,8 +40,10 @@ def test_save_and_load_roundtrip(redis_backend):
     assert loaded.party_users == {"lessor": "user1"}
     assert loaded.party_fields["lessor"]["name"].status == "ok"
 
+    from backend.domain.sessions.ttl import ttl_hours_for_state
     ttl = redis_backend.ttl(f"session:{session.session_id}")
-    assert ttl is not None and ttl > 0 and ttl <= settings.session_ttl_hours * 3600
+    expected_ttl = ttl_hours_for_state(session.state) * 3600
+    assert ttl is not None and ttl > 0 and ttl <= expected_ttl
 
     raw = json.loads(redis_backend.get(f"session:{session.session_id}"))
     assert raw["party_fields"]["lessor"]["name"]["status"] is True

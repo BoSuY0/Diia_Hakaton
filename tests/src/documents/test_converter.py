@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.documents.converter import convert_to_html
+from backend.domain.documents.converter import convert_to_html
 
 
 def test_convert_to_html_uses_mammoth(monkeypatch, tmp_path):
@@ -17,7 +17,7 @@ def test_convert_to_html_uses_mammoth(monkeypatch, tmp_path):
         called["called"] = True
         return DummyResult()
 
-    monkeypatch.setattr("src.documents.converter.mammoth.convert_to_html", fake_convert)
+    monkeypatch.setattr("backend.domain.documents.converter.mammoth.convert_to_html", fake_convert)
     html = convert_to_html(input_path)
     assert called.get("called") is True
     assert "<html" in html.lower()

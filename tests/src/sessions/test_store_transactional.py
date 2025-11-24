@@ -1,4 +1,4 @@
-from src.sessions.store import transactional_session, get_or_create_session, load_session, save_session
+from backend.infra.persistence.store import transactional_session, get_or_create_session, load_session, save_session
 
 
 def test_transactional_session_saves_changes(mock_settings):
@@ -16,5 +16,5 @@ def test_transactional_session_raises_on_missing(mock_settings):
             pass
         assert False, "expected SessionNotFoundError"
     except Exception as e:
-        from src.common.errors import SessionNotFoundError
+        from backend.shared.errors import SessionNotFoundError
         assert isinstance(e, SessionNotFoundError)

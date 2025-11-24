@@ -56,7 +56,7 @@ graph TB
 
 ### Основні компоненти
 
-#### 1. **FastAPI Application** (`src/app/server.py`)
+#### 1. **FastAPI Application** (`backend/api/http/server.py`)
 - REST API endpoints
 - CORS middleware
 - SSE (Server-Sent Events) для real-time оновлень
@@ -73,7 +73,7 @@ GET    /sessions/{id}/stream        # SSE підключення
 POST   /chat                        # AI чат інтерфейс
 ```
 
-#### 2. **Session Management** (`src/sessions/`)
+#### 2. **Session Management** (`backend/domain/sessions/`)
 
 ##### Session Model (`models.py`)
 ```python
@@ -116,7 +116,7 @@ class SessionState(Enum):
     COMPLETED = "completed"
 ```
 
-#### 3. **Storage Layer** (`src/sessions/store.py`)
+#### 3. **Storage Layer** (`backend/domain/sessions/store.py`)
 
 Трирівнева архітектура зберігання з автоматичним fallback:
 
@@ -138,7 +138,7 @@ async def atransactional_session(session_id: str) -> AsyncContextManager[Session
 async def alist_user_sessions(client_id: str) -> List[Session]
 ```
 
-#### 4. **AI Agent System** (`src/agent/`)
+#### 4. **AI Agent System** (`backend/agent/`)
 
 ##### Tool Registry Pattern
 ```python
@@ -162,7 +162,7 @@ class UpsertFieldTool(BaseTool):
 - `build_contract` - генерація документа
 - `sign_contract` - підпис договору
 
-#### 5. **Document Generation** (`src/documents/`)
+#### 5. **Document Generation** (`backend/domain/documents/`)
 
 ```python
 async def build_contract_async(
@@ -177,7 +177,7 @@ async def build_contract_async(
     # 5. Optional: Convert to HTML/PDF
 ```
 
-#### 6. **Validation System** (`src/validators/`)
+#### 6. **Validation System** (`backend/domain/validation/`)
 
 ##### PII Sanitizer
 ```python
@@ -209,7 +209,7 @@ def validate_value(value_type: str, value: str) -> Tuple[str, Optional[str]]:
 ### Component Structure
 
 ```
-client/src/
+frontend/src/
 ├── App.jsx                 # Головний компонент з маршрутизацією
 ├── api.js                  # API клієнт
 ├── App.css                 # Глобальні стилі

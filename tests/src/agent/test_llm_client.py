@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from src.agent import llm_client
-from src.common.config import settings
+from backend.agent import llm_client
+from backend.infra.config.settings import settings
 
 
 def test_ensure_api_key_sets_openai(monkeypatch):

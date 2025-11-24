@@ -1,5 +1,5 @@
-from src.common.enums import PersonType, ContractRole, FillingMode
-from src.common.errors import SessionNotFoundError, MetaNotFoundError, ValidationError
+from backend.shared.enums import PersonType, ContractRole, FillingMode
+from backend.shared.errors import SessionNotFoundError, MetaNotFoundError, ValidationError
 
 
 def test_enum_values():

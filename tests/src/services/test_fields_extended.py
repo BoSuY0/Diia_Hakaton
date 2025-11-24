@@ -1,7 +1,7 @@
 import json
 
-from src.services.fields import get_required_fields
-from src.sessions.store import get_or_create_session, save_session
+from backend.domain.services.fields import get_required_fields
+from backend.infra.persistence.store import get_or_create_session, save_session
 
 
 def _setup_category(settings, roles=True):
@@ -24,7 +24,7 @@ def _setup_category(settings, roles=True):
     path.write_text(json.dumps(meta), encoding="utf-8")
     idx = settings.meta_categories_root / "categories_index.json"
     idx.write_text(json.dumps({"categories": [{"id": "fields_cat", "label": "Fields"}]}), encoding="utf-8")
-    from src.categories.index import store as category_store
+    from backend.domain.categories.index import store as category_store
     category_store._categories = {}
     category_store.load()
 

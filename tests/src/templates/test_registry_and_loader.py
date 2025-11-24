@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from src.templates.registry import TemplateRegistry
-from src.templates.meta_loader import get_template_fields
-from src.common.errors import MetaNotFoundError
+from backend.domain.templates.registry import TemplateRegistry
+from backend.domain.templates.meta_loader import get_template_fields
+from backend.shared.errors import MetaNotFoundError
 
 
 def _write_category_with_template(settings, cat_id="tmpl_cat", templ_id="t1", filename="file.docx"):
@@ -22,7 +22,7 @@ def _write_category_with_template(settings, cat_id="tmpl_cat", templ_id="t1", fi
     cat_path.write_text(json.dumps(meta), encoding="utf-8")
     idx_path = settings.meta_categories_root / "categories_index.json"
     idx_path.write_text(json.dumps({"categories": [{"id": cat_id, "label": "Label"}]}), encoding="utf-8")
-    from src.categories.index import store as category_store
+    from backend.domain.categories.index import store as category_store
     category_store._categories = {}
     category_store.load()
 

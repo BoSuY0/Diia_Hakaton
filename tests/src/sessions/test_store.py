@@ -1,6 +1,6 @@
 import pytest
-from src.sessions.store import get_or_create_session, load_session, save_session
-from src.sessions.models import Session, FieldState
+from backend.infra.persistence.store import get_or_create_session, load_session, save_session
+from backend.domain.sessions.models import Session, FieldState
 
 def test_get_or_create_new(mock_settings):
     
@@ -19,6 +19,6 @@ def test_save_and_load(mock_settings):
     assert loaded.party_fields["lessor"]["name"].status == "ok"
 
 def test_load_not_found(mock_settings):
-    from src.common.errors import SessionNotFoundError
+    from backend.shared.errors import SessionNotFoundError
     with pytest.raises(SessionNotFoundError):
         load_session("non_existent")

@@ -1,7 +1,7 @@
 import json
 import shutil
 
-from src.content.manager import ContentManager
+from backend.domain.content.manager import ContentManager
 
 
 def test_add_category_creates_index_and_meta(mock_settings, tmp_path):

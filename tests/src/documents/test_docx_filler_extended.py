@@ -2,7 +2,7 @@ from pathlib import Path
 
 from docx import Document
 
-from src.documents.docx_filler import fill_docx_template
+from backend.domain.documents.docx_filler import fill_docx_template
 
 
 def test_fill_docx_replaces_placeholders_and_aliases(tmp_path):

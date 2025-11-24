@@ -1,8 +1,8 @@
 import pytest
-from src.validators.core import validate_value
-from src.validators.date import normalize_date
-from src.validators.money import normalize_money
-from src.common.errors import ValidationError
+from backend.domain.validation.core import validate_value
+from backend.domain.validation.date import normalize_date
+from backend.domain.validation.money import normalize_money
+from backend.shared.errors import ValidationError
 
 def test_validate_value_text():
     val, err = validate_value("text", " Hello ")

@@ -6,22 +6,22 @@ import pytest
 import asyncio
 import inspect
 
-# Додаємо корінь проєкту в sys.path, щоб імпорти src.* працювали без інсталяції пакету
+# Додаємо корінь проєкту в sys.path, щоб імпорти backend.* працювали без інсталяції пакету
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 root_str = str(PROJECT_ROOT)
-# Щоб src.* бралося з кореня, а не з tests/src, ставимо корінь на початок sys.path
+# Щоб backend.* бралося з кореня, а не з tests/src, ставимо корінь на початок sys.path
 if root_str in sys.path:
     sys.path.remove(root_str)
 sys.path.insert(0, root_str)
 
 try:
-    from src.common.config import Settings
+    from backend.infra.config.settings import Settings
 except ModuleNotFoundError:
     # Додаткова спроба з явним шляхом до кореня
     if root_str in sys.path:
         sys.path.remove(root_str)
     sys.path.insert(0, root_str)
-    from src.common.config import Settings
+    from backend.infra.config.settings import Settings
 
 @pytest.fixture
 def temp_workspace(tmp_path):
@@ -36,8 +36,8 @@ def temp_workspace(tmp_path):
 @pytest.fixture
 def mock_settings(temp_workspace):
     """Overrides settings to use the temporary workspace."""
-    from src.common.config import settings
-    from src.sessions import store_memory, store
+    from backend.infra.config.settings import settings
+    from backend.infra.persistence import store_memory, store
     
     # Store original values to restore after test
     original_values = {}
@@ -47,6 +47,7 @@ def mock_settings(temp_workspace):
         "sessions_root", "documents_files_root", "filled_documents_root",
         "default_documents_root", "users_documents_root",
         "session_backend", "session_ttl_hours", "redis_url",
+        "draft_ttl_hours", "filled_ttl_hours", "signed_ttl_days",
     ]
     
     for key in keys_to_update:
@@ -72,6 +73,9 @@ def mock_settings(temp_workspace):
     settings.users_documents_root = settings.documents_files_root / "users_documents_files"
     settings.session_backend = "memory"
     settings.session_ttl_hours = 24
+    settings.draft_ttl_hours = 24
+    settings.filled_ttl_hours = 24 * 7
+    settings.signed_ttl_days = 365
     settings.redis_url = None
     store._redis_disabled = False
     store_memory._reset_for_tests()
@@ -93,7 +97,7 @@ def mock_settings(temp_workspace):
 @pytest.fixture
 def mock_categories_data(mock_settings, monkeypatch):
     import json
-    from src.categories.index import store
+    from backend.domain.categories.index import store
     
     # Create a dummy category file
     cat_id = "test_cat"
@@ -129,7 +133,7 @@ def mock_categories_data(mock_settings, monkeypatch):
         json.dump(idx_data, f)
 
     # Patch the module-level variable _CATEGORIES_PATH because it's evaluated at import time
-    monkeypatch.setattr("src.categories.index._CATEGORIES_PATH", index_file)
+    monkeypatch.setattr("backend.domain.categories.index._CATEGORIES_PATH", index_file)
         
     # Force reload store
     store._categories = {} # Clear internal cache

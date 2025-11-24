@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from src.agent.tools.categories import (
+from backend.agent.tools.categories import (
     GetTemplatesForCategoryTool,
     GetCategoryEntitiesTool,
     SetCategoryTool,
@@ -43,7 +43,7 @@ def test_set_category_allows_custom(mock_settings, monkeypatch):
     )
 
     # Refresh store to pick up custom category
-    from src.categories import index as idx_module
+    from backend.domain.categories import index as idx_module
     idx_module.store._categories = {}
     idx_module.store.load()
 
@@ -59,6 +59,6 @@ def test_find_category_by_query_ignores_custom(monkeypatch):
     class Cat:
         id = "custom"
         label = "Custom"
-    monkeypatch.setattr("src.agent.tools.categories.find_category_by_query", lambda q: Cat())
+    monkeypatch.setattr("backend.agent.tools.categories.find_category_by_query", lambda q: Cat())
     res = tool.execute({"query": "any"}, {})
     assert res["category_id"] == "custom"

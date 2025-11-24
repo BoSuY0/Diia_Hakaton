@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import patch
 
-from src.documents.builder import build_contract
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState
-from src.common.errors import MetaNotFoundError
+from backend.domain.documents.builder import build_contract
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState
+from backend.shared.errors import MetaNotFoundError
 
 
 def _base_session(session_id: str, cat_id: str, templ_id: str):
@@ -43,10 +43,10 @@ def test_build_contract_partial_mode_allows_missing(mock_settings, mock_categori
     template_path = tmp_path / "assets" / "documents" / "default_documents_files" / mock_categories_data / "f1.docx"
     template_path.parent.mkdir(parents=True, exist_ok=True)
     template_path.touch()
-    monkeypatch.setattr("src.documents.builder.settings.default_documents_root", template_path.parent.parent)
+    monkeypatch.setattr("backend.domain.documents.builder.settings.default_documents_root", template_path.parent.parent)
 
     # Patch fill_docx_template to avoid docx processing
-    with patch("src.documents.builder.fill_docx_template") as filler:
+    with patch("backend.domain.documents.builder.fill_docx_template") as filler:
         res = build_contract(s.session_id, "t1", partial=True)
         assert res["file_path"]  # returns path even with missing required because partial=True
         filler.assert_called_once()

@@ -1,4 +1,4 @@
-from src.app.state import Conversation, ConversationStore
+from backend.api.http.state import Conversation, ConversationStore
 
 
 def test_conversation_defaults():

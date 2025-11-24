@@ -1,6 +1,6 @@
 import json
 
-from src.categories.index import store as category_store, find_category_by_query
+from backend.domain.categories.index import store as category_store, find_category_by_query
 
 
 def test_find_category_by_keywords(tmp_path, mock_settings):
@@ -34,7 +34,7 @@ def test_find_category_returns_custom_when_present(mock_settings, monkeypatch):
     (mock_settings.meta_categories_root / "categories_index.json").write_text(json.dumps(idx), encoding="utf-8")
     (mock_settings.meta_categories_root / "custom.json").write_text(json.dumps({"id": "custom", "templates": [], "roles": {}, "party_modules": {}, "contract_fields": []}), encoding="utf-8")
 
-    from src.categories import index as idx_module
+    from backend.domain.categories import index as idx_module
     category_store._categories = {}
     idx_module.store._categories = {}
     category_store.load()

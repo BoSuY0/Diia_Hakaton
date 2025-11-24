@@ -2,11 +2,11 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app.server import app
-from src.sessions.store import get_or_create_session, load_session, save_session
-from src.sessions.models import SessionState, FieldState
-from src.agent.tools.session import SetPartyContextTool
-from src.common.enums import FillingMode
+from backend.api.http.server import app
+from backend.infra.persistence.store import get_or_create_session, load_session, save_session
+from backend.domain.sessions.models import SessionState, FieldState
+from backend.agent.tools.session import SetPartyContextTool
+from backend.shared.enums import FillingMode
 
 client = TestClient(app)
 
@@ -39,7 +39,7 @@ def test_fields_endpoint_requires_header_when_participant(mock_settings, mock_ca
     # With wrong user -> 400/403 (tool returns error -> 400)
     resp = client.post(
         f"/sessions/{session_id}/fields",
-        headers={"X-Client-ID": "intruder"},
+        headers={"X-User-ID": "intruder"},
         json={"field": "name", "value": "A", "role": "lessor"},
     )
     assert resp.status_code in (400, 403)
@@ -47,17 +47,27 @@ def test_fields_endpoint_requires_header_when_participant(mock_settings, mock_ca
     # With owner -> allowed
     resp = client.post(
         f"/sessions/{session_id}/fields",
-        headers={"X-Client-ID": "owner1"},
+        headers={"X-User-ID": "owner1"},
         json={"field": "name", "value": "A", "role": "lessor"},
     )
     assert resp.status_code == 200
 
 
-def test_fields_header_not_required_before_participants(mock_settings, mock_categories_data):
+def test_fields_header_required_even_without_participants(mock_settings, mock_categories_data):
     session_id = _bootstrap_session(mock_categories_data)
-    # No participants yet -> allowed without header
+    s = load_session(session_id)
+    s.role_owners = {"lessor": "u_header"}
+    save_session(s)
+    # No participants yet -> should still require header
     resp = client.post(
         f"/sessions/{session_id}/fields",
+        json={"field": "name", "value": "A", "role": "lessor"},
+    )
+    assert resp.status_code == 401
+
+    resp = client.post(
+        f"/sessions/{session_id}/fields",
+        headers={"X-User-ID": "u_header"},
         json={"field": "name", "value": "A", "role": "lessor"},
     )
     assert resp.status_code == 200
@@ -70,14 +80,25 @@ def test_sign_full_mode_with_empty_owners(mock_settings, mock_categories_data):
     s.filling_mode = FillingMode.FULL
     save_session(s)
 
+    # Without claimed role -> should be blocked
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "user_full"},
+        headers={"X-User-ID": "user_full"},
+    )
+    assert resp.status_code == 400
+
+    # Claim role and sign
+    s = load_session(session_id)
+    s.role_owners = {"lessor": "user_full"}
+    save_session(s)
+    resp = client.post(
+        f"/sessions/{session_id}/contract/sign",
+        headers={"X-User-ID": "user_full"},
     )
     assert resp.status_code == 200
     signed = load_session(session_id).signatures
     assert signed.get("lessor") is True
-    assert signed.get("lessee") is True
+    assert signed.get("lessee") is not True
 
 
 def test_sign_full_mode_conflict_owner(mock_settings, mock_categories_data):
@@ -90,9 +111,9 @@ def test_sign_full_mode_conflict_owner(mock_settings, mock_categories_data):
 
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "other"},
+        headers={"X-User-ID": "other"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code in (400, 403)
 
 
 def test_download_forbidden_until_signed(mock_settings, mock_categories_data, monkeypatch):
@@ -103,11 +124,11 @@ def test_download_forbidden_until_signed(mock_settings, mock_categories_data, mo
     save_session(s)
 
     # Mock builder to avoid file IO
-    monkeypatch.setattr("src.app.server.tool_build_contract", lambda session_id, template_id: {"file_path": "tmp.docx"})
+    monkeypatch.setattr("backend.api.http.server.tool_build_contract", lambda session_id, template_id: {"file_path": "tmp.docx"})
 
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-Client-ID": "owner1"},
+        headers={"X-User-ID": "owner1"},
     )
     assert resp.status_code == 403
 
@@ -118,7 +139,7 @@ def test_download_forbidden_until_signed(mock_settings, mock_categories_data, mo
 
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-Client-ID": "owner1"},
+        headers={"X-User-ID": "owner1"},
     )
     assert resp.status_code in (200, 404)  # 404 allowed if file missing
 
@@ -150,18 +171,19 @@ def test_sign_contract_records_history(mock_settings, mock_categories_data):
     s = load_session(session_id)
     s.state = SessionState.BUILT
     s.filling_mode = FillingMode.FULL
+    s.role_owners = {"lessor": "user_history"}
     save_session(s)
 
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "user_history"},
+        headers={"X-User-ID": "user_history"},
     )
     assert resp.status_code == 200
     signed_session = load_session(session_id)
-    assert signed_session.sign_history
-    entry = signed_session.sign_history[-1]
-    assert entry["client_id"] == "user_history"
-    assert set(entry["roles"]) == {"lessor", "lessee"}
+    assert signed_session.history
+    entry = signed_session.history[-1]
+    assert entry["user_id"] == "user_history"
+    assert set(entry["roles"]) == {"lessor"}
     assert entry["state"] in {SessionState.BUILT.value, SessionState.READY_TO_SIGN.value, SessionState.COMPLETED.value}
 
 
@@ -176,13 +198,12 @@ def test_session_history_endpoint_requires_auth(mock_settings, mock_categories_d
 
     resp = client.get(
         f"/sessions/{session_id}/history",
-        headers={"X-Client-ID": "user_history"},
+        headers={"X-User-ID": "user_history"},
     )
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["session_id"] == session_id
-    assert "all_data" in payload
-    assert "sign_history" in payload
+    assert "history" in payload
 
 
 def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_categories_data):
@@ -194,7 +215,7 @@ def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_catego
 
     resp = client.get(
         f"/sessions/{session_id}/requirements",
-        headers={"X-Client-ID": "user_requirements"},
+        headers={"X-User-ID": "user_requirements"},
     )
     assert resp.status_code == 200
     data = resp.json()

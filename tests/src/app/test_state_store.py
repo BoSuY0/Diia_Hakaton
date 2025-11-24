@@ -1,4 +1,4 @@
-from src.app.state import conversation_store
+from backend.api.http.state import conversation_store
 
 
 def test_conversation_store_returns_same_instance():

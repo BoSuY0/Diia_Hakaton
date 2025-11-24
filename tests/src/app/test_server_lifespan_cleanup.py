@@ -1,7 +1,7 @@
 import asyncio
 
 import pytest
-from src.app.server import lifespan
+from backend.api.http.server import lifespan
 
 
 @pytest.mark.asyncio
@@ -17,9 +17,9 @@ async def test_lifespan_skips_cleanup_for_non_fs(monkeypatch, mock_settings):
     async def fake_shutdown():
         called["shutdown"] = True
 
-    monkeypatch.setattr("src.sessions.cleaner.clean_abandoned_sessions", fake_clean_abandoned)
-    monkeypatch.setattr("src.sessions.cleaner.clean_stale_sessions", fake_clean_stale)
-    monkeypatch.setattr("src.app.server.stream_manager.shutdown", fake_shutdown)
+    monkeypatch.setattr("backend.domain.sessions.cleaner.clean_abandoned_sessions", fake_clean_abandoned)
+    monkeypatch.setattr("backend.domain.sessions.cleaner.clean_stale_sessions", fake_clean_stale)
+    monkeypatch.setattr("backend.api.http.server.stream_manager.shutdown", fake_shutdown)
     monkeypatch.setattr(mock_settings, "session_backend", "memory")
 
     async with lifespan(object()):

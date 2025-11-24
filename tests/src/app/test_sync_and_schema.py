@@ -2,10 +2,10 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app.server import app
-from src.sessions.store import get_or_create_session, load_session, save_session
-from src.sessions.models import FieldState
-from src.agent.tools.session import UpsertFieldTool
+from backend.api.http.server import app
+from backend.infra.persistence.store import get_or_create_session, load_session, save_session
+from backend.domain.sessions.models import FieldState
+from backend.agent.tools.session import UpsertFieldTool
 
 client = TestClient(app)
 
@@ -46,7 +46,7 @@ def test_sync_template_must_match_category(mock_settings):
     resp = client.post(
         f"/sessions/{session_id}/sync",
         json=payload,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp.status_code == 400
 
@@ -64,19 +64,22 @@ def test_sync_partial_and_ready(mock_settings):
     resp = client.post(
         f"/sessions/{session_id}/sync",
         json=payload_partial,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "partial"
 
     # Fill contract field via tool to reach ready
     tool = UpsertFieldTool()
+    session_loaded = load_session(session_id)
+    session_loaded.role_owners = {"lessor": "u1"}
+    save_session(session_loaded)
     tool.execute({"session_id": session_id, "field": "cf1", "value": "Val"}, {"client_id": "u1"})
 
     resp2 = client.post(
         f"/sessions/{session_id}/sync",
         json={"parties": {"lessor": {"person_type": "individual", "fields": {"name": "X"}}}},
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp2.status_code == 200
     data = resp2.json()
@@ -91,12 +94,12 @@ def test_schema_respects_error_status(mock_settings, mock_categories_data):
     s.all_data = {"cf1": {"current": "text"}}
     save_session(s)
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "values"})
+    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "values"}, headers={"X-User-ID": "schema_user"})
     assert resp.status_code == 200
     cf = resp.json()["contract"]["fields"][0]
     assert cf["value"] is None  # error state should not expose value
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "status"})
+    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "status"}, headers={"X-User-ID": "schema_user"})
     assert resp.status_code == 200
     cf = resp.json()["contract"]["fields"][0]
     assert cf["value"] is False
@@ -110,7 +113,7 @@ def test_schema_required_scope_excludes_optional(mock_settings, mock_categories_
     cat_path.write_text(json.dumps(meta), encoding="utf-8")
 
     # Reload store to pick updated meta
-    from src.categories.index import store as category_store
+    from backend.domain.categories.index import store as category_store
     category_store._categories = {}
     category_store.load()
 
@@ -119,7 +122,7 @@ def test_schema_required_scope_excludes_optional(mock_settings, mock_categories_
     s.category_id = mock_categories_data
     save_session(s)
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"scope": "required"})
+    resp = client.get(f"/sessions/{session_id}/schema", params={"scope": "required"}, headers={"X-User-ID": "schema_user"})
     assert resp.status_code == 200
     fields = resp.json()["contract"]["fields"]
     assert all(f["field_name"] != "optional_field" for f in fields)

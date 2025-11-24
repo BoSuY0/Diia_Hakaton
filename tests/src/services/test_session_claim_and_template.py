@@ -1,8 +1,8 @@
 import pytest
 
-from src.services.session import claim_session_role, set_session_template
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import SessionState, FieldState
+from backend.domain.services.session import claim_session_role, set_session_template
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import SessionState, FieldState
 
 
 def _session(cat_id="test_cat"):

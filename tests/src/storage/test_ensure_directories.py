@@ -1,5 +1,5 @@
-from src.storage.fs import ensure_directories
-from src.common.config import settings
+from backend.infra.storage.fs import ensure_directories
+from backend.infra.config.settings import settings
 
 
 def test_ensure_directories_creates_paths(mock_settings):

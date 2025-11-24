@@ -1,12 +1,12 @@
 import os
 from pathlib import Path
 
-from src.common.config import settings, Settings
+from backend.infra.config.settings import settings, Settings
 
 
 def test_settings_paths_default(tmp_path, monkeypatch):
     # Override BASE_DIR indirectly
-    monkeypatch.setattr("src.common.config.BASE_DIR", tmp_path)
+    monkeypatch.setattr("backend.infra.config.settings.BASE_DIR", tmp_path)
     # Reload settings class
     s = Settings()
     assert s.documents_root == tmp_path / "assets"

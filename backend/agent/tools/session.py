@@ -15,6 +15,8 @@ from backend.domain.categories.index import (
 )
 from backend.shared.enums import PersonType, FillingMode
 from backend.shared.logging import get_logger
+from backend.shared.errors import SessionNotFoundError
+from backend.domain.services.session import can_edit_contract_field, can_edit_party_field
 from backend.domain.documents.builder import build_contract as build_contract_document
 from backend.domain.sessions.models import FieldState, SessionState
 from backend.infra.persistence.store import (
@@ -166,6 +168,11 @@ class SetPartyContextTool(BaseTool):
                     "type": "string",
                     "enum": [p.value for p in PersonType],
                 },
+                "filling_mode": {
+                    "type": "string",
+                    "enum": [m.value for m in FillingMode],
+                    "description": "Optional filling mode override.",
+                }
             },
             "required": ["session_id", "role", "person_type"],
             "additionalProperties": False,
@@ -175,6 +182,7 @@ class SetPartyContextTool(BaseTool):
         session_id = args["session_id"]
         role = args["role"]
         person_type = args["person_type"]
+        filling_mode = args.get("filling_mode")
 
         try:
             PersonType(person_type)
@@ -186,78 +194,70 @@ class SetPartyContextTool(BaseTool):
 
         # Validate person_type against category metadata
         from backend.domain.categories.index import store as category_store, _load_meta
-        try:
-            session = await aload_session(session_id)
-        except Exception as exc:
-            logger.error("set_party_context: failed to load session %s: %s", session_id, exc)
-            return {"ok": False, "error": "Сесію не знайдено або вона недоступна."}
-
-        if not session.category_id:
-            return {"ok": False, "error": "Спочатку оберіть категорію."}
+        user_id = context.get("user_id") or context.get("client_id") or args.get("user_id")
+        if not user_id:
+            return {"ok": False, "error": "Необхідний заголовок X-User-ID.", "status_code": 401}
 
         # Ensure category metadata is available (reload if needed)
-        if session.category_id not in category_store.categories:
+        if category_store.categories is None or not category_store.categories:
             try:
                 category_store.load()
             except Exception as exc:
                 logger.error("set_party_context: failed to load categories: %s", exc)
                 return {"ok": False, "error": "Не вдалося завантажити метадані категорій."}
 
-        cat = category_store.get(session.category_id)
-        if not cat:
-            return {"ok": False, "error": f"Невідома категорія: {session.category_id}."}
-
         try:
-            meta = _load_meta(cat)
-        except FileNotFoundError:
-            return {"ok": False, "error": "Метадані категорії відсутні."}
-        except Exception as exc:
-            logger.error("set_party_context: failed to read meta for %s: %s", session.category_id, exc)
-            return {"ok": False, "error": "Не вдалося прочитати метадані категорії."}
+            async with atransactional_session(session_id) as session:
+                if not session.category_id:
+                    return {"ok": False, "error": "Спочатку оберіть категорію.", "status_code": 400}
 
-        roles_meta = (meta.get("roles") or {})
-        role_meta = roles_meta.get(role)
-        if not role_meta:
-            return {"ok": False, "error": "Невідома роль для цієї категорії."}
+                cat = category_store.get(session.category_id)
+                if not cat:
+                    return {"ok": False, "error": f"Невідома категорія: {session.category_id}.", "status_code": 404}
 
-        allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
-        if allowed_types and person_type not in allowed_types:
-            return {"ok": False, "error": "Невірний тип особи для ролі."}
+                try:
+                    meta = _load_meta(cat)
+                except FileNotFoundError:
+                    return {"ok": False, "error": "Метадані категорії відсутні."}
+                except Exception as exc:
+                    logger.error("set_party_context: failed to read meta for %s: %s", session.category_id, exc)
+                    return {"ok": False, "error": "Не вдалося прочитати метадані категорії."}
 
-        client_id = context.get("client_id")
-        # If not, we can't enforce strict access control properly.
-        # Fallback to session.user_id if available?
-        if not client_id:
-             # Try to get from args if passed explicitly (for testing)
-             client_id = args.get("client_id")
-        
-        if not client_id:
-             # If still no ID, we can't claim role safely.
-             # But maybe we allow it for "anonymous" single-user mode?
-             # User wants STRICT control. So we should probably error or generate one.
-             # Let's generate a temporary one if missing, but warn.
-             client_id = "anon_" + session_id # Fallback
+                roles_meta = (meta.get("roles") or {})
+                role_meta = roles_meta.get(role)
+                if not role_meta:
+                    return {"ok": False, "error": "Невідома роль для цієї категорії.", "status_code": 400}
 
-        async with atransactional_session(session_id) as session:
-            from backend.domain.services.session import set_party_type, claim_session_role
-            
-            # Claim role
-            try:
-                success = claim_session_role(session, role, client_id)
-                if not success:
-                    return {"ok": False, "error": f"Роль '{role}' вже зайнята або ви вже маєте іншу роль."}
-            except ValueError as e:
-                 return {"ok": False, "error": str(e)}
+                allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
+                if allowed_types and person_type not in allowed_types:
+                    return {"ok": False, "error": "Невірний тип особи для ролі.", "status_code": 400}
 
-            # Set person type
-            set_party_type(session, role, person_type)
+                from backend.domain.services.session import set_party_type, claim_session_role
+                try:
+                    claim_session_role(session, role, user_id)
+                except PermissionError as exc:
+                    return {"ok": False, "error": str(exc), "status_code": 403}
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc), "status_code": 400}
 
-            return {
-                "ok": True,
-                "role": role,
-                "person_type": person_type,
-                "client_id": client_id
-            }
+                # Set person type
+                set_party_type(session, role, person_type)
+
+                if filling_mode:
+                    try:
+                        session.filling_mode = FillingMode(filling_mode)
+                    except Exception:
+                        session.filling_mode = filling_mode
+
+                return {
+                    "ok": True,
+                    "role": role,
+                    "person_type": person_type,
+                    "client_id": user_id,
+                    "filling_mode": session.filling_mode,
+                }
+        except SessionNotFoundError:
+            return {"ok": False, "error": "Сесію не знайдено або вона недоступна.", "status_code": 404}
             
 @register_tool
 class GetPartyFieldsForSessionTool(BaseTool):
@@ -401,60 +401,31 @@ class UpsertFieldTool(BaseTool):
 
         async with atransactional_session(session_id) as session:
             # Access Control Check
-            client_id = context.get("client_id")
+            user_id = context.get("user_id") or context.get("client_id")
 
-            # Дозволяємо роботу без client_id лише якщо всі ролі наразі anon_ (тимчасові сесії)
-            all_anon = bool(session.party_users) and all(str(v).startswith("anon_") for v in session.party_users.values())
-            if session.party_users and not client_id and not all_anon:
-                return {"ok": False, "error": "Необхідний заголовок X-Client-ID."}
+            if not user_id:
+                return {"ok": False, "error": "Необхідний заголовок X-User-ID."}
 
             entities = {e.field: e for e in list_entities(session.category_id)} if session.category_id else {}
             entity = entities.get(field)
 
             # Доступ до умов договору (contract fields)
             if entity is not None:
-                main_role = _get_main_role(session.category_id)
-                if main_role:
-                    owner = (session.party_users or {}).get(main_role)
-                    if not owner:
-                        return {"ok": False, "error": f"Спочатку закріпіть роль '{main_role}' (set_party_context)."}
-                    if not client_id:
-                        return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
-                    if client_id != owner:
-                        return {"ok": False, "error": "Умови договору може редагувати лише головна роль цієї категорії."}
-
-                from backend.shared.enums import FillingMode
-                is_full_mode = session.filling_mode == FillingMode.FULL
-                participant_roles = []
-                if client_id:
-                    participant_roles = [
-                        role_key for role_key, owner in (session.party_users or {}).items() if owner == client_id
-                    ]
-                if session.party_users and not is_full_mode and client_id and not participant_roles:
-                    return {"ok": False, "error": "Редагувати умови можуть лише учасники цієї сесії."}
-                if session.party_users and not is_full_mode and not client_id and not all_anon:
-                    return {"ok": False, "error": "Потрібен X-Client-ID для редагування умов."}
-            elif client_id and session.category_id:
+                if not can_edit_contract_field(session, acting_user_id=user_id, field_name=field):
+                    return {"ok": False, "error": "Вам не дозволено редагувати це поле договору."}
+            elif session.category_id:
                 # It is a party field
                 effective_role = role_arg or session.role
                 if effective_role:
-                    owner = session.party_users.get(effective_role)
-                    if owner:
-                        # Якщо роль прив'язана до anon_* і прийшов реальний користувач — перезакріплюємо
-                        if str(owner).startswith("anon_"):
-                            if client_id:
-                                session.party_users[effective_role] = client_id
-                                owner = client_id
-                            else:
-                                # anon власник, запит без client_id — дозволяємо
-                                owner = client_id
-                        if owner and owner != client_id:
-                             from backend.shared.enums import FillingMode
-                             if session.filling_mode != FillingMode.FULL:
-                                 return {
-                                     "ok": False, 
-                                     "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
-                                 }
+                    if not can_edit_party_field(session, acting_user_id=user_id, target_role=effective_role):
+                        return {
+                            "ok": False,
+                            "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
+                        }
+
+            # Normalize context so downstream history uses the declared user_id
+            normalized_context = dict(context)
+            normalized_context["client_id"] = user_id
 
             from backend.domain.services.session import update_session_field
             
@@ -464,7 +435,7 @@ class UpsertFieldTool(BaseTool):
                 value=real_value,
                 role=role_arg,
                 tags=tags, # Pass tags for history tracking
-                context=context,
+                context=normalized_context,
             )
 
             if not ok:
@@ -547,6 +518,7 @@ class GetSessionSummaryTool(BaseTool):
             "template_id": session.template_id,
             "state": session.state.value,
             "can_build_contract": session.can_build_contract,
+            "role_owners": session.role_owners,
             "fields": fields_summary,
             "party_fields": {
                 role: {
@@ -598,14 +570,14 @@ class SetFillingModeTool(BaseTool):
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         mode = args["mode"]
-        client_id = context.get("client_id")
+        client_id = context.get("user_id") or context.get("client_id")
 
         async with atransactional_session(session_id) as session:
             # Access check
-            if session.party_users:
+            if session.role_owners:
                 if not client_id:
                     return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
-                if client_id not in session.party_users.values():
+                if client_id not in session.role_owners.values():
                     return {"ok": False, "error": "Ви не є учасником цієї сесії."}
 
             session.filling_mode = mode
@@ -696,6 +668,7 @@ class SignContractTool(BaseTool):
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         role_arg = args.get("role")
+        user_id = context.get("user_id") or context.get("client_id")
 
         async with atransactional_session(session_id) as session:
             # Determine role
@@ -712,6 +685,15 @@ class SignContractTool(BaseTool):
                     "ok": False,
                     "error": f"Не можна підписати договір у стані {session.state.value}. Спочатку сформуйте його.",
                 }
+
+            if not user_id:
+                return {"ok": False, "error": "Необхідний X-User-ID для підпису."}
+
+            owner = session.role_owners.get(role)
+            if not owner:
+                return {"ok": False, "error": "Спочатку прив'яжіть роль через set_party_context."}
+            if owner != user_id:
+                return {"ok": False, "error": "Ви не маєте права підписувати за цю роль."}
 
             # Check if already signed
             if session.signatures.get(role):
@@ -733,7 +715,16 @@ class SignContractTool(BaseTool):
             session.sign_history.append(
                 {
                     "timestamp": datetime.utcnow().isoformat() + "Z",
-                    "client_id": context.get("client_id"),
+                    "client_id": user_id,
+                    "roles": [role],
+                    "state": session.state.value,
+                }
+            )
+            session.history.append(
+                {
+                    "ts": datetime.utcnow().isoformat() + "Z",
+                    "type": "sign",
+                    "user_id": user_id,
                     "roles": [role],
                     "state": session.state.value,
                 }

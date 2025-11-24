@@ -1,5 +1,5 @@
 import pytest
-from src.common.config import Settings
+from backend.infra.config.settings import Settings
 
 def test_settings_paths(mock_settings):
     # Check if paths are correctly set relative to the temp workspace

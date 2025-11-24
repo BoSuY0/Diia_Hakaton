@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.storage.fs import FileLock, write_json, session_answers_path, output_document_path
+from backend.infra.storage.fs import FileLock, write_json, session_answers_path, output_document_path
 
 
 def test_filelock_reentrant_same_thread(tmp_path):

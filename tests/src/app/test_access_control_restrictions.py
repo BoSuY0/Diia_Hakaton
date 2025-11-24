@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app.server import app
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import SessionState
-from src.documents.user_document import save_user_document
+from backend.api.http.server import app
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import SessionState
+from backend.domain.documents.user_document import save_user_document
 
 
 client = TestClient(app)
@@ -27,7 +27,7 @@ def _prepare_full_session(session_id: str, category_id: str) -> str:
 
 def test_contract_endpoints_reject_foreign_client(mock_settings, mock_categories_data):
     session_id = _prepare_full_session("acl_contract", mock_categories_data)
-    headers = {"X-Client-ID": "intruder"}
+    headers = {"X-User-ID": "intruder"}
 
     resp_info = client.get(f"/sessions/{session_id}/contract", headers=headers)
     assert resp_info.status_code == 403
@@ -41,7 +41,7 @@ def test_contract_endpoints_reject_foreign_client(mock_settings, mock_categories
 
 def test_user_document_protected_from_third_party(mock_settings, mock_categories_data):
     session_id = _prepare_full_session("acl_user_doc", mock_categories_data)
-    headers = {"X-Client-ID": "intruder"}
+    headers = {"X-User-ID": "intruder"}
 
     resp = client.get(f"/user-documents/{session_id}", headers=headers)
     assert resp.status_code == 403
@@ -49,7 +49,7 @@ def test_user_document_protected_from_third_party(mock_settings, mock_categories
 
 def test_stream_and_order_require_participant(mock_settings, mock_categories_data):
     session_id = _prepare_full_session("acl_stream_order", mock_categories_data)
-    headers = {"X-Client-ID": "intruder"}
+    headers = {"X-User-ID": "intruder"}
 
     resp_stream = client.get(f"/sessions/{session_id}/stream", headers=headers)
     assert resp_stream.status_code == 403
@@ -60,7 +60,7 @@ def test_stream_and_order_require_participant(mock_settings, mock_categories_dat
 
 def test_sync_requires_participant(mock_settings, mock_categories_data):
     session_id = _prepare_full_session("acl_sync", mock_categories_data)
-    headers = {"X-Client-ID": "intruder"}
+    headers = {"X-User-ID": "intruder"}
 
     resp = client.post(
         f"/sessions/{session_id}/sync",

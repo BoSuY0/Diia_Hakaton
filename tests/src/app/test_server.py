@@ -1,18 +1,18 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
-from src.app.server import app
+from backend.api.http.server import app
 
 client = TestClient(app)
 
 @pytest.fixture
 def mock_llm_response():
-    with patch("src.app.server.chat_with_tools") as mock:
+    with patch("backend.api.http.server.chat_with_tools") as mock:
         yield mock
 
 @pytest.fixture
 def mock_system_prompt():
-    with patch("src.app.server.load_system_prompt", return_value="System Prompt"):
+    with patch("backend.api.http.server.load_system_prompt", return_value="System Prompt"):
         yield
 
 def test_healthz():

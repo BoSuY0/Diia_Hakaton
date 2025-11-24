@@ -1,9 +1,9 @@
 import json
 import types
 
-from src.app import server
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import SessionState
+from backend.api.http import server
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import SessionState
 
 
 def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_categories_data):
@@ -31,8 +31,8 @@ def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_ca
             return DummyTool("unknown", "other")
         return None
 
-    monkeypatch.setattr("src.app.server.tool_registry.get_definitions", fake_get_definitions)
-    monkeypatch.setattr("src.app.server.tool_registry.get_by_alias", fake_get_by_alias)
+    monkeypatch.setattr("backend.api.http.server.tool_registry.get_definitions", fake_get_definitions)
+    monkeypatch.setattr("backend.api.http.server.tool_registry.get_by_alias", fake_get_by_alias)
 
     filtered = server._filter_tools_for_session("state_gate", [], has_category_tool=True)
     names = [t["function"]["name"] for t in filtered]

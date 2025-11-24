@@ -13,9 +13,9 @@ if "glide" not in sys.modules:
     )
     sys.modules["glide"] = glide_stub
 
-from src.categories import index as categories_index
-from src.sessions.models import Session, FieldState
-from src.services.fields import get_required_fields, validate_session_readiness
+from backend.domain.categories import index as categories_index
+from backend.domain.sessions.models import Session, FieldState
+from backend.domain.services.fields import get_required_fields, validate_session_readiness
 
 
 def _write_custom_meta(tmp_root):

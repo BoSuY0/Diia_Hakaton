@@ -1,8 +1,8 @@
 import pytest
 
-from src.services.session import update_session_field, validate_session_readiness
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState, SessionState
+from backend.domain.services.session import update_session_field, validate_session_readiness
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState, SessionState
 
 
 def _base_session(session_id: str, category_id: str):
@@ -95,8 +95,9 @@ def test_update_session_field_history_and_current_on_error(mock_settings, mock_c
     # Invalid attempt should keep previous current but append history
     ok2, _, _ = update_session_field(s, "cf1", "", role=None)
     assert ok2 is False
-    history = s.all_data["cf1"]["history"]
-    assert history[-1]["valid"] is False
+    last = s.history[-1]
+    assert last["type"] == "field_update"
+    assert last["valid"] is False
     assert s.all_data["cf1"]["current"] == "Valid"
 
 
@@ -110,7 +111,7 @@ def test_update_session_field_history_includes_actor(mock_settings, mock_categor
         context={"client_id": "user1"},
     )
     assert ok is True
-    entry = s.all_data["cf1"]["history"][-1]
-    assert entry["client_id"] == "user1"
+    entry = s.history[-1]
+    assert entry["user_id"] == "user1"
     assert entry["role"] == "lessor"
-    assert entry["timestamp"].endswith("Z")
+    assert entry["ts"].endswith("Z")

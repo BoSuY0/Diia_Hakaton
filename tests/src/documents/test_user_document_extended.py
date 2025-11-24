@@ -1,6 +1,6 @@
-from src.documents.user_document import build_user_document
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import SessionState
+from backend.domain.documents.user_document import build_user_document
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import SessionState
 
 
 def test_build_user_document_populates_fields(mock_settings, mock_categories_data):

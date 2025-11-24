@@ -1,12 +1,12 @@
 import pytest
-from src.agent.tools.session import (
+from backend.agent.tools.session import (
     SetPartyContextTool,
     UpsertFieldTool,
     GetPartyFieldsForSessionTool,
     GetSessionSummaryTool
 )
-from src.sessions.store import get_or_create_session, load_session
-from src.sessions.models import SessionState
+from backend.infra.persistence.store import get_or_create_session, load_session
+from backend.domain.sessions.models import SessionState
 
 @pytest.fixture
 def session_with_category(mock_settings, mock_categories_data):
@@ -14,7 +14,7 @@ def session_with_category(mock_settings, mock_categories_data):
     session_id = "tool_test_session"
     s = get_or_create_session(session_id)
     s.category_id = "test_cat"
-    from src.sessions.store import save_session
+    from backend.infra.persistence.store import save_session
     save_session(s)
     return session_id
 
@@ -24,7 +24,7 @@ def test_set_party_context(session_with_category):
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
-    }, {})
+    }, {"user_id": "tool_user"})
     
     assert res["ok"] is True
     assert res["role"] == "lessor"
@@ -40,14 +40,14 @@ def test_upsert_field_party(session_with_category):
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
-    }, {})
+    }, {"user_id": "tool_user"})
     
     tool = UpsertFieldTool()
     res = tool.execute({
         "session_id": session_with_category,
         "field": "name",
         "value": "John Doe"
-    }, {})
+    }, {"user_id": "tool_user"})
     
     assert res["ok"] is True
     assert res["status"] == "ok"
@@ -58,12 +58,20 @@ def test_upsert_field_party(session_with_category):
 
 def test_upsert_field_contract(session_with_category):
     # "cf1" is a contract field in mock_categories_data
+    SetPartyContextTool().execute(
+        {
+            "session_id": session_with_category,
+            "role": "lessor",
+            "person_type": "individual",
+        },
+        {"user_id": "tool_user"},
+    )
     tool = UpsertFieldTool()
     res = tool.execute({
         "session_id": session_with_category,
         "field": "cf1",
         "value": "Contract Value"
-    }, {})
+    }, {"user_id": "tool_user"})
     
     assert res["ok"] is True
     
@@ -76,7 +84,7 @@ def test_get_party_fields(session_with_category):
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
-    }, {})
+    }, {"user_id": "tool_user"})
     
     tool = GetPartyFieldsForSessionTool()
     res = tool.execute({"session_id": session_with_category}, {})

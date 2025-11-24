@@ -1,5 +1,5 @@
 import pytest
-from src.content.manager import ContentManager
+from backend.domain.content.manager import ContentManager
 
 @pytest.fixture
 def content_manager(mock_settings):

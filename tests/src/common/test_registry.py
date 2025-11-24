@@ -1,5 +1,5 @@
 import pytest
-from src.common.registry import Registry
+from backend.shared.registry import Registry
 
 def test_registry_register_and_get():
     reg = Registry()

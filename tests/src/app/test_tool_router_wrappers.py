@@ -1,6 +1,6 @@
 import json
 
-from src.app import tool_router
+from backend.api.tool_adapter import tool_router
 
 
 def test_wrapper_tool_find_category():

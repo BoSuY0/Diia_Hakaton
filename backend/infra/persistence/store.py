@@ -57,13 +57,13 @@ def _run(coro):
         raise RuntimeError("Synchronous store call inside running event loop")
 
 
-def get_or_create_session(session_id: str, user_id: Optional[str] = None) -> Session:
+def get_or_create_session(session_id: str, creator_user_id: Optional[str] = None) -> Session:
     if _redis_allowed():
         try:
-            return _run(redis_aget_or_create_session(session_id, user_id=user_id))
+            return _run(redis_aget_or_create_session(session_id, user_id=creator_user_id))
         except Exception as exc:
             logger.error("Redis get_or_create failed, fallback to memory: %s", exc)
-    return memory_get_or_create_session(session_id, user_id=user_id)
+    return memory_get_or_create_session(session_id, user_id=creator_user_id)
 
 
 def load_session(session_id: str) -> Session:

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
-from src.app.server import app
-from src.sessions.store import load_session
+from backend.api.http.server import app
+from backend.infra.persistence.store import load_session
 
 client = TestClient(app)
 
@@ -19,19 +19,19 @@ def mock_chat_with_tools(monkeypatch):
             choices = [Choice()]
         return MockResponse()
     
-    monkeypatch.setattr("src.app.server.chat_with_tools", mock_chat)
+    monkeypatch.setattr("backend.api.http.server.chat_with_tools", mock_chat)
     return mock_chat
 
 @pytest.fixture
 def mock_build_contract(monkeypatch):
     def mock_build(*args, **kwargs):
         return {"document_url": "http://mock/doc.docx", "ok": True}
-    monkeypatch.setattr("src.app.server.tool_build_contract", mock_build)
+    monkeypatch.setattr("backend.api.http.server.tool_build_contract", mock_build)
 
 def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_contract, temp_workspace):
     """Test one-shot sync with full data."""
     # 1. Create session
-    response = client.post("/sessions", json={})
+    response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})
     session_id = response.json()["session_id"]
 
     # 2. Sync with full data using IDs from mock_categories_data (test_cat, t1)
@@ -57,7 +57,7 @@ def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_
     response = client.post(
         f"/sessions/{session_id}/sync",
         json=payload,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert response.status_code == 200, f"Response: {response.text}"
     data = response.json()
@@ -66,7 +66,7 @@ def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_
 
 def test_sync_session_partial_flow(mock_settings, mock_categories_data, temp_workspace):
     """Test partial sync (one party only)."""
-    response = client.post("/sessions", json={})
+    response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})
     session_id = response.json()["session_id"]
 
     payload = {
@@ -85,7 +85,7 @@ def test_sync_session_partial_flow(mock_settings, mock_categories_data, temp_wor
     response = client.post(
         f"/sessions/{session_id}/sync",
         json=payload,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert response.status_code == 200, f"Response: {response.text}"
     data = response.json()
@@ -97,7 +97,7 @@ def test_sync_session_partial_flow(mock_settings, mock_categories_data, temp_wor
 def test_sync_session_incremental_flow(mock_settings, mock_categories_data, mock_build_contract, temp_workspace):
     """Test incremental sync (add second party later)."""
     # 1. Start with partial
-    response = client.post("/sessions", json={})
+    response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})
     session_id = response.json()["session_id"]
     
     payload1 = {
@@ -113,7 +113,7 @@ def test_sync_session_incremental_flow(mock_settings, mock_categories_data, mock
     client.post(
         f"/sessions/{session_id}/sync",
         json=payload1,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     
     # 2. Add lessee
@@ -128,7 +128,7 @@ def test_sync_session_incremental_flow(mock_settings, mock_categories_data, mock
     response = client.post(
         f"/sessions/{session_id}/sync",
         json=payload2,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert response.status_code == 200, f"Response: {response.text}"
     data = response.json()
@@ -136,7 +136,7 @@ def test_sync_session_incremental_flow(mock_settings, mock_categories_data, mock
     assert data["status"] in ("ready", "partial")
     
     # Verify user_document contains both parties' data
-    from src.documents.user_document import load_user_document
+    from backend.domain.documents.user_document import load_user_document
     doc = load_user_document(session_id)
     
     # Check Lessor Data

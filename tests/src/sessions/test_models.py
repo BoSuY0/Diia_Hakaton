@@ -1,5 +1,5 @@
 import pytest
-from src.sessions.models import Session, FieldState, SessionState
+from backend.domain.sessions.models import Session, FieldState, SessionState
 
 def test_field_state_default():
     fs = FieldState()

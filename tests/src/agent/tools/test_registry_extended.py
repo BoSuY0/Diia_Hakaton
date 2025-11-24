@@ -1,4 +1,4 @@
-from src.agent.tools.registry import ToolRegistry
+from backend.agent.tools.registry import ToolRegistry
 
 
 class DummyTool:

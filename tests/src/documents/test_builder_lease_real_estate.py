@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from docx import Document
 
-from src.documents.builder import build_contract
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState
+from backend.domain.documents.builder import build_contract
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
     meta_dst_dir = mock_settings.meta_categories_root
     meta_dst_dir.mkdir(parents=True, exist_ok=True)
     meta_dst = meta_dst_dir / "lease_real_estate.json"
-    meta_dst.write_text(meta_src.read_text(encoding="utf-8"), encoding="utf-8")
+    meta_dst.write_text(meta_backend.read_text(encoding="utf-8"), encoding="utf-8")
 
     # Write categories_index.json for store
     index_path = meta_dst_dir / "categories_index.json"
@@ -29,8 +29,8 @@ async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
     index_path.write_text(json.dumps(index_data), encoding="utf-8")
 
     # Patch categories index path and reload store
-    monkeypatch.setattr("src.categories.index._CATEGORIES_PATH", index_path)
-    from src.categories import index as cat_index
+    monkeypatch.setattr("backend.domain.categories.index._CATEGORIES_PATH", index_path)
+    from backend.domain.categories import index as cat_index
 
     cat_index.store._categories = {}
     cat_index.store.load()

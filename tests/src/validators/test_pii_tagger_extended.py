@@ -1,6 +1,6 @@
 import pytest
 
-from src.validators.pii_tagger import sanitize_typed
+from backend.domain.validation.pii_tagger import sanitize_typed
 
 
 def test_sanitize_typed_detects_iban_card_phone_email():

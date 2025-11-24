@@ -7,12 +7,12 @@ from unittest.mock import patch, MagicMock
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from src.app.server import app
-from src.app.state import conversation_store
-from src.sessions.store import load_session, save_session
+from backend.api.http.server import app
+from backend.api.http.state import conversation_store
+from backend.infra.persistence.store import load_session, save_session
 
 # Mock chat_with_tools to avoid real LLM calls
-patcher = patch("src.app.server.chat_with_tools")
+patcher = patch("backend.api.http.server.chat_with_tools")
 mock_chat = patcher.start()
 
 # Setup mock return value
@@ -24,11 +24,12 @@ mock_response.choices[0].message.tool_calls = []
 mock_chat.return_value = mock_response
 
 client = TestClient(app)
+USER_ID = "plan_user"
 
 def test_pii_persistence():
     print("\n--- Testing PII Persistence ---")
     # 1. Create session
-    resp = client.post("/sessions", json={})
+    resp = client.post("/sessions", json={}, headers={"X-User-ID": USER_ID})
     assert resp.status_code == 200
     session_id = resp.json()["session_id"]
     print(f"Session created: {session_id}")
@@ -36,7 +37,7 @@ def test_pii_persistence():
     # 2. Send message with PII
     fake_iban = "UA213223130000026007233566001"
     msg1 = f"Мій IBAN {fake_iban}"
-    resp = client.post("/chat", json={"session_id": session_id, "message": msg1})
+    resp = client.post("/chat", json={"session_id": session_id, "message": msg1}, headers={"X-User-ID": USER_ID})
     assert resp.status_code == 200
     
     # Check if PII was captured in conversation store
@@ -57,9 +58,9 @@ def test_pii_persistence():
     # We will mock the LLM response to call upsert_field with the tag
     
     # First, setup context so upsert_field is allowed
-    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"})
-    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"})
-    client.post("/chat", json={"session_id": session_id, "message": "set role to lessor and person type to individual"})
+    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"}, headers={"X-User-ID": USER_ID})
+    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"}, headers={"X-User-ID": USER_ID})
+    client.post("/chat", json={"session_id": session_id, "message": "set role to lessor and person type to individual"}, headers={"X-User-ID": USER_ID})
     
     # Mock LLM to call upsert_field with the tag
     mock_tool_call = MagicMock()
@@ -77,7 +78,7 @@ def test_pii_persistence():
     mock_response.choices[0].message.tool_calls = [mock_tool_call]
     
     # Send a dummy message to trigger the tool loop
-    resp = client.post("/chat", json={"session_id": session_id, "message": "use my iban"})
+    resp = client.post("/chat", json={"session_id": session_id, "message": "use my iban"}, headers={"X-User-ID": USER_ID})
     assert resp.status_code == 200
     
     # Check if the field was upserted with the REAL value (unmasked)
@@ -94,29 +95,13 @@ def test_pii_persistence():
     
     # Let's look at all_data
     print("All Data keys:", session.all_data.keys())
-    
-    # Check if unmasked value is present in history of 'id_code'
-    field_data = session.all_data.get("lessor.id_code") or session.all_data.get("id_code")
-    
-    if field_data:
-        history = field_data.get("history", [])
-        if history:
-            last_entry = history[-1]
-            print(f"Last history entry: {last_entry}")
-            assert last_entry["value"] == fake_iban, f"Expected {fake_iban}, got {last_entry['value']}"
-            print("PII Unmasking: OK")
-        else:
-            print("No history for field")
-            # Fail if no history
-            assert False, "No history for field"
-    else:
-        # If validation failed completely and didn't save?
-        # upsert_field saves to all_data even if validation fails (check code)
-        # It saves: entry["current"] = normalized (if ok), entry["history"].append(...)
-        # So history should be there.
-        print("Field data not found in all_data")
-        # Maybe the field name was wrong?
-        # We used "id_code".
+    # Check global history for unmasked value
+    entries = [e for e in session.history if e.get("type") == "field_update" and e.get("key") in ("lessor.id_code", "id_code")]
+    assert entries, "No history events for id_code"
+    last_entry = entries[-1]
+    print(f"Last history entry: {last_entry}")
+    assert last_entry.get("value") == fake_iban, f"Expected {fake_iban}, got {last_entry.get('value')}"
+    print("PII Unmasking: OK")
         pass
 
     # Reset mock
@@ -126,12 +111,12 @@ def test_pii_persistence():
 def test_explicit_role_upsert():
     print("\n--- Testing Explicit Role Upsert ---")
     # 1. Create session
-    resp = client.post("/sessions", json={})
+    resp = client.post("/sessions", json={}, headers={"X-User-ID": USER_ID})
     session_id = resp.json()["session_id"]
     
     # 2. Setup Category and Template
-    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"})
-    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"})
+    client.post(f"/sessions/{session_id}/category", json={"category_id": "lease_real_estate"}, headers={"X-User-ID": USER_ID})
+    client.post(f"/sessions/{session_id}/template", json={"template_id": "lease_flat"}, headers={"X-User-ID": USER_ID})
     
     # 3. Define Party Types (REQUIRED before upserting party fields)
     # We simulate this by calling set_party_context via chat (mocked) or just manually setting it in store if we could.
@@ -186,7 +171,7 @@ def test_explicit_role_upsert():
 def test_contract_api_flow():
     print("\n--- Testing Contract API Flow ---")
     # 1. Setup Session
-    resp = client.post("/sessions", json={})
+    resp = client.post("/sessions", json={}, headers={"X-User-ID": USER_ID})
     session_id = resp.json()["session_id"]
     client_id = "plan_user"
     
@@ -218,7 +203,7 @@ def test_contract_api_flow():
     client.post(
         f"/sessions/{session_id}/sync",
         json=sync_data,
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     
     # Upsert remaining contract fields
@@ -231,7 +216,7 @@ def test_contract_api_flow():
         client.post(
             f"/sessions/{session_id}/fields",
             json={"field": f, "value": v},
-            headers={"X-Client-ID": client_id},
+            headers={"X-User-ID": client_id},
         )
         
     # Force can_build_contract just in case
@@ -242,7 +227,7 @@ def test_contract_api_flow():
     # 3. Get Contract Info
     resp = client.get(
         f"/sessions/{session_id}/contract",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     data = resp.json()
     print("Contract Info:", data)
@@ -256,7 +241,7 @@ def test_contract_api_flow():
     # 4. Preview
     resp = client.get(
         f"/sessions/{session_id}/contract/preview",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -268,7 +253,7 @@ def test_contract_api_flow():
     
     resp = client.get(
         f"/sessions/{session_id}/contract",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     data = resp.json()
     assert data["document_ready"] == True
@@ -277,14 +262,14 @@ def test_contract_api_flow():
     # 5. Download (Unsigned) -> 403
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     assert resp.status_code == 403
     
     # 6. Sign
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     assert resp.status_code == 200
     assert resp.json()["is_signed"] == True
@@ -292,7 +277,7 @@ def test_contract_api_flow():
     # 7. Download (Signed) -> 200
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-Client-ID": client_id},
+        headers={"X-User-ID": client_id},
     )
     print(f"Download (Signed) Status: {resp.status_code}")
     if resp.status_code != 200:

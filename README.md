@@ -54,6 +54,16 @@ SESSION_BACKEND=fs  # або redis
 # REDIS_URL=redis://localhost:6379/0
 ```
 
+## Структура Session (коротко)
+- `creator_user_id`: хто створив сесію (не робить його автоматично учасником).
+- `role_owners`: мапа роль → user_id (єдине джерело прав).
+- `party_types`, `party_fields`, `contract_fields`: статуси полів (без значень).
+- `all_data`: значення полів (`role.field` або `field` для контрактних).
+- `history`: глобальний масив подій:
+  - `field_update`: `{ts, type, key, user_id, role, value, normalized, valid, source}`
+  - `sign`: `{ts, type, user_id, roles, state}`
+- `signatures`, `state`, `filling_mode`, `progress`, `updated_at`.
+
 ### 2. Запуск Backend
 
 ```bash
@@ -63,7 +73,7 @@ pip install -r requirements.txt
 # Запуск сервера
 python launcher.py
 # Або через uvicorn напряму:
-# uvicorn src.app.server:app --reload
+# uvicorn backend.api.http.server:app --reload
 ```
 
 Сервер буде доступний за адресою: `http://localhost:8000`
@@ -72,7 +82,7 @@ python launcher.py
 ### 3. Запуск Frontend
 
 ```bash
-cd client
+cd frontend
 
 # Встановлення залежностей
 npm install
@@ -96,17 +106,18 @@ docker-compose up --build
 ├── assets/                 # Шаблони документів та метадані
 │   ├── documents_files/    # DOCX шаблони
 │   └── meta_data/          # JSON конфігурації категорій та ролей
-├── client/                 # React Frontend додаток
-├── src/                    # Backend Source Code
+├── backend/                # Backend Source Code
+│   ├── api/http            # FastAPI додаток та роути
+│   ├── api/tool_adapter    # Адаптер для LLM tools
 │   ├── agent/              # Логіка AI агента та інструменти
-│   ├── app/                # FastAPI додаток та роути
-│   ├── common/             # Спільні утиліти та конфіги
-│   ├── content/            # Менеджер контенту (шаблони, категорії)
-│   ├── documents/          # Логіка генерації документів
-│   ├── services/           # Бізнес-логіка
-│   └── sessions/           # Управління сесіями користувачів
-├── launcher.py             # Скрипт запуску
-└── manage_content.py       # CLI для управління контентом
+│   ├── domain/             # Бізнес-логіка (sessions, documents, templates, categories, validation)
+│   ├── infra/              # Зберігання/конфіг (fs, redis, settings, persistence)
+│   └── shared/             # Спільні утиліти/enum/логування
+├── frontend/               # React Frontend додаток
+├── scripts/                # Міграції/демо
+├── tools/                  # CLI та перевірки (manage_content.py, verify_*.py)
+├── tests/                  # Pytest
+└── launcher.py             # Скрипт запуску
 ```
 
 ## 🔧 CLI Інструменти
@@ -121,16 +132,16 @@ python launcher.py --test
 **Управління контентом (додавання категорій/шаблонів):**
 ```bash
 # Додати нову категорію
-python manage_content.py add-category --id auto_lease --label "Оренда авто"
+python tools/manage_content.py add-category --id auto_lease --label "Оренда авто"
 
 # Додати шаблон
-python manage_content.py add-template --category auto_lease --id std_auto --name "Стандартний договір"
+python tools/manage_content.py add-template --category auto_lease --id std_auto --name "Стандартний договір"
 ```
 
 ## 🔒 Безпека
 
 - **PII Sanitization**: Персональні дані (паспорт, ІПН тощо) маскуються перед відправкою в LLM.
-- **Session Access**: Доступ до сесій захищений через `X-Client-ID`.
+- **Session Access**: Доступ до сесій захищений через `X-User-ID`.
 
 ---
 Розроблено для Diia Hakaton 🇺🇦

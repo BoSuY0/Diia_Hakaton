@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import uvicorn
 
-import src.common.logging as common_logging
-from src.common.logging import get_logger, setup_logging
+import backend.shared.logging as common_logging
+from backend.shared.logging import get_logger, setup_logging
 
 
 logger = get_logger(__name__)
@@ -100,7 +100,7 @@ def run_app(
     Головна точка входу для запуску всієї аппки.
 
     1. Налаштовує єдиний логгер.
-    2. Запускає FastAPI-сервер (src.app.server:app) через uvicorn.
+    2. Запускає FastAPI-сервер (backend.api.http.server:app) через uvicorn.
     """
     # Єдине налаштування логування для всієї системи
     setup_logging()
@@ -110,7 +110,7 @@ def run_app(
 
     logger.info("Starting API server on %s:%d", host, port)
     uvicorn_kwargs = {
-        "app": "src.app.server:app",
+        "app": "backend.api.http.server:app",
         "host": host,
         "port": port,
         # Використовуємо наше глобальне налаштування logging,
@@ -146,8 +146,8 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
 
     Використовує ті самі handler-и, що й HTTP /chat, але без підняття uvicorn.
     """
-    from src.app.server import ChatRequest, chat  # type: ignore[import]
-    from src.storage.fs import ensure_directories
+    from backend.api.http.server import ChatRequest, chat  # type: ignore[import]
+    from backend.infra.storage.fs import ensure_directories
 
     setup_logging()
     ensure_directories()

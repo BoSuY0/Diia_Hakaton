@@ -1,6 +1,6 @@
-from src.sessions.actions import set_session_category
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import SessionState, FieldState
+from backend.domain.sessions.actions import set_session_category
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import SessionState, FieldState
 
 
 def test_set_session_category_resets_state_and_data(mock_settings, mock_categories_data):

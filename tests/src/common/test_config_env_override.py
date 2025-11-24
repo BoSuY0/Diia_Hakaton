@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from src.common.config import Settings
+from backend.infra.config.settings import Settings
 
 
 def test_env_overrides_base_dir(monkeypatch, tmp_path):

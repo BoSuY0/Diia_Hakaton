@@ -1,4 +1,4 @@
-from src.validators.core import validate_value, validator_registry
+from backend.domain.validation.core import validate_value, validator_registry
 
 
 def test_validator_registry_fallback_trims_value():

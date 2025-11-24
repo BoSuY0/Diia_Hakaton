@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from src.categories.index import (
+from backend.domain.categories.index import (
     list_entities,
     list_templates,
     list_party_fields,

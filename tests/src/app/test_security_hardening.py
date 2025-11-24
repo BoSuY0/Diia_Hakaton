@@ -2,15 +2,15 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app.server import app
-from src.agent.tools.session import UpsertFieldTool, SetPartyContextTool
-from src.sessions.store import (
+from backend.api.http.server import app
+from backend.agent.tools.session import UpsertFieldTool, SetPartyContextTool
+from backend.infra.persistence.store import (
     get_or_create_session,
     load_session,
     save_session,
 )
-from src.sessions.models import SessionState, FieldState
-from src.categories.index import store as category_store
+from backend.domain.sessions.models import SessionState, FieldState
+from backend.domain.categories.index import store as category_store
 
 
 client = TestClient(app)
@@ -63,6 +63,7 @@ def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
     s.role = "lessor"
     s.person_type = "individual"
     s.party_types = {"lessor": "individual"}
+    s.role_owners = {"lessor": "user1"}
     save_session(s)
 
     tool = UpsertFieldTool()
@@ -135,7 +136,7 @@ def test_sign_requires_client_and_ready(mock_settings, mock_categories_data):
     # Not ready -> 400 even with client
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "user1"},
+        headers={"X-User-ID": "user1"},
     )
     assert resp.status_code == 400
 
@@ -146,7 +147,7 @@ def test_sign_requires_client_and_ready(mock_settings, mock_categories_data):
     save_session(s)
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "user1"},
+        headers={"X-User-ID": "user1"},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -167,9 +168,9 @@ def test_sign_full_mode_respects_owners(mock_settings, mock_categories_data):
 
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-Client-ID": "intruder"},
+        headers={"X-User-ID": "intruder"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code in (400, 403)
 
 
 def test_set_party_context_disallows_disallowed_type(mock_settings, mock_categories_data):
@@ -181,7 +182,7 @@ def test_set_party_context_disallows_disallowed_type(mock_settings, mock_categor
 
     res = tool.execute(
         {"session_id": session_id, "role": "lessor", "person_type": "fop"},
-        {},
+        {"user_id": "ctx_user"},
     )
     assert res["ok"] is False
 
@@ -204,7 +205,7 @@ def test_sync_changes_category_and_clears_state(mock_settings, mock_categories_d
     resp = client.post(
         f"/sessions/{session_id}/sync",
         json=payload1,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp.status_code == 200
 
@@ -225,7 +226,7 @@ def test_sync_changes_category_and_clears_state(mock_settings, mock_categories_d
     resp = client.post(
         f"/sessions/{session_id}/sync",
         json=payload2,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp.status_code == 200
     s = load_session(session_id)
@@ -248,7 +249,7 @@ def test_sync_template_must_belong_to_category(mock_settings, mock_categories_da
     resp = client.post(
         f"/sessions/{session_id}/sync",
         json=bad_payload,
-        headers={"X-Client-ID": "sync_user"},
+        headers={"X-User-ID": "sync_user"},
     )
     assert resp.status_code == 400
 

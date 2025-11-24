@@ -1,9 +1,9 @@
 import pytest
 from docx import Document
 
-from src.documents.builder import build_contract
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState
+from backend.domain.documents.builder import build_contract
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState
 
 
 @pytest.mark.asyncio

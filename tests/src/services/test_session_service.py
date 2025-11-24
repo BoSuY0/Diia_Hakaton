@@ -1,8 +1,8 @@
 import pytest
 
-from src.services.session import set_party_type
-from src.sessions.store import get_or_create_session, save_session
-from src.sessions.models import FieldState, SessionState
+from backend.domain.services.session import set_party_type
+from backend.infra.persistence.store import get_or_create_session, save_session
+from backend.domain.sessions.models import FieldState, SessionState
 
 
 def test_set_party_type_invalidates_signature(mock_settings, mock_categories_data):

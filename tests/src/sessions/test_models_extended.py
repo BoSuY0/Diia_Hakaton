@@ -1,4 +1,4 @@
-from src.sessions.models import Session, SessionState
+from backend.domain.sessions.models import Session, SessionState
 
 
 def test_is_fully_signed_requires_party_types():
