@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Download } from 'lucide-react';
 import { api } from '../api';
 
-export default function PreviewDrawer({ isOpen, onClose, sessionId, clientId }) {
+export default function PreviewDrawer({ isOpen, onClose, sessionId, userId }) {
     const [htmlContent, setHtmlContent] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -11,7 +11,7 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId, clientId }) 
         if (isOpen && sessionId) {
             fetchPreview();
         }
-    }, [isOpen, sessionId, clientId]);
+    }, [isOpen, sessionId, userId]);
 
     const fetchPreview = async () => {
         setLoading(true);
@@ -19,7 +19,7 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId, clientId }) 
         try {
             // Use api.API_URL to ensure correct host (e.g. when accessing from mobile via IP)
             const response = await fetch(`${api.API_URL}/sessions/${sessionId}/contract/preview`, {
-                headers: clientId ? { 'X-User-ID': clientId } : undefined,
+                headers: userId ? { 'X-User-ID': userId } : undefined,
             });
             if (!response.ok) {
                 const errorData = await response.json();
@@ -36,7 +36,7 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId, clientId }) 
     };
 
     const handleDownload = () => {
-        window.open(api.getDownloadUrl(sessionId, clientId), '_blank');
+        window.open(api.getDownloadUrl(sessionId, userId), '_blank');
     };
 
     if (!isOpen) return null;

@@ -32,12 +32,12 @@ def redis_backend(mock_settings, monkeypatch):
 
 def test_save_and_load_roundtrip(redis_backend):
     session = get_or_create_session("redis_roundtrip")
-    session.party_users = {"lessor": "user1"}
+    session.role_owners = {"lessor": "user1"}
     session.party_fields["lessor"] = {"name": FieldState(status="ok")}
     save_session(session)
 
     loaded = load_session(session.session_id)
-    assert loaded.party_users == {"lessor": "user1"}
+    assert loaded.role_owners == {"lessor": "user1"}
     assert loaded.party_fields["lessor"]["name"].status == "ok"
 
     from backend.domain.sessions.ttl import ttl_hours_for_state
@@ -53,28 +53,28 @@ def test_transactional_session_saves_changes(redis_backend):
     session = get_or_create_session("redis_tx")
 
     with transactional_session(session.session_id) as s:
-        s.party_users["lessor"] = "client1"
+        s.role_owners["lessor"] = "client1"
         s.contract_fields["cf1"] = FieldState(status="ok")
 
     loaded = load_session(session.session_id)
-    assert loaded.party_users["lessor"] == "client1"
+    assert loaded.role_owners["lessor"] == "client1"
     assert loaded.contract_fields["cf1"].status == "ok"
     assert redis_backend.get(f"session_lock:{session.session_id}") is None
 
 
 def test_list_user_sessions_returns_sorted(redis_backend):
     s1 = get_or_create_session("redis_ls1")
-    s1.party_users = {"lessor": "user-list"}
+    s1.role_owners = {"lessor": "user-list"}
     save_session(s1)
 
     time.sleep(0.01)
 
     s2 = get_or_create_session("redis_ls2")
-    s2.party_users = {"lessee": "user-list"}
+    s2.role_owners = {"lessee": "user-list"}
     save_session(s2)
 
     s3 = get_or_create_session("redis_ls3")
-    s3.party_users = {"lessor": "other-user"}
+    s3.role_owners = {"lessor": "other-user"}
     save_session(s3)
 
     # Add ghost id to index to ensure cleanup
@@ -84,6 +84,13 @@ def test_list_user_sessions_returns_sorted(redis_backend):
     ids = [s.session_id for s in sessions]
     assert ids == [s2.session_id, s1.session_id]
     assert "ghost" not in redis_backend.zrange("user_sessions:user-list", 0, -1)
+
+    creator_only = get_or_create_session("redis_creator_only", user_id="creator")
+    creator_only.role_owners = {}
+    save_session(creator_only)
+
+    creator_sessions = list_user_sessions("creator")
+    assert any(s.session_id == "redis_creator_only" for s in creator_sessions)
 
 
 def test_load_missing_raises(redis_backend):

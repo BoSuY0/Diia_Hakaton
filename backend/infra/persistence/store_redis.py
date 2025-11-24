@@ -43,12 +43,15 @@ async def save_session(session: Session) -> None:
     ttl_seconds = max(ttl_hours_for_session(session) * 3600, 1)
     await redis.set(_session_key(session.session_id), payload, ex=ttl_seconds)
 
-    role_owners = session.role_owners or {}
-    ts = session.updated_at.timestamp()
-    mapping = {session.session_id: ts}
-    for uid in list(role_owners.values()) + ([session.creator_user_id] if session.creator_user_id else []):
-        if uid:
-            await redis.zadd(_user_index_key(uid), mapping)
+    participants = set((session.role_owners or {}).values())
+    if session.creator_user_id:
+        participants.add(session.creator_user_id)
+    if participants:
+        ts = session.updated_at.timestamp()
+        mapping = {session.session_id: ts}
+        for uid in participants:
+            if uid:
+                await redis.zadd(_user_index_key(uid), mapping)
 
     try:
         await save_user_document_async(session)

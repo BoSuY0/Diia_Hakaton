@@ -1,3 +1,5 @@
+import pytest
+
 from backend.api.http import server
 
 
@@ -31,13 +33,14 @@ def test_inject_session_id_adds_and_expands_alias():
     assert data["field"] == "field1"
 
 
-def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_settings, mock_categories_data):
     from backend.infra.persistence.store import get_or_create_session, save_session
     s = get_or_create_session("eff_state")
     s.category_id = mock_categories_data
     s.state = server.SessionState.TEMPLATE_SELECTED
     save_session(s)
-    state = server._get_effective_state("eff_state", [], has_category_tool=False)
+    state = await server._get_effective_state("eff_state", [], has_category_tool=False)
     assert state == "template_selected"
 
 

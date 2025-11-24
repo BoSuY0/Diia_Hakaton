@@ -1,6 +1,7 @@
 import pytest
 
 from backend.domain.services.session import claim_session_role, set_session_template
+import pytest
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState, FieldState
 
@@ -10,33 +11,34 @@ def _session(cat_id="test_cat"):
     s.category_id = cat_id
     s.filling_mode = "partial"
     s.party_types = {"lessor": "individual", "lessee": "individual"}
+    s.role_owners = {}
     return s
 
 
 def test_claim_session_role_blocks_second_role_in_partial(mock_settings, mock_categories_data):
     s = _session(mock_categories_data)
-    s.party_users = {"lessor": "user1"}
+    s.role_owners = {"lessor": "user1"}
     save_session(s)
 
-    ok = claim_session_role(s, "lessee", "user1")
-    assert ok is False
+    with pytest.raises(PermissionError):
+        claim_session_role(s, "lessee", "user1")
 
 
 def test_claim_session_role_allows_second_role_in_full_mode(mock_settings, mock_categories_data):
     s = _session(mock_categories_data)
     s.filling_mode = "full"
-    s.party_users = {"lessor": "user1"}
+    s.role_owners = {"lessor": "user1"}
     save_session(s)
-    ok = claim_session_role(s, "lessee", "user1")
-    assert ok is True
+    with pytest.raises(PermissionError):
+        claim_session_role(s, "lessee", "user1")
 
 
 def test_claim_session_role_blocks_taken_role(mock_settings, mock_categories_data):
     s = _session(mock_categories_data)
-    s.party_users = {"lessor": "owner1"}
+    s.role_owners = {"lessor": "owner1"}
     save_session(s)
-    ok = claim_session_role(s, "lessor", "intruder")
-    assert ok is False
+    with pytest.raises(PermissionError):
+        claim_session_role(s, "lessor", "intruder")
 
 
 def test_set_session_template_updates_state_based_on_readiness(mock_settings, mock_categories_data):

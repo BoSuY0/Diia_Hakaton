@@ -35,11 +35,11 @@ function App() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [missingRequirements, setMissingRequirements] = useState(null);
 
-  const [clientId] = useState(() => {
-    const stored = localStorage.getItem('diia_client_id');
+  const [userId] = useState(() => {
+    const stored = localStorage.getItem('diia_user_id');
     if (stored) return stored;
     const newId = Math.random().toString(36).substring(7);
-    localStorage.setItem('diia_client_id', newId);
+    localStorage.setItem('diia_user_id', newId);
     return newId;
   });
 
@@ -49,12 +49,12 @@ function App() {
     const taken = [];
     schema.parties.forEach(party => {
       // Only mark as taken if claimed by SOMEONE ELSE
-      if (party.claimed_by && party.claimed_by !== clientId) {
+      if (party.claimed_by && party.claimed_by !== userId) {
         taken.push(party.role);
       }
     });
     return taken;
-  }, [schema, clientId]);
+  }, [schema, userId]);
 
   const extractErrorsFromSchema = (schemaData) => {
     const errors = {};
@@ -174,7 +174,7 @@ function App() {
   const restoreSession = async (sid) => {
     try {
       setIsLoading(true);
-      const data = await api.getSchema(sid, 'all', 'values', clientId);
+      const data = await api.getSchema(sid, 'all', 'values', userId);
 
       if (data && data.contract) {
         setSchema(data);
@@ -218,7 +218,7 @@ function App() {
         setFormValues(prev => ({ ...prev, ...initialValues }));
 
         // Check if I have a role
-        const myRole = data.parties.find(p => p.claimed_by === clientId)?.role || null;
+        const myRole = data.parties.find(p => p.claimed_by === userId)?.role || null;
         if (myRole) {
           setSelectedRole(myRole);
           if (sid) {
@@ -257,7 +257,7 @@ function App() {
   useEffect(() => {
     if (!sessionId) return;
 
-    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${clientId}`);
+    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${userId}`);
 
     eventSource.onopen = () => {
       setIsOnline(true);
@@ -296,7 +296,7 @@ function App() {
     return () => {
       eventSource.close();
     };
-  }, [sessionId, clientId]);
+  }, [sessionId, userId]);
 
   // --- Step Handlers ---
 
@@ -317,7 +317,7 @@ function App() {
     if (!sid) {
       try {
         setIsLoading(true);
-        const session = await api.createSession(clientId);
+        const session = await api.createSession(userId);
         sid = session.session_id;
         setSessionId(sid);
         updateUrl(sid, null, { replace: false });
@@ -352,7 +352,7 @@ function App() {
 
     if (sessionId) {
       try {
-        await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial', clientId);
+        await api.setFillingMode(sessionId, mode === 'full' ? 'full' : 'partial', userId);
         // Завантажуємо схему перед переходом на крок вибору ролі
         await fetchSchema(sessionId);
       } catch (e) {
@@ -386,7 +386,7 @@ function App() {
     const ensureContext = async (targetRole, soft = false) => {
       const defaultType = getDefaultType(targetRole);
       try {
-        const res = await api.setPartyContext(sessionId, targetRole, defaultType, clientId);
+        const res = await api.setPartyContext(sessionId, targetRole, defaultType, userId);
         const data = res?.data || res;
         if (data && data.ok === false) {
           if (!soft) {
@@ -460,7 +460,7 @@ function App() {
     if (!sid) return;
     const { silent = false } = options;
     try {
-      const res = await api.upsertField(sid, fieldName, value, role, clientId);
+      const res = await api.upsertField(sid, fieldName, value, role, userId);
       const data = res?.data || res;
       const status = data?.status || data?.field_state?.status;
       const errorText = data?.error || data?.field_state?.error;
@@ -481,12 +481,12 @@ function App() {
         console.error(`Failed to save ${fieldName}`, error);
       }
     }
-  }, [clientId]);
+  }, [userId]);
 
   const fetchSchema = async (sid) => {
     try {
       setIsLoading(true);
-      const data = await api.getSchema(sid, 'all', 'values', clientId);
+      const data = await api.getSchema(sid, 'all', 'values', userId);
       setSchema(data);
       setFieldErrors(extractErrorsFromSchema(data));
       setMissingRequirements(null);
@@ -542,7 +542,7 @@ function App() {
     try {
       setIsLoading(true);
       setMissingRequirements(null);
-      await api.setPartyContext(sessionId, role, newType, clientId);
+      await api.setPartyContext(sessionId, role, newType, userId);
       await fetchSchema(sessionId);
     } catch (e) {
       console.error("Failed to change party type", e);
@@ -557,7 +557,7 @@ function App() {
       alert("Спочатку оберіть шаблон договору.");
       return;
     }
-    api.buildContract(sessionId, tpl, clientId)
+    api.buildContract(sessionId, tpl, userId)
       .catch((e) => {
         console.error("Failed to build before preview", e);
       })
@@ -577,7 +577,7 @@ function App() {
     try {
       setIsLoading(true);
       setMissingRequirements(null);
-      const res = await api.orderContract(sessionId, clientId);
+      const res = await api.orderContract(sessionId, userId);
       if (res.ok) {
         await fetchSchema(sessionId);
         setMissingRequirements(null);
@@ -594,7 +594,7 @@ function App() {
 
       if (!missing) {
         try {
-          const reqInfo = await api.getRequirements(sessionId, clientId);
+          const reqInfo = await api.getRequirements(sessionId, userId);
           missing = reqInfo?.missing;
         } catch (reqErr) {
           console.error("Failed to fetch requirements", reqErr);
@@ -613,8 +613,8 @@ function App() {
   // Derived state for my roles
   const myRoles = React.useMemo(() => {
     if (!schema || !schema.parties) return [];
-    return schema.parties.filter(p => p.claimed_by === clientId).map(p => p.role);
-  }, [schema, clientId]);
+    return schema.parties.filter(p => p.claimed_by === userId).map(p => p.role);
+  }, [schema, userId]);
 
   // --- Render Helpers ---
 
@@ -665,7 +665,7 @@ function App() {
             <SectionCard
               key={party.role}
               title={party.label}
-              subtitle={party.claimed_by && party.claimed_by !== clientId ? '(Заповнено іншою стороною)' : `Вкажіть дані для сторони "${party.label}"`}
+              subtitle={party.claimed_by && party.claimed_by !== userId ? '(Заповнено іншою стороною)' : `Вкажіть дані для сторони "${party.label}"`}
             >
               <div style={{ marginBottom: 16 }}>
                 <label className="input-label">Тип особи</label>
@@ -741,7 +741,7 @@ function App() {
 
         <div className="actions">
           {schema.status === 'completed' ? (
-            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId, clientId), '_blank')}>
+            <button className="btn-primary" onClick={() => window.open(api.getDownloadUrl(sessionId, userId), '_blank')}>
               Завантажити DOCX
             </button>
           ) : (
@@ -813,7 +813,7 @@ function App() {
         return (
           <ContractDetails
             sessionId={sessionId}
-            clientId={clientId}
+            userId={userId}
             onBack={handleBack}
             onEdit={() => setStep('form')}
           />
@@ -821,7 +821,7 @@ function App() {
       case 'dashboard':
         return (
           <Dashboard
-            clientId={clientId}
+            userId={userId}
             onSelectSession={(sid) => {
               setSessionId(sid);
               fetchSchema(sid);
@@ -834,7 +834,7 @@ function App() {
         return (
           <AIChat
             sessionId={sessionId}
-            clientId={clientId}
+            userId={userId}
             onBack={() => setStep('mode')}
           />
         );
@@ -858,7 +858,7 @@ function App() {
         isOpen={showPreview}
         onClose={() => setShowPreview(false)}
         sessionId={sessionId}
-        clientId={clientId}
+        userId={userId}
       />
 
       <header className="header">

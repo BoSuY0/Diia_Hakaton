@@ -128,7 +128,7 @@ def mock_categories_data(mock_settings, monkeypatch):
     
     # Update index
     index_file = mock_settings.meta_categories_root / "categories_index.json"
-    idx_data = {"categories": [{"id": cat_id, "label": "Test Cat"}]}
+    idx_data = {"categories": [{"id": cat_id, "label": "Test Cat", "keywords": ["test"]}]}
     with index_file.open("w", encoding="utf-8") as f:
         json.dump(idx_data, f)
 

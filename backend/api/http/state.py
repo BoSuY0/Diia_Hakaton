@@ -15,7 +15,7 @@ class Conversation:
     # Остання мова користувача для серверних відповідей ("uk" або "en")
     last_lang: str = "uk"
     # Поточний user_id (для передачі у тулли)
-    client_id: str | None = None
+    user_id: str | None = None
 
 
 class ConversationStore:

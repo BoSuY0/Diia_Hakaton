@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
 
-export const AIChat = ({ sessionId, clientId, onBack }) => {
+export const AIChat = ({ sessionId, userId, onBack }) => {
     const [messages, setMessages] = useState([
         { role: 'system', content: 'Привіт! Я ваш AI-помічник. Я можу допомогти вам заповнити договір. Просто напишіть мені дані або запитайте щось.' }
     ]);
@@ -26,7 +26,7 @@ export const AIChat = ({ sessionId, clientId, onBack }) => {
         setIsSending(true);
 
         try {
-            const res = await api.chat(sessionId, userMsg.content, clientId);
+            const res = await api.chat(sessionId, userMsg.content, userId);
             setMessages(prev => [...prev, { role: 'assistant', content: res.reply }]);
         } catch (e) {
             console.error("Chat failed", e);
