@@ -1,12 +1,16 @@
 import json
 import types
 
+import asyncio
+import pytest
+
 from backend.api.http import server
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState
 
 
-def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_categories_data):
     # Prepare session with category and state so _get_effective_state returns category_selected
     s = get_or_create_session("state_gate")
     s.category_id = mock_categories_data
@@ -34,7 +38,7 @@ def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_ca
     monkeypatch.setattr("backend.api.http.server.tool_registry.get_definitions", fake_get_definitions)
     monkeypatch.setattr("backend.api.http.server.tool_registry.get_by_alias", fake_get_by_alias)
 
-    filtered = server._filter_tools_for_session("state_gate", [], has_category_tool=True)
+    filtered = await server._filter_tools_for_session("state_gate", [], has_category_tool=True)
     names = [t["function"]["name"] for t in filtered]
     assert "fc" in names
     assert "other" not in names

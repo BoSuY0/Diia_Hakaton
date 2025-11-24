@@ -25,6 +25,8 @@ def _setup_category(settings, roles=True):
     idx = settings.meta_categories_root / "categories_index.json"
     idx.write_text(json.dumps({"categories": [{"id": "fields_cat", "label": "Fields"}]}), encoding="utf-8")
     from backend.domain.categories.index import store as category_store
+    from backend.domain.categories import index as category_index
+    category_index._CATEGORIES_PATH = idx
     category_store._categories = {}
     category_store.load()
 

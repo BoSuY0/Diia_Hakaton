@@ -1,4 +1,5 @@
 import json
+import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -56,7 +57,8 @@ def _add_category(settings, cat_id: str, allowed_types=None, templ_id="t_new"):
     category_store.load()
 
 
-def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
     session_id = "pii_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -68,13 +70,13 @@ def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
 
     tool = UpsertFieldTool()
     tags = {"[IBAN#1]": "UA123456789012345678901234567"}
-    res = tool.execute(
+    res = await tool.execute(
         {
             "session_id": session_id,
             "field": "name",
             "value": "My iban [IBAN#1]",
         },
-        {"pii_tags": tags, "client_id": "user1"},
+        {"pii_tags": tags, "user_id": "user1"},
     )
 
     assert res["ok"] is True
@@ -82,7 +84,8 @@ def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
     assert updated.all_data["lessor.name"]["current"] == "My iban UA123456789012345678901234567"
 
 
-def test_upsert_requires_client_when_role_claimed(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_upsert_requires_client_when_role_claimed(mock_settings, mock_categories_data):
     session_id = "acl_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -93,7 +96,7 @@ def test_upsert_requires_client_when_role_claimed(mock_settings, mock_categories
     save_session(s)
 
     tool = UpsertFieldTool()
-    res = tool.execute(
+    res = await tool.execute(
         {"session_id": session_id, "field": "name", "value": "Test"},
         {},  # no client_id
     )
@@ -101,7 +104,8 @@ def test_upsert_requires_client_when_role_claimed(mock_settings, mock_categories
     assert "необхідний" in res["error"].lower()
 
 
-def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
     session_id = "foreign_field_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -112,9 +116,9 @@ def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
     save_session(s)
 
     tool = UpsertFieldTool()
-    res = tool.execute(
+    res = await tool.execute(
         {"session_id": session_id, "field": "name", "value": "Test", "role": "lessor"},
-        {"client_id": "other_user"},
+        {"user_id": "other_user"},
     )
     assert res["ok"] is False
     assert "не маєте права" in res["error"]
@@ -173,14 +177,15 @@ def test_sign_full_mode_respects_owners(mock_settings, mock_categories_data):
     assert resp.status_code in (400, 403)
 
 
-def test_set_party_context_disallows_disallowed_type(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_set_party_context_disallows_disallowed_type(mock_settings, mock_categories_data):
     tool = SetPartyContextTool()
     session_id = "ctx_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
     save_session(s)
 
-    res = tool.execute(
+    res = await tool.execute(
         {"session_id": session_id, "role": "lessor", "person_type": "fop"},
         {"user_id": "ctx_user"},
     )
@@ -262,7 +267,11 @@ def test_schema_status_uses_field_state(mock_settings, mock_categories_data):
     s.all_data = {"cf1": {"current": "Some text"}}
     save_session(s)
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "status"})
+    resp = client.get(
+        f"/sessions/{session_id}/schema",
+        params={"data_mode": "status"},
+        headers={"X-User-ID": "schema_user"},
+    )
     assert resp.status_code == 200
     contract_fields = resp.json()["contract"]["fields"]
     assert contract_fields[0]["value"] is False  # error state should be false
