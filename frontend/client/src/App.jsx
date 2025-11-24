@@ -409,22 +409,8 @@ function App() {
     };
 
     try {
-      if (selectedMode === 'full') {
-        // Гарантуємо контекст для обраної ролі навіть якщо schema ще не прийшла
-        await ensureContext(role);
-        // Далі намагаємось виставити контекст для інших ролей (якщо вже знаємо метадані)
-        if (schema && schema.parties) {
-          for (const party of schema.parties) {
-            // Не падаємо, якщо інша роль вже зайнята/недоступна
-            if (party.role !== role) {
-              await ensureContext(party.role, true);
-            }
-          }
-        }
-      } else {
-        // Partial mode: claim only selected
-        await ensureContext(role);
-      }
+      // У будь-якому режимі клеймимо лише обрану роль
+      await ensureContext(role);
     } catch {
       return;
     }

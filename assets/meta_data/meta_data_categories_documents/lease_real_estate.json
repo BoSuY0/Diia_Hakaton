@@ -1,7 +1,5 @@
 {
   "category_id": "lease_real_estate",
-  "main_role": "lessor",
-
   "templates": [
     {
       "id": "lease_flat",

@@ -188,7 +188,7 @@ def update_session_field(
             "ts": datetime.utcnow().isoformat() + "Z",
             "type": "field_update",
             "key": key,
-            "user_id": ctx.get("client_id"),
+            "user_id": ctx.get("user_id") or ctx.get("client_id"),
             "role": effective_role or session.role,
             "value": value,
             "normalized": normalized if error is None else None,

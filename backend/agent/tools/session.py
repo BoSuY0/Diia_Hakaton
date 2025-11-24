@@ -426,6 +426,7 @@ class UpsertFieldTool(BaseTool):
             # Normalize context so downstream history uses the declared user_id
             normalized_context = dict(context)
             normalized_context["client_id"] = user_id
+            normalized_context["user_id"] = user_id
 
             from backend.domain.services.session import update_session_field
             
