@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from backend.api.tool_adapter import tool_router
 
@@ -7,6 +8,12 @@ def test_wrapper_tool_find_category():
     res = tool_router.tool_find_category_by_query("q")
     if isinstance(res, str):
         res = json.loads(res)
+    assert isinstance(res, dict)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_tool_find_category_async():
+    res = await tool_router.tool_find_category_by_query_async("q")
     assert isinstance(res, dict)
 
 

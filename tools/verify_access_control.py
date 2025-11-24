@@ -44,10 +44,12 @@ def test_access_control():
     user1_id = "user_1"
     # We need to find a valid role.
     # Let's get schema to find roles.
-    schema = client.get(
+    schema_resp = client.get(
         f"/sessions/{session_id}/schema",
         headers={"X-User-ID": creator_id},
-    ).json()
+    )
+    assert schema_resp.status_code == 200, schema_resp.text
+    schema = schema_resp.json()
     roles = [p["role"] for p in schema["parties"]]
     print(f"Roles found: {roles}")
     

@@ -38,7 +38,10 @@ function App() {
   const [userId] = useState(() => {
     const stored = localStorage.getItem('diia_user_id');
     if (stored) return stored;
-    const newId = Math.random().toString(36).substring(7);
+    const newId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 10);
     localStorage.setItem('diia_user_id', newId);
     return newId;
   });
