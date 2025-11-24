@@ -63,6 +63,7 @@ SESSION_BACKEND=fs  # або redis
   - `field_update`: `{ts, type, key, user_id, role, value, normalized, valid, source}`
   - `sign`: `{ts, type, user_id, roles, state}`
 - `signatures`, `state`, `filling_mode`, `progress`, `updated_at`.
+- TTL за стейтом: чернетки — `draft_ttl_hours`, заповнені — `filled_ttl_hours`, підписані — `signed_ttl_days`.
 
 ### 2. Запуск Backend
 

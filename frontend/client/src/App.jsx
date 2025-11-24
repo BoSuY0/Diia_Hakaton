@@ -409,6 +409,7 @@ function App() {
     };
 
     try {
+      // У будь-якому режимі клеймимо лише обрану роль
       await ensureContext(role);
     } catch {
       return;

@@ -7,10 +7,7 @@ from backend.domain.categories.index import list_entities, list_party_fields
 from backend.infra.config.settings import settings
 from backend.domain.sessions.models import Session, SessionState
 from backend.infra.storage.fs import read_json, write_json, read_json_async, write_json_async
-from backend.infra.persistence.contracts_db import (
-    create_or_update_contract,
-    get_contract_by_session,
-)
+from backend.infra.persistence.contracts_repository import get_contracts_repo
 
 
 def build_user_document(session: Session) -> Dict[str, Any]:
@@ -131,7 +128,8 @@ def save_user_document(session: Session) -> Path:
     """
     doc = build_user_document(session)
     try:
-        create_or_update_contract(session, doc)
+        repo = get_contracts_repo()
+        repo.create_or_update(session, doc)
     except Exception:
         # DB write is best-effort; keep filesystem path as fallback
         pass
@@ -146,7 +144,8 @@ async def save_user_document_async(session: Session) -> Path:
     """
     doc = build_user_document(session)
     try:
-        create_or_update_contract(session, doc)
+        repo = get_contracts_repo()
+        repo.create_or_update(session, doc)
     except Exception:
         pass
     path = settings.meta_users_documents_root / f"{session.session_id}.json"
@@ -158,9 +157,13 @@ def load_user_document(session_id: str) -> Dict[str, Any]:
     """
     Завантажує user-document JSON за session_id.
     """
-    doc = get_contract_by_session(session_id)
-    if doc:
-        return doc
+    try:
+        repo = get_contracts_repo()
+        doc = repo.get_by_session_id(session_id)
+        if doc:
+            return doc
+    except Exception:
+        pass
     path = settings.meta_users_documents_root / f"{session_id}.json"
     if not path.exists():
         raise FileNotFoundError(f"User document for session '{session_id}' not found")
@@ -171,9 +174,13 @@ async def load_user_document_async(session_id: str) -> Dict[str, Any]:
     """
     Асинхронне завантаження user-document.
     """
-    doc = get_contract_by_session(session_id)
-    if doc:
-        return doc
+    try:
+        repo = get_contracts_repo()
+        doc = repo.get_by_session_id(session_id)
+        if doc:
+            return doc
+    except Exception:
+        pass
     path = settings.meta_users_documents_root / f"{session_id}.json"
     if not path.exists():
         raise FileNotFoundError(f"User document for session '{session_id}' not found")

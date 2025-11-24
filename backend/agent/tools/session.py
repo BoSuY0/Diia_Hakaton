@@ -418,6 +418,11 @@ class UpsertFieldTool(BaseTool):
                             "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
                         }
 
+            # Normalize context so downstream history uses the declared user_id
+            normalized_context = dict(context)
+            normalized_context["client_id"] = user_id
+            normalized_context["user_id"] = user_id
+
             from backend.domain.services.session import update_session_field
 
             ok, error, fs = update_session_field(
