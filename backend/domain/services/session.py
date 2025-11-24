@@ -29,7 +29,7 @@ def update_session_field(
         value: The raw value to set.
         role: Optional role override. If None, uses session.role.
         tags: Optional PII tags for history tracking.
-        context: Optional context (client_id, source, etc.) for audit logging.
+        context: Optional context (user_id, source, etc.) for audit logging.
 
     Returns:
         Tuple[success, error_message, field_state]
@@ -188,7 +188,7 @@ def update_session_field(
             "ts": datetime.utcnow().isoformat() + "Z",
             "type": "field_update",
             "key": key,
-            "user_id": ctx.get("user_id") or ctx.get("client_id"),
+            "user_id": ctx.get("user_id"),
             "role": effective_role or session.role,
             "value": value,
             "normalized": normalized if error is None else None,

@@ -89,6 +89,13 @@ async def test_list_user_sessions_returns_sorted(redis_backend):
     assert ids == [s2.session_id, s1.session_id]
     assert "ghost" not in await redis_backend.zrange("user_sessions:user-list", 0, -1)
 
+    creator_only = get_or_create_session("redis_creator_only", user_id="creator")
+    creator_only.role_owners = {}
+    save_session(creator_only)
+
+    creator_sessions = list_user_sessions("creator")
+    assert any(s.session_id == "redis_creator_only" for s in creator_sessions)
+
 
 @pytest.mark.asyncio
 async def test_load_missing_raises(redis_backend):

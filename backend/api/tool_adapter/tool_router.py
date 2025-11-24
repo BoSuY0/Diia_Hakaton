@@ -4,6 +4,9 @@ import json
 from typing import Any, Dict, Optional
 
 # Import tools to register them
+import asyncio
+import inspect
+
 import backend.agent.tools.categories
 import backend.agent.tools.session
 from backend.agent.tools.registry import tool_registry
@@ -16,7 +19,7 @@ def dispatch_tool(
     name: str,
     arguments_json: str,
     tags: Dict[str, str] | None = None,
-    client_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     args = json.loads(arguments_json or "{}")
     logger.info("dispatch_tool name=%s", name)
@@ -29,8 +32,7 @@ def dispatch_tool(
     context = {
         "tags": tags,
         "pii_tags": tags or {},
-        "client_id": client_id,
-        "user_id": client_id,
+        "user_id": user_id,
     }
 
     try:
@@ -45,7 +47,7 @@ async def dispatch_tool_async(
     name: str,
     arguments_json: str,
     tags: Dict[str, str] | None = None,
-    client_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     args = json.loads(arguments_json or "{}")
     logger.info("dispatch_tool_async name=%s", name)
@@ -58,8 +60,7 @@ async def dispatch_tool_async(
     context = {
         "tags": tags,
         "pii_tags": tags or {},
-        "client_id": client_id,
-        "user_id": client_id,
+        "user_id": user_id,
     }
 
     try:
@@ -73,49 +74,49 @@ async def dispatch_tool_async(
 def tool_find_category_by_query(query: str) -> Dict[str, Any]:
     tool = tool_registry.get("find_category_by_query")
     if tool:
-        return tool.execute({"query": query}, {})
+        return _run_tool(tool, {"query": query})
     return {}
 
 
 def tool_get_templates_for_category(category_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("get_templates_for_category")
     if tool:
-        return tool.execute({"category_id": category_id}, {})
+        return _run_tool(tool, {"category_id": category_id})
     return {}
 
 
 def tool_get_category_entities(category_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("get_category_entities")
     if tool:
-        return tool.execute({"category_id": category_id}, {})
+        return _run_tool(tool, {"category_id": category_id})
     return {}
 
 
 def tool_get_category_parties(category_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("get_category_parties")
     if tool:
-        return tool.execute({"category_id": category_id}, {})
+        return _run_tool(tool, {"category_id": category_id})
     return {}
 
 
 def tool_get_party_fields_for_session(session_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("get_party_fields_for_session")
     if tool:
-        return tool.execute({"session_id": session_id}, {})
+        return _run_tool(tool, {"session_id": session_id})
     return {}
 
 
 def tool_set_category(session_id: str, category_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("set_category")
     if tool:
-        return tool.execute({"session_id": session_id, "category_id": category_id}, {})
+        return _run_tool(tool, {"session_id": session_id, "category_id": category_id})
     return {}
 
 
 def tool_set_template(session_id: str, template_id: str) -> Dict[str, Any]:
     tool = tool_registry.get("set_template")
     if tool:
-        return tool.execute({"session_id": session_id, "template_id": template_id}, {})
+        return _run_tool(tool, {"session_id": session_id, "template_id": template_id})
     return {}
 
 
@@ -284,3 +285,36 @@ async def tool_set_party_context_async(
         payload,
         _context or {},
     )
+def _run_tool(tool, args: Dict[str, Any]) -> Dict[str, Any]:
+    result = tool.execute(args, {})
+    if inspect.iscoroutine(result):
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop and running_loop.is_running():
+            import threading
+
+            output: Dict[str, Any] = {}
+
+            def _run_in_thread():
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    output["value"] = loop.run_until_complete(result)
+                finally:
+                    loop.close()
+
+            t = threading.Thread(target=_run_in_thread)
+            t.start()
+            t.join()
+            return output.get("value")
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(result)
+        finally:
+            loop.close()
+    return result
+

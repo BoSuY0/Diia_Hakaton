@@ -24,9 +24,9 @@ def test_tool_upsert_field_context_tags():
             return json.dumps(r)
 
     tool_router.tool_registry.register("upsert_field", Dummy())
-    res = tool_router.tool_upsert_field("s1", "f", "v", tags={"[T]": "val"}, role=None, _context={"client_id": "u"})
+    res = tool_router.tool_upsert_field("s1", "f", "v", tags={"[T]": "val"}, role=None, _context={"user_id": "u"})
     assert res["ok"] is True
     ctx = called["ctx"]
     assert ctx["tags"] == {"[T]": "val"}
     assert ctx["pii_tags"] == {"[T]": "val"}
-    assert ctx["client_id"] == "u"
+    assert ctx["user_id"] == "u"

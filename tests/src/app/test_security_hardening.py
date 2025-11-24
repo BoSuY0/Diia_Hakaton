@@ -92,13 +92,13 @@ async def test_upsert_requires_client_when_role_claimed(mock_settings, mock_cate
     s.role = "lessor"
     s.person_type = "individual"
     s.party_types = {"lessor": "individual"}
-    s.party_users = {"lessor": "owner1"}
+    s.role_owners = {"lessor": "owner1"}
     save_session(s)
 
     tool = UpsertFieldTool()
     res = await tool.execute(
         {"session_id": session_id, "field": "name", "value": "Test"},
-        {},  # no client_id
+        {},  # no user_id
     )
     assert res["ok"] is False
     assert "необхідний" in res["error"].lower()
@@ -112,7 +112,7 @@ async def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
     s.role = "lessor"
     s.person_type = "individual"
     s.party_types = {"lessor": "individual"}
-    s.party_users = {"lessor": "owner1"}
+    s.role_owners = {"lessor": "owner1"}
     save_session(s)
 
     tool = UpsertFieldTool()
@@ -263,6 +263,7 @@ def test_schema_status_uses_field_state(mock_settings, mock_categories_data):
     session_id = "schema_status_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
+    s.creator_user_id = "schema_user"
     s.contract_fields = {"cf1": FieldState(status="error", error="bad")}
     s.all_data = {"cf1": {"current": "Some text"}}
     save_session(s)

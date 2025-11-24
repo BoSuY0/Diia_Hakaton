@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 
-export const Dashboard = ({ clientId, onSelectSession, onBack }) => {
+export const Dashboard = ({ userId, onSelectSession, onBack }) => {
     const [sessions, setSessions] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const load = async () => {
             try {
-                const data = await api.getMySessions(clientId);
+                const data = await api.getMySessions(userId);
                 setSessions(data);
             } catch (e) {
                 console.error("Failed to load sessions", e);
@@ -17,7 +17,7 @@ export const Dashboard = ({ clientId, onSelectSession, onBack }) => {
             }
         };
         load();
-    }, [clientId]);
+    }, [userId]);
 
     if (isLoading) return <div>Loading...</div>;
 

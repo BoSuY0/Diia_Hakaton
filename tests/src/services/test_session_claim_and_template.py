@@ -1,6 +1,7 @@
 import pytest
 
 from backend.domain.services.session import claim_session_role, set_session_template
+import pytest
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState, FieldState
 
@@ -10,6 +11,7 @@ def _session(cat_id="test_cat"):
     s.category_id = cat_id
     s.filling_mode = "partial"
     s.party_types = {"lessor": "individual", "lessee": "individual"}
+    s.role_owners = {}
     return s
 
 

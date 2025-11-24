@@ -74,7 +74,7 @@ async def test_sync_partial_and_ready(mock_settings):
     # Fill contract field via tool to reach ready
     tool = UpsertFieldTool()
     session_loaded = load_session(session_id)
-    session_loaded.role_owners = {"lessor": "u1"}
+    session_loaded.role_owners = {"lessor": "sync_user"}
     save_session(session_loaded)
     await tool.execute(
         {"session_id": session_id, "field": "cf1", "value": "Val"},

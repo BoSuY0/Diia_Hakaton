@@ -173,7 +173,7 @@ def test_contract_api_flow():
     # 1. Setup Session
     resp = client.post("/sessions", json={}, headers={"X-User-ID": USER_ID})
     session_id = resp.json()["session_id"]
-    client_id = "plan_user"
+    user_id = "plan_user"
     
     # 2. Sync Session to be ready
     sync_data = {
@@ -203,7 +203,7 @@ def test_contract_api_flow():
     client.post(
         f"/sessions/{session_id}/sync",
         json=sync_data,
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     
     # Upsert remaining contract fields
@@ -216,7 +216,7 @@ def test_contract_api_flow():
         client.post(
             f"/sessions/{session_id}/fields",
             json={"field": f, "value": v},
-            headers={"X-User-ID": client_id},
+            headers={"X-User-ID": user_id},
         )
         
     # Force can_build_contract just in case
@@ -227,7 +227,7 @@ def test_contract_api_flow():
     # 3. Get Contract Info
     resp = client.get(
         f"/sessions/{session_id}/contract",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     data = resp.json()
     print("Contract Info:", data)
@@ -241,7 +241,7 @@ def test_contract_api_flow():
     # 4. Preview
     resp = client.get(
         f"/sessions/{session_id}/contract/preview",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -253,7 +253,7 @@ def test_contract_api_flow():
     
     resp = client.get(
         f"/sessions/{session_id}/contract",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     data = resp.json()
     assert data["document_ready"] == True
@@ -262,14 +262,14 @@ def test_contract_api_flow():
     # 5. Download (Unsigned) -> 403
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     assert resp.status_code == 403
     
     # 6. Sign
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     assert resp.status_code == 200
     assert resp.json()["is_signed"] == True
@@ -277,7 +277,7 @@ def test_contract_api_flow():
     # 7. Download (Signed) -> 200
     resp = client.get(
         f"/sessions/{session_id}/contract/download",
-        headers={"X-User-ID": client_id},
+        headers={"X-User-ID": user_id},
     )
     print(f"Download (Signed) Status: {resp.status_code}")
     if resp.status_code != 200:

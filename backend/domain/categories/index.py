@@ -189,7 +189,7 @@ def get_party_schema(category_id: str) -> Dict[str, Any]:
     modules_raw = data.get("party_modules") or {}
 
     roles: List[Dict[str, Any]] = []
-    main_role = data.get("main_role") or data.get("primary_role")
+    main_role = None
     allowed_fallback = list(modules_raw.keys())
     for role_id, info in roles_raw.items():
         allowed_types = info.get("allowed_person_types") or allowed_fallback
@@ -200,8 +200,8 @@ def get_party_schema(category_id: str) -> Dict[str, Any]:
                 "allowed_person_types": allowed_types,
             }
         )
-        if not main_role:
-            main_role = role_id  # default to first role
+        if main_role is None:
+            main_role = role_id  # default to first role order
 
     person_types: List[Dict[str, Any]] = []
     for person_type, info in modules_raw.items():

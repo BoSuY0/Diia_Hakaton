@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 
-export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
+export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
     const [info, setInfo] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSigning, setIsSigning] = useState(false);
@@ -13,7 +13,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
     const load = async () => {
         try {
             setIsLoading(true);
-            const res = await api.getContract(sessionId, clientId);
+            const res = await api.getContract(sessionId, userId);
             setInfo(res.data);
         } catch (e) {
             console.error("Failed to load contract info", e);
@@ -26,7 +26,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
         try {
             setHistoryLoading(true);
             setHistoryError(null);
-            const data = await api.getHistory(sessionId, clientId);
+            const data = await api.getHistory(sessionId, userId);
             setHistory(data);
         } catch (e) {
             const detail = e?.response?.data?.detail;
@@ -63,7 +63,7 @@ export const ContractDetails = ({ sessionId, clientId, onBack, onEdit }) => {
     const handleSign = async () => {
         try {
             setIsSigning(true);
-            await api.signContract(sessionId, clientId);
+            await api.signContract(sessionId, userId);
             await load(); // Reload to update status
             await loadHistory();
             alert("Підписано успішно!");

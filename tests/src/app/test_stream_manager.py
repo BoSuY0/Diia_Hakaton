@@ -18,7 +18,7 @@ async def test_stream_manager_connect_broadcast_disconnect():
     assert payload["hello"] == "world"
 
     # Exclude sender should skip enqueueing
-    await stream_manager.broadcast("s1", {"skip": True}, exclude_client_id="user1")
+    await stream_manager.broadcast("s1", {"skip": True}, exclude_user_id="user1")
     assert q.empty()
 
     stream_manager.disconnect("s1", q)

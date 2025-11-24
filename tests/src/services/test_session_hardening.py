@@ -108,7 +108,7 @@ def test_update_session_field_history_includes_actor(mock_settings, mock_categor
         "cf1",
         "Valid",
         role=None,
-        context={"client_id": "user1"},
+        context={"user_id": "user1"},
     )
     assert ok is True
     entry = s.history[-1]
