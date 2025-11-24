@@ -3,10 +3,11 @@ from backend.infra.persistence.store import get_or_create_session, load_session,
 from backend.domain.sessions.models import Session, FieldState
 
 def test_get_or_create_new(mock_settings):
-    
+
     s = get_or_create_session("new_session")
     assert s.session_id == "new_session"
-    assert (mock_settings.sessions_root / "session_new_session.json").exists()
+    loaded = load_session("new_session")
+    assert loaded.session_id == "new_session"
 
 def test_save_and_load(mock_settings):
     s = Session(session_id="test_save")

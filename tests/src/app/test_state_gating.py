@@ -2,6 +2,9 @@ import json
 import types
 import pytest
 
+import asyncio
+import pytest
+
 from backend.api.http import server
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState

@@ -24,9 +24,10 @@ def mock_chat_with_tools(monkeypatch):
 
 @pytest.fixture
 def mock_build_contract(monkeypatch):
-    def mock_build(*args, **kwargs):
+    async def mock_build(*args, **kwargs):
         return {"document_url": "http://mock/doc.docx", "ok": True}
-    monkeypatch.setattr("backend.api.http.server.tool_build_contract", mock_build)
+
+    monkeypatch.setattr("backend.api.http.server.tool_build_contract_async", mock_build)
 
 def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_contract, temp_workspace):
     """Test one-shot sync with full data."""
