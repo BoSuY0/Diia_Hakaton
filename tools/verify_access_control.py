@@ -29,7 +29,7 @@ def test_access_control():
     # We assume 'lease_agreement' exists and has 2 roles.
     # If not, we might need to pick another one or mock.
     # Let's check available categories first.
-    cats = client.get("/categories").json()
+    cats = client.get("/categories", headers={"X-User-ID": creator_id}).json()
     if not cats:
         print("No categories found. Skipping test.")
         return
@@ -37,7 +37,11 @@ def test_access_control():
     cat_id = cats[0]["id"] # Use first category
     print(f"Using category: {cat_id}")
     
-    resp = client.post(f"/sessions/{session_id}/category", json={"category_id": cat_id})
+    resp = client.post(
+        f"/sessions/{session_id}/category",
+        json={"category_id": cat_id},
+        headers={"X-User-ID": creator_id},
+    )
     assert resp.status_code == 200
 
     # 3. User 1 claims Role 1

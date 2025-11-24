@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from backend.api.http import server
@@ -31,6 +32,9 @@ def test_inject_session_id_adds_and_expands_alias():
     # alias cid -> category_id should be preserved as explicit field when not session-aware
     assert data["category_id"] == "cat1"
     assert data["field"] == "field1"
+
+
+import asyncio
 
 
 @pytest.mark.asyncio
