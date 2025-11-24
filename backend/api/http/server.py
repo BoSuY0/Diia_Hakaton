@@ -30,6 +30,9 @@ from backend.api.tool_adapter.tool_router import (
     tool_upsert_field_async,
     tool_set_party_context_async,
 )
+
+# Backwards-compatible alias for sync monkeypatches in tests
+tool_build_contract = tool_build_contract_async
 from backend.shared.errors import SessionNotFoundError
 from backend.shared.logging import get_logger, setup_logging
 from backend.infra.config.settings import settings
@@ -268,7 +271,6 @@ class UpsertFieldRequest(BaseModel):
     field: str
     value: Any
     role: Optional[str] = None
-    client_id: Optional[str] = None
 
 
 class SetTemplateRequest(BaseModel):
@@ -730,7 +732,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                     tool_name,
                     tool_args,
                     tags=getattr(conv, "tags", None),
-                    client_id=getattr(conv, "client_id", None),
+                    user_id=getattr(conv, "user_id", None),
                 )
 
                 if tool_name == "set_category":
@@ -1027,7 +1029,7 @@ async def create_session(
 
 def check_session_access(
     session: Session,
-    client_id: Optional[str],
+    user_id: Optional[str],
     *,
     require_participant: bool = False,
     allow_owner: bool = False,
@@ -1040,17 +1042,17 @@ def check_session_access(
     - allow_owner: treat session.creator_user_id як учасника.
     """
     is_owner = bool(
-        allow_owner and client_id and session.creator_user_id and client_id == session.creator_user_id
+        allow_owner and user_id and session.creator_user_id and user_id == session.creator_user_id
     )
 
     # If participant-level access is required, enforce header presence early
-    if require_participant and not client_id:
+    if require_participant and not user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
     # 1. If no category, we can't determine roles, so allow access (setup phase)
     if not session.category_id:
         # If some roles are already claimed, still enforce participant ownership when explicitly required
-        if require_participant and session.role_owners and client_id not in session.role_owners.values() and not is_owner:
+        if require_participant and session.role_owners and user_id not in session.role_owners.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
@@ -1073,10 +1075,10 @@ def check_session_access(
 
     # Enforce participant-only access when explicitly required or when session is already full
     if require_participant or is_full:
-        if not client_id:
+        if not user_id:
             raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
-        if session.role_owners and client_id not in session.role_owners.values() and not is_owner:
+        if session.role_owners and user_id not in session.role_owners.values() and not is_owner:
             raise HTTPException(status_code=403, detail="You are not a participant of this session.")
         return
 
@@ -1162,7 +1164,7 @@ async def set_session_filling_mode(
 
     result = await tool.execute_async(
         {"session_id": session_id, "mode": req.mode},
-        {"client_id": user_id, "user_id": user_id},
+        {"user_id": user_id},
     )
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1187,9 +1189,9 @@ class StreamManager:
     def __init__(self):
         self.connections: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    async def connect(self, session_id: str, client_id: Optional[str]) -> asyncio.Queue:
+    async def connect(self, session_id: str, user_id: Optional[str]) -> asyncio.Queue:
         queue = asyncio.Queue(maxsize=100)
-        self.connections[session_id].append({"queue": queue, "client_id": client_id})
+        self.connections[session_id].append({"queue": queue, "user_id": user_id})
         return queue
 
     def disconnect(self, session_id: str, queue: asyncio.Queue):
@@ -1201,7 +1203,7 @@ class StreamManager:
         else:
             del self.connections[session_id]
 
-    async def broadcast(self, session_id: str, message: dict, exclude_client_id: Optional[str] = None):
+    async def broadcast(self, session_id: str, message: dict, exclude_user_id: Optional[str] = None):
         if session_id not in self.connections:
             return
         
@@ -1214,8 +1216,8 @@ class StreamManager:
         for conn in list(self.connections[session_id]):
             try:
                 queue = conn.get("queue")
-                cid = conn.get("client_id")
-                if exclude_client_id and cid and cid == exclude_client_id:
+                cid = conn.get("user_id")
+                if exclude_user_id and cid and cid == exclude_user_id:
                     continue
                 if queue is None:
                     continue
@@ -1254,8 +1256,8 @@ async def stream_session_events(
     """
     Server-Sent Events endpoint for real-time session updates.
     """
-    client_id = x_user_id or user_id_query
-    if not client_id:
+    user_id = x_user_id or user_id_query
+    if not user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
     try:
@@ -1264,9 +1266,9 @@ async def stream_session_events(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # Дозволяємо підключення навіть якщо клієнт ще не учасник (щоб бачити зміни ролей у реальному часі)
-    check_session_access(session, client_id, require_participant=False, allow_owner=True)
+    check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
-    queue = await stream_manager.connect(session_id, client_id)
+    queue = await stream_manager.connect(session_id, user_id)
 
     async def event_generator():
         try:
@@ -1309,11 +1311,11 @@ async def upsert_session_field(
         value=req.value,
         tags=None,
         role=req.role,
-        _context={"client_id": user_id, "user_id": user_id}
+        _context={"user_id": user_id}
     )
-    
+
     if result.get("ok", False):
-        sender_id = user_id or req.client_id
+        sender_id = user_id
         field_key = f"{req.role}.{req.field}" if req.role else req.field
         # Broadcast update to all listeners
         await stream_manager.broadcast(
@@ -1325,7 +1327,7 @@ async def upsert_session_field(
                 "value": req.value,
                 "role": req.role,
             },
-            exclude_client_id=sender_id,
+            exclude_user_id=sender_id,
         )
 
     # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
@@ -1387,9 +1389,9 @@ async def sync_session(
     await aget_or_create_session(session_id)
 
     # Access control: only participants can sync when roles are claimed/full.
-    client_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id)
     session_for_acl = await aload_session(session_id)
-    check_session_access(session_for_acl, client_id, require_participant=True, allow_owner=True)
+    check_session_access(session_for_acl, user_id, require_participant=True, allow_owner=True)
 
     # Під час тестів метадані можуть змінюватися на льоту — перезавантажуємо індекс
     await run_sync(category_store.load)
@@ -1398,8 +1400,6 @@ async def sync_session(
     missing_roles: Dict[str, Any] = {}
     is_ready = True
     template_id_local: Optional[str] = None
-    # Для подальшої фільтрації помилок під конкретного клієнта
-    main_role: Optional[str] = None
     role_owners: Dict[str, str] = {}
 
     async with atransactional_session(session_id) as session:
@@ -1429,7 +1429,6 @@ async def sync_session(
             raise HTTPException(status_code=400, detail="Invalid category_id")
 
         category_meta = _load_meta(category)
-        main_role = category_meta.get("main_role") or category_meta.get("primary_role")
         defined_roles = category_meta.get("roles", {})
 
         # Import service
@@ -1458,7 +1457,7 @@ async def sync_session(
                     field=field_name,
                     value=value,
                     role=role_id,
-                    context={"client_id": client_id, "user_id": client_id, "source": "api"},
+                    context={"user_id": user_id, "source": "api"},
                 )
 
         # 4. Check Readiness using shared schema helper
@@ -1487,17 +1486,13 @@ async def sync_session(
     # End of transaction block. Session is saved to disk.
 
     # Фільтрація списку missing під роль поточного клієнта
-    if client_id and role_owners:
-        current_role = next((r for r, uid in role_owners.items() if uid == client_id), None)
+    if user_id and role_owners:
+        current_role = next((r for r, uid in role_owners.items() if uid == user_id), None)
         if current_role:
             if current_role in missing_roles:
                 missing_roles = {current_role: missing_roles[current_role]}
             else:
                 missing_roles = {}
-
-            # Якщо клієнт не головна роль — не показуємо контрактні помилки
-            if main_role and current_role != main_role:
-                missing_contract = []
 
     if is_ready and template_id_local:
         try:
@@ -1551,7 +1546,7 @@ async def chat(
     conv = conversation_store.get(req.session_id)
     user_id = x_user_id
     if user_id:
-        conv.client_id = user_id
+        conv.user_id = user_id
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
     # get_or_create_session uses lock if creating, so it's safe.
     session = await aget_or_create_session(req.session_id)
@@ -1698,23 +1693,23 @@ async def get_contract_info(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id)
 
-    check_session_access(session, client_id, require_participant=True, allow_owner=True)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
-        f"/sessions/{session_id}/contract/download?user_id={client_id}"
+        f"/sessions/{session_id}/contract/download?user_id={user_id}"
         if session.state in {SessionState.BUILT, SessionState.COMPLETED, SessionState.READY_TO_SIGN}
         else None
     )
     preview_url = (
-        f"/sessions/{session_id}/contract/preview?user_id={client_id}"
+        f"/sessions/{session_id}/contract/preview?user_id={user_id}"
         if session.can_build_contract
         else None
     )
 
-    client_roles = [role for role, uid in session.role_owners.items() if uid == client_id]
+    client_roles = [role for role, uid in session.role_owners.items() if uid == user_id]
 
     return {
         "session_id": session.session_id,
@@ -1742,11 +1737,11 @@ async def preview_contract(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    client_id = x_user_id or user_id_query
-    if not client_id:
+    user_id = x_user_id or user_id_query
+    if not user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID")
     # Превʼю доступне лише учасникам або власнику
-    check_session_access(session, client_id, require_participant=True, allow_owner=True)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
@@ -1791,10 +1786,10 @@ async def download_contract(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    client_id = x_user_id or user_id_query
-    if not client_id:
+    user_id = x_user_id or user_id_query
+    if not user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-ID")
-    check_session_access(session, client_id, require_participant=True, allow_owner=True)
+    check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
     # The test verify_contract_api expects 403 if not signed.
@@ -1892,7 +1887,7 @@ async def sign_contract(
                 session.sign_history.append(
                     {
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "client_id": user_id,
+                        "user_id": user_id,
                         "roles": signed_roles,
                         "state": session.state.value,
                     }
@@ -1973,12 +1968,8 @@ async def get_session_schema(
 
     meta = _load_meta(category_def)
     roles = meta.get("roles", {})
-    main_role = meta.get("main_role") or meta.get("primary_role")
-    if not main_role and roles:
-        # default to first role in metadata order
-        for k in roles.keys():
-            main_role = k
-            break
+    # main_role використовується лише для порядку відображення в UI
+    main_role = next(iter(roles.keys()), None)
 
     response = {
         "session_id": session.session_id,
@@ -2113,18 +2104,6 @@ async def get_session_requirements(
 
     missing = collect_missing_fields(session)
     # Фільтруємо missing за роллю клієнта, щоб не блокувати другорядні ролі
-    from backend.domain.categories.index import store as category_store, _load_meta
-
-    main_role = None
-    if session.category_id:
-        cat = category_store.get(session.category_id)
-        if cat:
-            try:
-                meta = _load_meta(cat)
-                main_role = meta.get("main_role") or meta.get("primary_role")
-            except Exception:
-                pass
-
     if user_id and session.role_owners:
         current_role = next((r for r, uid in session.role_owners.items() if uid == user_id), None)
         if current_role:
@@ -2133,9 +2112,6 @@ async def get_session_requirements(
                 missing["roles"] = {current_role: roles_missing[current_role]}
             else:
                 missing["roles"] = {}
-
-            if main_role and current_role != main_role:
-                missing["contract"] = []
 
     return {
         "session_id": session.session_id,
@@ -2186,8 +2162,8 @@ async def order_contract(
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    client_id_local = _require_user_id(x_user_id)
-    check_session_access(session, client_id_local, require_participant=True, allow_owner=True)
+    user_id_local = _require_user_id(x_user_id)
+    check_session_access(session, user_id_local, require_participant=True, allow_owner=True)
 
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
@@ -2236,7 +2212,7 @@ async def order_contract(
     download_url_local = f"/sessions/{session_id}/contract/download?final=true"
 
     result = {
-        "client_id": client_id_local,
+        "user_id": user_id_local,
         "download_url": download_url_local,
         "response": {
             "ok": True,

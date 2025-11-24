@@ -9,27 +9,31 @@ from backend.agent.tools.categories import (
 )
 
 
-def test_get_templates_for_category_returns_list(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_get_templates_for_category_returns_list(mock_settings, mock_categories_data):
     tool = GetTemplatesForCategoryTool()
-    res = tool.execute({"category_id": mock_categories_data}, {})
+    res = await tool.execute({"category_id": mock_categories_data}, {})
     assert "templates" in res
     assert res["category_id"] == mock_categories_data
 
 
-def test_get_category_entities_unknown_category_raises():
+@pytest.mark.asyncio
+async def test_get_category_entities_unknown_category_raises():
     tool = GetCategoryEntitiesTool()
     with pytest.raises(ValueError):
-        tool.execute({"category_id": "unknown"}, {})
+        await tool.execute({"category_id": "unknown"}, {})
 
 
-def test_set_category_rejects_unknown_and_custom(monkeypatch):
+@pytest.mark.asyncio
+async def test_set_category_rejects_unknown_and_custom(monkeypatch):
     tool = SetCategoryTool()
     # Unknown category
-    res = tool.execute({"session_id": "s1", "category_id": "unknown"}, {})
+    res = await tool.execute({"session_id": "s1", "category_id": "unknown"}, {})
     assert res["ok"] is False
 
 
-def test_set_category_allows_custom(mock_settings, monkeypatch):
+@pytest.mark.asyncio
+async def test_set_category_allows_custom(mock_settings, monkeypatch):
     # Prepare minimal custom meta
     idx = {
         "categories": [
@@ -48,17 +52,18 @@ def test_set_category_allows_custom(mock_settings, monkeypatch):
     idx_module.store.load()
 
     tool = SetCategoryTool()
-    res = tool.execute({"session_id": "s1", "category_id": "custom"}, {})
+    res = await tool.execute({"session_id": "s1", "category_id": "custom"}, {})
     assert res["ok"] is True
     assert res["category_id"] == "custom"
 
 
-def test_find_category_by_query_ignores_custom(monkeypatch):
+@pytest.mark.asyncio
+async def test_find_category_by_query_ignores_custom(monkeypatch):
     tool = FindCategoryByQueryTool()
     # Monkeypatch find_category_by_query to return mock custom object
     class Cat:
         id = "custom"
         label = "Custom"
     monkeypatch.setattr("backend.agent.tools.categories.find_category_by_query", lambda q: Cat())
-    res = tool.execute({"query": "any"}, {})
+    res = await tool.execute({"query": "any"}, {})
     assert res["category_id"] == "custom"

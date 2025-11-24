@@ -4,7 +4,7 @@ from backend.api.tool_adapter.tool_router import dispatch_tool
 
 
 def test_dispatch_tool_handles_missing():
-    res = dispatch_tool("no_such_tool", "{}", client_id=None)
+    res = dispatch_tool("no_such_tool", "{}", user_id=None)
     data = json.loads(res)
     assert "error" in data
 
@@ -34,12 +34,12 @@ def test_dispatch_tool_passes_context(monkeypatch):
         "dummy",
         '{"foo": "bar"}',
         tags={"[T1]": "RAW"},
-        client_id="user1",
+        user_id="user1",
     )
     data = json.loads(res)
     assert data["ok"] is True
     assert recorded["args"]["foo"] == "bar"
     ctx = recorded["context"]
-    assert ctx["client_id"] == "user1"
+    assert ctx["user_id"] == "user1"
     assert ctx["pii_tags"] == {"[T1]": "RAW"}
     assert ctx["tags"] == {"[T1]": "RAW"}

@@ -32,9 +32,7 @@ logger = get_logger(__name__)
 
 def _get_main_role(category_id: str | None) -> str | None:
     """
-    Визначає головну роль для редагування умов договору з метаданих категорії.
-    - Якщо в meta є main_role/primary_role — використовуємо його.
-    - Інакше беремо першу роль зі списку roles.
+    UI helper to pick the first role from metadata order.
     """
     if not category_id:
         return None
@@ -45,9 +43,6 @@ def _get_main_role(category_id: str | None) -> str | None:
         if not cat:
             return None
         meta = _load_meta(cat)
-        main_role = meta.get("main_role") or meta.get("primary_role")
-        if main_role:
-            return str(main_role)
         roles = meta.get("roles") or {}
         for role_key in roles.keys():
             return role_key
@@ -194,7 +189,7 @@ class SetPartyContextTool(BaseTool):
 
         # Validate person_type against category metadata
         from backend.domain.categories.index import store as category_store, _load_meta
-        user_id = context.get("user_id") or context.get("client_id") or args.get("user_id")
+        user_id = context.get("user_id") or args.get("user_id")
         if not user_id:
             return {"ok": False, "error": "Необхідний заголовок X-User-ID.", "status_code": 401}
 
@@ -253,7 +248,7 @@ class SetPartyContextTool(BaseTool):
                     "ok": True,
                     "role": role,
                     "person_type": person_type,
-                    "client_id": user_id,
+                    "user_id": user_id,
                     "filling_mode": session.filling_mode,
                 }
         except SessionNotFoundError:
@@ -401,7 +396,7 @@ class UpsertFieldTool(BaseTool):
 
         async with atransactional_session(session_id) as session:
             # Access Control Check
-            user_id = context.get("user_id") or context.get("client_id")
+            user_id = context.get("user_id") or args.get("user_id")
 
             if not user_id:
                 return {"ok": False, "error": "Необхідний заголовок X-User-ID."}
@@ -423,19 +418,15 @@ class UpsertFieldTool(BaseTool):
                             "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
                         }
 
-            # Normalize context so downstream history uses the declared user_id
-            normalized_context = dict(context)
-            normalized_context["client_id"] = user_id
-
             from backend.domain.services.session import update_session_field
-            
+
             ok, error, fs = update_session_field(
                 session=session,
                 field=field,
                 value=real_value,
                 role=role_arg,
                 tags=tags, # Pass tags for history tracking
-                context=normalized_context,
+                context={**context, "user_id": user_id},
             )
 
             if not ok:
@@ -570,14 +561,14 @@ class SetFillingModeTool(BaseTool):
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         mode = args["mode"]
-        client_id = context.get("user_id") or context.get("client_id")
+        user_id = context.get("user_id")
 
         async with atransactional_session(session_id) as session:
             # Access check
             if session.role_owners:
-                if not client_id:
+                if not user_id:
                     return {"ok": False, "error": "Необхідна авторизація для зміни режиму."}
-                if client_id not in session.role_owners.values():
+                if user_id not in session.role_owners.values():
                     return {"ok": False, "error": "Ви не є учасником цієї сесії."}
 
             session.filling_mode = mode
@@ -668,7 +659,7 @@ class SignContractTool(BaseTool):
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
         role_arg = args.get("role")
-        user_id = context.get("user_id") or context.get("client_id")
+        user_id = context.get("user_id")
 
         async with atransactional_session(session_id) as session:
             # Determine role
@@ -715,7 +706,7 @@ class SignContractTool(BaseTool):
             session.sign_history.append(
                 {
                     "timestamp": datetime.utcnow().isoformat() + "Z",
-                    "client_id": user_id,
+                    "user_id": user_id,
                     "roles": [role],
                     "state": session.state.value,
                 }

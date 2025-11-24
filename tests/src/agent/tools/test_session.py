@@ -18,9 +18,10 @@ def session_with_category(mock_settings, mock_categories_data):
     save_session(s)
     return session_id
 
-def test_set_party_context(session_with_category):
+@pytest.mark.asyncio
+async def test_set_party_context(session_with_category):
     tool = SetPartyContextTool()
-    res = tool.execute({
+    res = await tool.execute({
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
@@ -34,16 +35,17 @@ def test_set_party_context(session_with_category):
     assert s.person_type == "individual"
     assert s.party_types["lessor"] == "individual"
 
-def test_upsert_field_party(session_with_category):
+@pytest.mark.asyncio
+async def test_upsert_field_party(session_with_category):
     # First set context
-    SetPartyContextTool().execute({
+    await SetPartyContextTool().execute({
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
     }, {"user_id": "tool_user"})
-    
+
     tool = UpsertFieldTool()
-    res = tool.execute({
+    res = await tool.execute({
         "session_id": session_with_category,
         "field": "name",
         "value": "John Doe"
@@ -56,9 +58,10 @@ def test_upsert_field_party(session_with_category):
     assert s.party_fields["lessor"]["name"].status == "ok"
     assert s.all_data["lessor.name"]["current"] == "John Doe"
 
-def test_upsert_field_contract(session_with_category):
+@pytest.mark.asyncio
+async def test_upsert_field_contract(session_with_category):
     # "cf1" is a contract field in mock_categories_data
-    SetPartyContextTool().execute(
+    await SetPartyContextTool().execute(
         {
             "session_id": session_with_category,
             "role": "lessor",
@@ -67,7 +70,7 @@ def test_upsert_field_contract(session_with_category):
         {"user_id": "tool_user"},
     )
     tool = UpsertFieldTool()
-    res = tool.execute({
+    res = await tool.execute({
         "session_id": session_with_category,
         "field": "cf1",
         "value": "Contract Value"
@@ -79,23 +82,25 @@ def test_upsert_field_contract(session_with_category):
     assert s.contract_fields["cf1"].status == "ok"
     assert s.all_data["cf1"]["current"] == "Contract Value"
 
-def test_get_party_fields(session_with_category):
-    SetPartyContextTool().execute({
+@pytest.mark.asyncio
+async def test_get_party_fields(session_with_category):
+    await SetPartyContextTool().execute({
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
     }, {"user_id": "tool_user"})
-    
+
     tool = GetPartyFieldsForSessionTool()
-    res = tool.execute({"session_id": session_with_category}, {})
+    res = await tool.execute({"session_id": session_with_category}, {})
     
     assert res["ok"] is True
     assert len(res["fields"]) == 1
     assert res["fields"][0]["field"] == "name"
 
-def test_get_session_summary(session_with_category):
+@pytest.mark.asyncio
+async def test_get_session_summary(session_with_category):
     tool = GetSessionSummaryTool()
-    res = tool.execute({"session_id": session_with_category}, {})
+    res = await tool.execute({"session_id": session_with_category}, {})
     
     assert res["session_id"] == session_with_category
     assert "party_fields" in res

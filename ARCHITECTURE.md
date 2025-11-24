@@ -92,7 +92,7 @@ class Session:
     role: Optional[str]
     person_type: Optional[str]
     party_types: Dict[str, str]      # role -> person_type
-    party_users: Dict[str, str]      # role -> client_id
+    party_users: Dict[str, str]      # role -> user_id
     
     # Дані полів
     party_fields: Dict[str, Dict[str, FieldState]]  # role -> field -> state
@@ -135,7 +135,7 @@ async def aget_or_create_session(session_id: str) -> Session
 async def aload_session(session_id: str) -> Session
 async def asave_session(session: Session) -> None
 async def atransactional_session(session_id: str) -> AsyncContextManager[Session]
-async def alist_user_sessions(client_id: str) -> List[Session]
+async def alist_user_sessions(user_id: str) -> List[Session]
 ```
 
 #### 4. **AI Agent System** (`backend/agent/`)
@@ -239,7 +239,7 @@ const [fieldErrors, setFieldErrors] = useState({});
 // SSE синхронізація
 useEffect(() => {
     const eventSource = new EventSource(
-        `/sessions/${sessionId}/stream?client_id=${clientId}`
+        `/sessions/${sessionId}/stream?user_id=${userId}`
     );
     
     eventSource.onmessage = (event) => {
@@ -363,7 +363,7 @@ flowchart LR
 ```python
 def check_session_access(
     session: Session,
-    client_id: str,
+    user_id: str,
     require_participant: bool = False
 ):
     # Check if session is full (all roles taken)
@@ -371,7 +371,7 @@ def check_session_access(
     
     if is_full or require_participant:
         # Only participants can access
-        if client_id not in session.party_users.values():
+        if user_id not in session.party_users.values():
             raise HTTPException(403, "Not a participant")
 ```
 
@@ -451,7 +451,7 @@ logger.info(
     "session_update",
     session_id=session_id,
     field=field_name,
-    client_id=client_id,
+    user_id=user_id,
     duration_ms=elapsed
 )
 

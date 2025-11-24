@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from backend.api.http.server import app
 from backend.infra.persistence.store import get_or_create_session, load_session, save_session
 from backend.domain.sessions.models import SessionState, FieldState
-from backend.agent.tools.session import SetPartyContextTool
+from backend.agent.tools.session import SetPartyContextTool, UpsertFieldTool
 from backend.shared.enums import FillingMode
 
 client = TestClient(app)
@@ -18,6 +18,26 @@ def _bootstrap_session(cat_id: str, template_id: str = "t1"):
     s.template_id = template_id
     s.party_types = {"lessor": "individual", "lessee": "individual"}
     s.state = SessionState.TEMPLATE_SELECTED
+    s.role_owners = {}
+    s.party_users = {}
+    s.signatures = {}
+    s.history = []
+    s.all_data = {}
+    save_session(s)
+    return session_id
+
+
+def _fresh_session(session_id: str, cat_id: str, template_id: str = "t1") -> str:
+    s = get_or_create_session(session_id)
+    s.category_id = cat_id
+    s.template_id = template_id
+    s.party_types = {"lessor": "individual", "lessee": "individual"}
+    s.state = SessionState.TEMPLATE_SELECTED
+    s.role_owners = {}
+    s.party_users = {}
+    s.signatures = {}
+    s.history = []
+    s.all_data = {}
     save_session(s)
     return session_id
 
@@ -144,23 +164,24 @@ def test_download_forbidden_until_signed(mock_settings, mock_categories_data, mo
     assert resp.status_code in (200, 404)  # 404 allowed if file missing
 
 
-def test_set_party_context_requires_category_and_allowed_type(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+async def test_set_party_context_requires_category_and_allowed_type(mock_settings, mock_categories_data):
     tool = SetPartyContextTool()
     session_id = "ctx_access_test"
     s = get_or_create_session(session_id)
     save_session(s)  # no category
-    res = tool.execute({"session_id": session_id, "role": "lessor", "person_type": "individual"}, {})
+    res = await tool.execute({"session_id": session_id, "role": "lessor", "person_type": "individual"}, {})
     assert res["ok"] is False
 
     s = load_session(session_id)
     s.category_id = mock_categories_data
     save_session(s)
     # Disallowed type
-    res = tool.execute({"session_id": session_id, "role": "lessor", "person_type": "fop"}, {})
+    res = await tool.execute({"session_id": session_id, "role": "lessor", "person_type": "fop"}, {})
     assert res["ok"] is False
 
     # Allowed type
-    res = tool.execute({"session_id": session_id, "role": "lessor", "person_type": "individual"}, {"client_id": "user_ctx"})
+    res = await tool.execute({"session_id": session_id, "role": "lessor", "person_type": "individual"}, {"user_id": "user_ctx"})
     assert res["ok"] is True
     s = load_session(session_id)
     assert s.party_users["lessor"] == "user_ctx"
@@ -222,3 +243,63 @@ def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_catego
     assert data["session_id"] == session_id
     assert data["can_build_contract"] is False
     assert data["missing"]["contract"] or data["missing"]["roles"]
+
+
+def test_user_cannot_claim_multiple_roles_even_full(mock_settings, mock_categories_data):
+    session_id = _fresh_session("acl_single_role", mock_categories_data)
+    s = load_session(session_id)
+    s.filling_mode = FillingMode.FULL
+    save_session(s)
+
+    first = client.post(
+        f"/sessions/{session_id}/party-context",
+        headers={"X-User-ID": "user_multi"},
+        json={"role": "lessor", "person_type": "individual"},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/sessions/{session_id}/party-context",
+        headers={"X-User-ID": "user_multi"},
+        json={"role": "lessee", "person_type": "individual"},
+    )
+    assert second.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_creator_full_mode_prefill_blocked_after_claim(mock_settings, mock_categories_data):
+    session_id = _fresh_session("acl_creator_full", mock_categories_data)
+    s = load_session(session_id)
+    s.filling_mode = FillingMode.FULL
+    s.creator_user_id = "creator"
+    save_session(s)
+
+    tool = UpsertFieldTool()
+
+    # Creator can prefill both roles while unclaimed
+    res_owner_side = await tool.execute(
+        {"session_id": session_id, "field": "name", "value": "Owner", "role": "lessor"},
+        {"user_id": "creator"},
+    )
+    assert res_owner_side["ok"] is True
+
+    res_other_side = await tool.execute(
+        {"session_id": session_id, "field": "name", "value": "Counterparty", "role": "lessee"},
+        {"user_id": "creator"},
+    )
+    assert res_other_side["ok"] is True
+
+    # Another user claims the second role
+    claim_resp = client.post(
+        f"/sessions/{session_id}/party-context",
+        headers={"X-User-ID": "joiner"},
+        json={"role": "lessee", "person_type": "individual"},
+    )
+    assert claim_resp.status_code == 200
+
+    # Creator cannot edit the claimed side anymore
+    blocked = await tool.execute(
+        {"session_id": session_id, "field": "name", "value": "Changed", "role": "lessee"},
+        {"user_id": "creator"},
+    )
+    assert blocked["ok"] is False

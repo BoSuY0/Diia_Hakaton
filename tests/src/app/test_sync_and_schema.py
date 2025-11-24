@@ -51,7 +51,8 @@ def test_sync_template_must_match_category(mock_settings):
     assert resp.status_code == 400
 
 
-def test_sync_partial_and_ready(mock_settings):
+@pytest.mark.asyncio
+async def test_sync_partial_and_ready(mock_settings):
     _write_category(mock_settings, "cat_a", "templ_a")
     session_id = "sync_ready_flow"
 
@@ -72,9 +73,9 @@ def test_sync_partial_and_ready(mock_settings):
     # Fill contract field via tool to reach ready
     tool = UpsertFieldTool()
     session_loaded = load_session(session_id)
-    session_loaded.role_owners = {"lessor": "u1"}
+    session_loaded.role_owners = {"lessor": "sync_user"}
     save_session(session_loaded)
-    tool.execute({"session_id": session_id, "field": "cf1", "value": "Val"}, {"client_id": "u1"})
+    await tool.execute({"session_id": session_id, "field": "cf1", "value": "Val"}, {"user_id": "sync_user"})
 
     resp2 = client.post(
         f"/sessions/{session_id}/sync",

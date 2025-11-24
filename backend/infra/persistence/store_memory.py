@@ -75,6 +75,8 @@ def _remove_session(session_id: str) -> None:
 def _update_indexes(session: Session) -> None:
     ts = session.updated_at.timestamp()
     new_users = {uid for uid in (session.role_owners or {}).values() if uid}
+    if session.creator_user_id:
+        new_users.add(session.creator_user_id)
     prev_users = _session_users.get(session.session_id, set())
 
     removed = prev_users - new_users
@@ -136,12 +138,12 @@ def transactional_session(session_id: str) -> Generator[Session, None, None]:
         save_session(session)
 
 
-def list_user_sessions(client_id: str) -> list[Session]:
-    if not client_id:
+def list_user_sessions(user_id: str) -> list[Session]:
+    if not user_id:
         return []
 
     with _global_lock:
-        idx = _user_index.get(client_id, {})
+        idx = _user_index.get(user_id, {})
         session_ids = sorted(idx.keys(), key=lambda sid: idx[sid], reverse=True)
 
     sessions: list[Session] = []
@@ -152,7 +154,7 @@ def list_user_sessions(client_id: str) -> list[Session]:
         except SessionNotFoundError:
             stale_ids.append(sid)
             continue
-        if client_id not in (s.role_owners or {}).values():
+        if user_id not in (s.role_owners or {}).values() and user_id != s.creator_user_id:
             stale_ids.append(sid)
             continue
         sessions.append(s)
@@ -160,10 +162,10 @@ def list_user_sessions(client_id: str) -> list[Session]:
     if stale_ids:
         with _global_lock:
             for sid in stale_ids:
-                if client_id in _user_index:
-                    _user_index[client_id].pop(sid, None)
-            if client_id in _user_index and not _user_index[client_id]:
-                _user_index.pop(client_id, None)
+                if user_id in _user_index:
+                    _user_index[user_id].pop(sid, None)
+            if user_id in _user_index and not _user_index[user_id]:
+                _user_index.pop(user_id, None)
 
     return sessions
 
@@ -225,12 +227,12 @@ async def atransactional_session(session_id: str):
         await asave_session(session)
 
 
-async def alist_user_sessions(client_id: str) -> list[Session]:
-    if not client_id:
+async def alist_user_sessions(user_id: str) -> list[Session]:
+    if not user_id:
         return []
 
     async with _async_global_lock:
-        idx = _user_index.get(client_id, {})
+        idx = _user_index.get(user_id, {})
         session_ids = sorted(idx.keys(), key=lambda sid: idx[sid], reverse=True)
 
     sessions: list[Session] = []
@@ -241,7 +243,7 @@ async def alist_user_sessions(client_id: str) -> list[Session]:
         except SessionNotFoundError:
             stale_ids.append(sid)
             continue
-        if client_id not in (s.role_owners or {}).values():
+        if user_id not in (s.role_owners or {}).values() and user_id != s.creator_user_id:
             stale_ids.append(sid)
             continue
         sessions.append(s)
@@ -249,9 +251,9 @@ async def alist_user_sessions(client_id: str) -> list[Session]:
     if stale_ids:
         async with _async_global_lock:
             for sid in stale_ids:
-                if client_id in _user_index:
-                    _user_index[client_id].pop(sid, None)
-            if client_id in _user_index and not _user_index[client_id]:
-                _user_index.pop(client_id, None)
+                if user_id in _user_index:
+                    _user_index[user_id].pop(sid, None)
+            if user_id in _user_index and not _user_index[user_id]:
+                _user_index.pop(user_id, None)
 
     return sessions

@@ -109,13 +109,13 @@ def transactional_session(session_id: str) -> Generator[Session, None, None]:
     return _Ctx()
 
 
-def list_user_sessions(client_id: str) -> list[Session]:
+def list_user_sessions(user_id: str) -> list[Session]:
     if _redis_allowed():
         try:
-            return _run(redis_alist_user_sessions(client_id))
+            return _run(redis_alist_user_sessions(user_id))
         except Exception as exc:
             logger.error("Redis list_user_sessions failed, fallback to memory: %s", exc)
-    return memory_list_user_sessions(client_id)
+    return memory_list_user_sessions(user_id)
 
 
 async def aget_or_create_session(session_id: str, user_id: Optional[str] = None) -> Session:
@@ -164,13 +164,13 @@ async def atransactional_session(session_id: str):
         yield session
 
 
-async def alist_user_sessions(client_id: str) -> list[Session]:
+async def alist_user_sessions(user_id: str) -> list[Session]:
     if _redis_allowed():
         try:
-            return await redis_alist_user_sessions(client_id)
+            return await redis_alist_user_sessions(user_id)
         except Exception as exc:
             logger.error("Redis async list_user_sessions failed, fallback to memory: %s", exc)
-    return await memory_alist_user_sessions(client_id)
+    return await memory_alist_user_sessions(user_id)
 
 
 async def ainit_store() -> None:

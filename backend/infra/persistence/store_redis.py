@@ -43,11 +43,13 @@ async def save_session(session: Session) -> None:
     ttl_seconds = max(ttl_hours_for_session(session) * 3600, 1)
     await redis.set(_session_key(session.session_id), payload, ex=ttl_seconds)
 
-    role_owners = session.role_owners or {}
-    if role_owners:
+    participants = set((session.role_owners or {}).values())
+    if session.creator_user_id:
+        participants.add(session.creator_user_id)
+    if participants:
         ts = session.updated_at.timestamp()
         mapping = {session.session_id: ts}
-        for uid in role_owners.values():
+        for uid in participants:
             if uid:
                 await redis.zadd(_user_index_key(uid), mapping)
 
@@ -107,12 +109,12 @@ async def transactional_session(
             pass
 
 
-async def list_user_sessions(client_id: str) -> list[Session]:
-    if not client_id:
+async def list_user_sessions(user_id: str) -> list[Session]:
+    if not user_id:
         return []
 
     redis = await get_redis()
-    key = _user_index_key(client_id)
+    key = _user_index_key(user_id)
     session_ids = await redis.zrevrange(key, 0, -1)
     sessions: list[Session] = []
     stale_ids: list[str] = []
@@ -124,7 +126,7 @@ async def list_user_sessions(client_id: str) -> list[Session]:
             stale_ids.append(session_id)
             continue
 
-        if client_id not in (session.role_owners or {}).values():
+        if user_id not in (session.role_owners or {}).values() and user_id != session.creator_user_id:
             stale_ids.append(session_id)
             continue
 

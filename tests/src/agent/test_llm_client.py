@@ -23,7 +23,8 @@ def test_ensure_api_key_sets_anthropic(monkeypatch):
     assert os.getenv("ANTHROPIC_API_KEY") == "anthro_key"
 
 
-def test_chat_with_tools_filters_orphan_tool(monkeypatch):
+@pytest.mark.asyncio
+async def test_chat_with_tools_filters_orphan_tool(monkeypatch):
     monkeypatch.setattr(settings, "llm_api_key", "test_key")
     monkeypatch.setattr(settings, "llm_model", "gpt-4")
 
@@ -33,7 +34,14 @@ def test_chat_with_tools_filters_orphan_tool(monkeypatch):
         captured["messages"] = kwargs["messages"]
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    monkeypatch.setattr(llm_client, "litellm", type("obj", (), {"completion": staticmethod(fake_completion)}))
+    async def fake_acompletion(**kwargs):
+        return fake_completion(**kwargs)
+
+    monkeypatch.setattr(
+        llm_client,
+        "litellm",
+        type("obj", (), {"completion": staticmethod(fake_completion), "acompletion": staticmethod(fake_acompletion)}),
+    )
 
     msgs = [
         {"role": "user", "content": "hi"},
@@ -41,7 +49,7 @@ def test_chat_with_tools_filters_orphan_tool(monkeypatch):
         {"role": "tool", "tool_call_id": "orphan", "content": "drop"},
         {"role": "tool", "tool_call_id": "call1", "content": "ok"},
     ]
-    llm_client.chat_with_tools(msgs, tools=[])
+    await llm_client.chat_with_tools_async(msgs, tools=[])
     sent_roles = [m["role"] for m in captured["messages"]]
     # Only one tool response should remain
     assert sent_roles.count("tool") == 1
