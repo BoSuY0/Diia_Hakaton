@@ -2,30 +2,21 @@
 import json
 import os
 import sys
-from unittest.mock import patch, MagicMock
-
-from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from backend.api.http.server import app  # pylint: disable=wrong-import-position
 from backend.api.http.state import conversation_store  # pylint: disable=wrong-import-position
 from backend.infra.persistence.store import load_session, save_session  # pylint: disable=wrong-import-position
+from tests.test_utils import (  # pylint: disable=wrong-import-position
+    setup_mock_chat,
+    create_mock_chat_response,
+)
 
-# Mock chat_with_tools to avoid real LLM calls
-patcher = patch("backend.api.http.server.chat_with_tools")
-mock_chat = patcher.start()
-
-# Setup mock return value
-mock_response = MagicMock()
-mock_response.choices = [MagicMock()]
-mock_response.choices[0].message.role = "assistant"
-mock_response.choices[0].message.content = "Mock response"
-mock_response.choices[0].message.tool_calls = []
+patcher, mock_chat, client = setup_mock_chat()
+mock_response = create_mock_chat_response()
 mock_chat.return_value = mock_response
-
-client = TestClient(app)
 USER_ID = "plan_user"
 
 def test_pii_persistence() -> None:

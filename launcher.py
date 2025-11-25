@@ -1,9 +1,6 @@
 """Application launcher for API server and CLI chat."""
 from __future__ import annotations
 
-from dotenv import load_dotenv
-load_dotenv()
-
 import argparse
 import asyncio
 import os
@@ -12,10 +9,13 @@ import threading
 from typing import Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
 import uvicorn
 
 import backend.shared.logging as common_logging
 from backend.shared.logging import get_logger, setup_logging
+
+load_dotenv()
 
 
 logger = get_logger(__name__)
