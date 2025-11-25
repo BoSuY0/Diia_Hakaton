@@ -27,8 +27,12 @@ def test_claim_session_role_blocks_second_role_in_partial(mock_categories_data):
 
 
 @pytest.mark.usefixtures("mock_settings")
-def test_claim_session_role_allows_second_role_in_full_mode(mock_categories_data):
-    """Test that user cannot claim second role even in full mode."""
+def test_claim_session_role_blocks_second_role_even_in_full_mode(mock_categories_data):
+    """Test that user cannot claim second role even in full mode.
+    
+    In full mode, user can EDIT fields for other roles via can_edit_party_field,
+    but cannot OWN multiple roles.
+    """
     s = _session(mock_categories_data)
     s.filling_mode = "full"
     s.role_owners = {"lessor": "user1"}

@@ -557,6 +557,14 @@ function App() {
       await fetchSchema(sessionId);
     } catch (e) {
       console.error("Failed to change party type", e);
+      const detail = e.response?.data?.detail;
+      const errorMsg = detail 
+        ? (typeof detail === 'string' ? detail : detail.message || detail.error || JSON.stringify(detail))
+        : "Не вдалося змінити тип особи. Спробуйте оновити сторінку.";
+      alert(`Помилка: ${errorMsg}`);
+      // Refresh schema to reset the select to server state
+      await fetchSchema(sessionId);
+    } finally {
       setIsLoading(false);
     }
   };

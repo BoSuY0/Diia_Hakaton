@@ -233,12 +233,34 @@ class SetPartyContextTool(BaseTool):
                 from backend.domain.services.session import (  # pylint: disable=import-outside-toplevel
                     set_party_type, claim_session_role,
                 )
-                try:
-                    claim_session_role(session, role, user_id)
-                except PermissionError as exc:
-                    return {"ok": False, "error": str(exc), "status_code": 403}
-                except ValueError as exc:
-                    return {"ok": False, "error": str(exc), "status_code": 400}
+                
+                # Determine if we need to claim the role or just set person_type
+                current_owner = (session.role_owners or {}).get(role)
+                is_full_mode = session.filling_mode == "full"
+                is_creator = session.creator_user_id == user_id
+                
+                if current_owner == user_id:
+                    # User already owns this role - just update person_type
+                    pass
+                elif current_owner and current_owner != user_id:
+                    # Role is owned by someone else - deny
+                    return {
+                        "ok": False,
+                        "error": f"Роль '{role}' вже зайнята іншим користувачем.",
+                        "status_code": 403,
+                    }
+                elif is_full_mode and is_creator:
+                    # Full mode: creator can set person_type for unclaimed roles without claiming
+                    # This allows filling data for both sides without owning both roles
+                    pass
+                else:
+                    # Need to claim the role
+                    try:
+                        claim_session_role(session, role, user_id)
+                    except PermissionError as exc:
+                        return {"ok": False, "error": str(exc), "status_code": 403}
+                    except ValueError as exc:
+                        return {"ok": False, "error": str(exc), "status_code": 400}
 
                 # Set person type
                 set_party_type(session, role, person_type)

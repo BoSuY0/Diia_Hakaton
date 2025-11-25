@@ -449,14 +449,14 @@ def claim_session_role(session: Session, role: str, user_id: str) -> None:
     if role not in roles_meta:
         raise ValueError(f"Role '{role}' does not exist in category '{session.category_id}'.")
 
-    # У режимі "full" один користувач може володіти кількома ролями
-    is_full_mode = getattr(session, "filling_mode", "partial") == "full"
-
+    # Один користувач може володіти лише однією роллю в сесії.
+    # В режимі "full" він може РЕДАГУВАТИ дані інших ролей (через can_edit_party_field),
+    # але не може ВОЛОДІТИ кількома ролями.
     for existing_role, uid in (session.role_owners or {}).items():
         if uid == user_id and existing_role == role:
             # Already owns this role; nothing to change.
             return
-        if uid == user_id and existing_role != role and not is_full_mode:
+        if uid == user_id and existing_role != role:
             logger.warning(
                 "User %s already owns role %s in session %s",
                 user_id, existing_role, session.session_id,
