@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -264,6 +265,19 @@ async def logging_middleware(request: Request, call_next):
 
 def _require_user_id(x_user_id: Optional[str], authorization: Optional[str] = None) -> str:
     return resolve_user_id(x_user_id, authorization)
+
+
+# Session ID validation: alphanumeric, hyphens, underscores, 3-64 chars
+_SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{3,64}$")
+
+
+def _validate_session_id(session_id: str) -> None:
+    """Validate session_id format to prevent injection attacks."""
+    if not session_id or not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid session_id format. Must be 3-64 alphanumeric characters, hyphens, or underscores."
+        )
 
 
 class ChatRequest(BaseModel):
@@ -970,16 +984,28 @@ def format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
 
 
 @app.get("/healthz")
-async def healthz() -> Dict[str, Any]:
+async def healthz() -> Dict[str, str]:
     """
-    Простіший health-check сервера.
+    Basic health-check endpoint (public).
+    Returns minimal info to avoid exposing infrastructure details.
+    """
+    return {"status": "ok"}
 
-    Повертає статус сервера та ознаку наявності залежності для роботи з DOCX.
+
+@app.get("/healthz/detailed")
+async def healthz_detailed(
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> Dict[str, Any]:
     """
+    Detailed health-check (requires authentication).
+    Returns infrastructure status for debugging.
+    """
+    # Require authentication for detailed health info
+    _require_user_id(x_user_id, authorization)
+
     try:
         from docx import Document  # type: ignore  # pylint: disable=import-outside-toplevel
-
-        # Перевіряємо, що можна створити порожній документ
         Document()
         docx_ok = True
     except (ImportError, OSError):
@@ -1764,6 +1790,32 @@ async def chat(
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
 
+def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
+    """Format session list for API response (DRY helper)."""
+    results = []
+    for s in sessions:
+        title = s.template_id
+        if s.category_id:
+            try:
+                templates = list_templates(s.category_id)
+                for t in templates:
+                    if t.id == s.template_id:
+                        title = t.name
+                        break
+            except (KeyError, ValueError, AttributeError):
+                pass
+
+        results.append({
+            "session_id": s.session_id,
+            "template_id": s.template_id,
+            "title": title,
+            "updated_at": s.updated_at,
+            "state": s.state.value,
+            "is_signed": s.is_fully_signed
+        })
+    return results
+
+
 @app.get("/my-sessions")
 async def get_my_sessions(
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
@@ -1775,58 +1827,34 @@ async def get_my_sessions(
         return []
 
     sessions = await alist_user_sessions(user_id)
-    results = []
-    for s in sessions:
-        title = s.template_id
-        if s.category_id:
-            try:
-                templates = list_templates(s.category_id)
-                for t in templates:
-                    if t.id == s.template_id:
-                        title = t.name
-                        break
-            except (KeyError, ValueError, AttributeError):
-                pass
-
-        results.append({
-            "session_id": s.session_id,
-            "template_id": s.template_id,
-            "title": title,
-            "updated_at": s.updated_at,
-            "state": s.state.value,
-            "is_signed": s.is_fully_signed
-        })
-    return results
+    return _format_session_list(sessions)
 
 
 @app.get("/users/{user_id}/sessions")
-async def get_user_sessions(user_id: str):
+async def get_user_sessions(
+    user_id: str,
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
     """
-Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (role_owners).
+    Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (role_owners).
+    Вимагає авторизації: тільки сам користувач може бачити свої сесії.
     """
-    sessions = await alist_user_sessions(user_id)
-    results = []
-    for s in sessions:
-        title = s.template_id
-        if s.category_id:
-            try:
-                templates = list_templates(s.category_id)
-                for t in templates:
-                    if t.id == s.template_id:
-                        title = t.name
-                        break
-            except (KeyError, ValueError, AttributeError):
-                pass
+    # Security: verify caller is the same user (prevent IDOR)
+    caller_id = _require_user_id(x_user_id, authorization)
+    if caller_id != user_id:
+        security_logger.warning(
+            "idor_attempt caller=%s target=%s endpoint=/users/{user_id}/sessions",
+            caller_id,
+            user_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="You can only access your own sessions."
+        )
 
-        results.append({
-            "session_id": s.session_id,
-            "template_id": s.template_id,
-            "title": title,
-            "updated_at": s.updated_at,
-            "state": s.state.value,
-            "is_signed": s.is_fully_signed
-        })
-    return results
+    sessions = await alist_user_sessions(user_id)
+    return _format_session_list(sessions)
 
 
 @app.get("/sessions/{session_id}/contract")

@@ -110,8 +110,11 @@ async def transactional_session(
     finally:
         try:
             val = await redis.get(lock_key)
-            if val == token:
-                await redis.delete(lock_key)
+            # Redis returns bytes, token is str - decode for comparison
+            if val is not None:
+                val_str = val.decode("utf-8") if isinstance(val, bytes) else val
+                if val_str == token:
+                    await redis.delete(lock_key)
         except (ConnectionError, TimeoutError, OSError):
             pass  # Lock cleanup is best-effort
 
@@ -127,7 +130,9 @@ async def list_user_sessions(user_id: str) -> list[Session]:
     sessions: list[Session] = []
     stale_ids: list[str] = []
 
-    for session_id in session_ids:
+    for raw_session_id in session_ids:
+        # Redis may return bytes, decode if needed
+        session_id = raw_session_id.decode("utf-8") if isinstance(raw_session_id, bytes) else raw_session_id
         try:
             session = await load_session(session_id)
         except SessionNotFoundError:

@@ -95,9 +95,24 @@ class Session:
     def party_users(self) -> Dict[str, str]:
         """
         Backward-compatible alias for role owners mapping.
+        
+        .. deprecated:: 1.0
+            Use :attr:`role_owners` instead. This alias will be removed in a future version.
         """
+        import warnings
+        warnings.warn(
+            "party_users is deprecated, use role_owners instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.role_owners
 
     @party_users.setter
     def party_users(self, value: Dict[str, str]) -> None:
+        import warnings
+        warnings.warn(
+            "party_users is deprecated, use role_owners instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.role_owners = value or {}

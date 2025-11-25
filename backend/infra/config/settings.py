@@ -73,8 +73,6 @@ class Settings:
         self.llm_model: str = (
             os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
         )
-        if self.llm_model == "gpt-5-mini-2025-08-7":
-            self.llm_model = "gpt-5-mini-2025-08-07"
         self.llm_base_url: str | None = os.getenv("LLM_BASE_URL")
         self.chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"
         self.llm_wire_format: str = os.getenv("LLM_WIRE_FORMAT", "JSON")
@@ -102,13 +100,20 @@ class Settings:
                 o.strip() for o in cors_env.split(",") if o.strip()
             ]
         else:
+            # Security: No wildcard "*" in defaults - only localhost for dev
             self.cors_origins = [
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
-                "*",
             ]
+        # Warn if wildcard is used with credentials (security risk)
+        if "*" in self.cors_origins:
+            import warnings
+            warnings.warn(
+                "CORS wildcard '*' is insecure. Set specific CORS_ORIGINS in production.",
+                stacklevel=2,
+            )
         self.cors_allow_credentials: bool = "*" not in self.cors_origins
 
     @staticmethod

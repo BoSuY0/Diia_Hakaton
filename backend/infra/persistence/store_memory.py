@@ -21,14 +21,27 @@ try:
 except ImportError:
     _ttl_hours_for_session = None
 
+# In-memory storage structures
 _sessions: dict[str, str] = {}
 _expires_at: dict[str, datetime] = {}
 _session_users: dict[str, set[str]] = {}
 _user_index: dict[str, dict[str, int]] = {}
+
+# Locking: Use threading lock as the single source of truth for both sync and async.
+# Async operations acquire the threading lock briefly (non-blocking data access is fast).
+# This ensures consistency when mixing sync/async calls (e.g., in tests or background tasks).
 _locks: dict[str, threading.RLock] = {}
 _async_locks: dict[str, asyncio.Lock] = {}
 _global_lock = threading.RLock()
-_async_global_lock = asyncio.Lock()
+_async_global_lock: asyncio.Lock | None = None  # Lazily created to avoid event loop issues
+
+
+def _get_async_global_lock() -> asyncio.Lock:
+    """Get or create the async global lock (lazy init to avoid event loop issues)."""
+    global _async_global_lock
+    if _async_global_lock is None:
+        _async_global_lock = asyncio.Lock()
+    return _async_global_lock
 
 
 def _session_ttl_seconds(session) -> int:
@@ -72,9 +85,13 @@ def _evict_if_expired(session_id: str) -> bool:
 
 
 def _remove_session(session_id: str) -> None:
+    """Remove session and all associated resources (including locks)."""
     _sessions.pop(session_id, None)
     _expires_at.pop(session_id, None)
     _session_users.pop(session_id, None)
+    # Cleanup locks to prevent memory leak
+    _locks.pop(session_id, None)
+    _async_locks.pop(session_id, None)
     for idx in _user_index.values():
         idx.pop(session_id, None)
     # Cleanup empty user_index entries
@@ -204,7 +221,7 @@ async def asave_session(session: Session) -> None:
     ttl_seconds = _session_ttl_seconds(session)
     expire_at = session.updated_at + timedelta(seconds=ttl_seconds)
 
-    async with _async_global_lock:
+    async with _get_async_global_lock():
         _sessions[session.session_id] = payload
         _expires_at[session.session_id] = expire_at
         _update_indexes(session)
@@ -217,7 +234,7 @@ async def asave_session(session: Session) -> None:
 
 async def aload_session(session_id: str) -> Session:
     """Load session from in-memory store (async)."""
-    async with _async_global_lock:
+    async with _get_async_global_lock():
         if _evict_if_expired(session_id):
             raise SessionNotFoundError(f"Session '{session_id}' not found")
         payload = _sessions.get(session_id)
@@ -252,7 +269,7 @@ async def alist_user_sessions(user_id: str) -> list[Session]:
     if not user_id:
         return []
 
-    async with _async_global_lock:
+    async with _get_async_global_lock():
         idx = _user_index.get(user_id, {})
         session_ids = sorted(idx.keys(), key=lambda sid: idx[sid], reverse=True)
 
@@ -270,7 +287,7 @@ async def alist_user_sessions(user_id: str) -> list[Session]:
         sessions.append(s)
 
     if stale_ids:
-        async with _async_global_lock:
+        async with _get_async_global_lock():
             for sid in stale_ids:
                 if user_id in _user_index:
                     _user_index[user_id].pop(sid, None)
