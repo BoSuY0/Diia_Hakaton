@@ -1,10 +1,12 @@
+"""Extended tests for fields service."""
 import json
 
 from backend.domain.services.fields import get_required_fields
 from backend.infra.persistence.store import get_or_create_session, save_session
 
 
-def _setup_category(settings, roles=True):
+def _setup_category(settings, roles=True):  # pylint: disable=protected-access
+    """Setup test category metadata."""
     meta = {
         "category_id": "fields_cat",
         "templates": [{"id": "t1", "name": "T1", "file": "f1.docx"}],
@@ -35,6 +37,7 @@ def _setup_category(settings, roles=True):
 
 
 def test_get_required_fields_full_mode(mock_settings):
+    """Test get required fields in full mode."""
     _setup_category(mock_settings)
     s = get_or_create_session("req_full")
     s.category_id = "fields_cat"
@@ -51,6 +54,7 @@ def test_get_required_fields_full_mode(mock_settings):
 
 
 def test_get_required_fields_partial_mode(mock_settings):
+    """Test get required fields in partial mode."""
     _setup_category(mock_settings)
     s = get_or_create_session("req_partial")
     s.category_id = "fields_cat"

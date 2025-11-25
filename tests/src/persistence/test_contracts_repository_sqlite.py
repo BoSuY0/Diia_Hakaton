@@ -1,4 +1,4 @@
-import json
+"""Tests for SQLite contracts repository."""
 from pathlib import Path
 
 from backend.infra.persistence.contracts_repository import SQLiteContractsRepository
@@ -6,10 +6,12 @@ from backend.domain.sessions.models import Session, SessionState
 
 
 def _session(session_id: str = "s1") -> Session:
+    """Create a test session."""
     return Session(session_id=session_id, creator_user_id="owner", state=SessionState.BUILT)
 
 
 def test_sqlite_contracts_repo_roundtrip(tmp_path: Path):
+    """Test SQLite contracts repository roundtrip."""
     db_path = tmp_path / "contracts.db"
     repo = SQLiteContractsRepository(db_path)
 

@@ -1,3 +1,4 @@
+"""Tests for AI required fields."""
 import json
 import sys
 import types
@@ -19,6 +20,7 @@ from backend.domain.services.fields import get_required_fields, validate_session
 
 
 def _write_custom_meta(tmp_root):
+    """Write custom category metadata for testing."""
     meta_dir = tmp_root / "assets" / "meta_data" / "meta_data_categories_documents"
     meta_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,13 +63,15 @@ def _write_custom_meta(tmp_root):
     return index_path
 
 
-def _reload_store(index_path):
+def _reload_store(index_path):  # pylint: disable=protected-access
+    """Reload category store with new index path."""
     categories_index._CATEGORIES_PATH = index_path
     categories_index.store.clear()
     categories_index.store.load()
 
 
-def test_ai_required_fields_are_exposed(mock_settings, tmp_path):
+def test_ai_required_fields_are_exposed(mock_settings, tmp_path):  # pylint: disable=unused-argument
+    """Test AI required fields are exposed."""
     index_path = _write_custom_meta(tmp_path)
     _reload_store(index_path)
 
@@ -79,7 +83,8 @@ def test_ai_required_fields_are_exposed(mock_settings, tmp_path):
     assert all(f.required is False for f in ai_fields.values())
 
 
-def test_ai_required_fields_block_readiness_until_filled(mock_settings, tmp_path):
+def test_ai_required_fields_block_readiness_until_filled(mock_settings, tmp_path):  # noqa: ARG001
+    """Test AI required fields block readiness until filled."""
     index_path = _write_custom_meta(tmp_path)
     _reload_store(index_path)
 

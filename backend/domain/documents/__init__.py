@@ -1,1 +1,1 @@
-
+"""Documents domain package."""

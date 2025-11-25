@@ -1,1 +1,1 @@
-
+"""Templates domain package."""

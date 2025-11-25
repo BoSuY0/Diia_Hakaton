@@ -1,1 +1,1 @@
-
+"""Validation domain package."""
