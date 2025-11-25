@@ -1,18 +1,45 @@
+"""Utility functions for session serialization and deserialization."""
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 import uuid
 
 from backend.domain.sessions.models import FieldState, Session, SessionState
 
 
-def generate_readable_id(prefix: str = "session") -> str:
+def _parse_field_status(raw_status, error: str | None) -> str:
     """
-    Генерує унікальний ID (UUID).
-    Аргумент prefix залишено для сумісності, але ігнорується.
+    Parse field status from various formats to canonical string format.
+    
+    Canonical statuses: "ok", "error", "empty"
+    
+    Handles:
+    - bool: True -> "ok", False -> "error" if error exists, else "empty"
+    - str: returned as-is if valid, defaults to "empty"
     """
+    if isinstance(raw_status, bool):
+        if raw_status:
+            return "ok"
+        return "error" if error else "empty"
+
+    if isinstance(raw_status, str) and raw_status in ("ok", "error", "empty"):
+        return raw_status
+
+    return "empty"
+
+
+def generate_readable_id(prefix: str = "session") -> str:  # noqa: ARG001
+    """
+    Generate a unique session ID (UUID).
+
+    Args:
+        prefix: Ignored, kept for backward compatibility.
+
+    Returns:
+        A UUID string.
+    """
+    del prefix  # unused, kept for API compatibility
     return str(uuid.uuid4())
 
 
@@ -26,18 +53,9 @@ def _from_dict(data: dict) -> Session:
             continue
         role_fields = {}
         for key, value in fields_dict.items():
-            raw_status = value.get("status")
-            if isinstance(raw_status, bool):
-                if raw_status:
-                    status = "ok"
-                else:
-                    status = "error" if value.get("error") else "empty"
-            else:
-                status = value.get("status", "empty")
-            role_fields[key] = FieldState(
-                status=status,
-                error=value.get("error"),
-            )
+            error = value.get("error")
+            status = _parse_field_status(value.get("status"), error)
+            role_fields[key] = FieldState(status=status, error=error)
         party_fields[role] = role_fields
 
     # Підтримка попереднього формату: якщо немає contract_fields, читаємо legacy "fields"
@@ -46,22 +64,21 @@ def _from_dict(data: dict) -> Session:
         raw_contract_fields = data.get("fields") or {}
     contract_fields: dict[str, FieldState] = {}
     for key, value in raw_contract_fields.items():
-        raw_status = value.get("status")
-        if isinstance(raw_status, bool):
-            if raw_status:
-                status = "ok"
-            else:
-                status = "error" if value.get("error") else "empty"
-        else:
-            status = value.get("status", "empty")
-        contract_fields[key] = FieldState(
-            status=status,
-            error=value.get("error"),
-        )
+        error = value.get("error")
+        status = _parse_field_status(value.get("status"), error)
+        contract_fields[key] = FieldState(status=status, error=error)
 
     # Deserialize updated_at
     updated_at_str = data.get("updated_at")
-    updated_at = datetime.fromisoformat(updated_at_str) if updated_at_str else datetime.now()
+    if updated_at_str:
+        try:
+            updated_at = datetime.fromisoformat(updated_at_str)
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            updated_at = datetime.now(timezone.utc)
+    else:
+        updated_at = datetime.now(timezone.utc)
 
     session = Session(
         session_id=data["session_id"],
@@ -90,46 +107,39 @@ def _from_dict(data: dict) -> Session:
     progress = data.get("progress")
     if isinstance(progress, dict):
         session.progress = progress
-    sign_history = data.get("sign_history")
-    if isinstance(sign_history, list):
-        session.sign_history = sign_history
     history = data.get("history")
+    merged_history: list[dict] = []
     if isinstance(history, list):
-        session.history = history
+        merged_history.extend(history)
+
+    legacy_sign_history = data.get("sign_history")
+    if isinstance(legacy_sign_history, list):
+        for evt in legacy_sign_history:
+            if not isinstance(evt, dict):
+                continue
+            ts = evt.get("timestamp") or evt.get("ts")
+            ts = ts or datetime.now(timezone.utc).isoformat()
+            merged_history.append(
+                {
+                    "ts": ts,
+                    "type": "sign",
+                    "user_id": evt.get("user_id"),
+                    "roles": evt.get("roles", []),
+                    "state": evt.get("state"),
+                }
+            )
+
+    if merged_history:
+        session.history = merged_history
     return session
 
 
-def _normalize_field_statuses(data: dict) -> None:
-    """
-    Mutates serialized session data so FieldState.status is stored as bools for readability.
-    """
-    c_fields = data.get("contract_fields") or {}
-    for key, value in c_fields.items():
-        if not isinstance(value, dict):
-            continue
-        raw_status = value.get("status")
-        if isinstance(raw_status, bool):
-            continue
-        status_str = str(raw_status or "empty")
-        error = value.get("error")
-        value["status"] = bool(status_str == "ok" and error is None)
-
-    p_fields = data.get("party_fields") or {}
-    for role, fields_dict in p_fields.items():
-        if not isinstance(fields_dict, dict):
-            continue
-        for key, value in fields_dict.items():
-            if not isinstance(value, dict):
-                continue
-            raw_status = value.get("status")
-            if isinstance(raw_status, bool):
-                continue
-            status_str = str(raw_status or "empty")
-            error = value.get("error")
-            value["status"] = bool(status_str == "ok" and error is None)
+# NOTE: Field statuses are now stored as strings ("ok", "error", "empty")
+# for consistency. Legacy boolean format is still read via _parse_field_status.
 
 
 def session_to_dict(session: Session) -> dict:
+    """Convert a Session object to a dictionary for serialization."""
     data = asdict(session)
     data["creator_user_id"] = session.creator_user_id
     data["role_owners"] = session.role_owners
@@ -138,9 +148,8 @@ def session_to_dict(session: Session) -> dict:
     data["party_types"] = session.party_types
     data["filling_mode"] = session.filling_mode
     data["signatures"] = session.signatures
-    data["sign_history"] = session.sign_history
     data["history"] = session.history
     data["updated_at"] = session.updated_at.isoformat()
     data["state"] = session.state.value
-    _normalize_field_statuses(data)
+    # Field statuses are stored as strings ("ok", "error", "empty")
     return data

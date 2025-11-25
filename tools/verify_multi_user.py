@@ -1,20 +1,22 @@
-import sys
+"""Verification script for multi-user session support."""
 from backend.infra.persistence.store import get_or_create_session, load_session
 from backend.agent.tools.session import SetPartyContextTool, UpsertFieldTool
-from backend.domain.sessions.models import SessionState
 
-def verify_multi_user():
+
+def verify_multi_user() -> None:
+    """Verify multi-user session support with role-based data separation."""
     print("=== Verifying Multi-User Support ===")
-    
+
     session_id = "test_multi_user_session"
-    
+
     # 1. Create Session
     print(f"\n1. Creating session '{session_id}'...")
     session = get_or_create_session(session_id)
-    session.category_id = "lease_real_estate" # Assuming this category exists from previous steps or default
-    session.save_session = lambda: None # Mock save for now? No, we need real save.
+    # Assuming this category exists from previous steps or default
+    session.category_id = "lease_real_estate"
+    session.save_session = lambda: None  # Mock save for now? No, we need real save.
     # We rely on real store
-    from backend.infra.persistence.store import save_session
+    from backend.infra.persistence.store import save_session  # pylint: disable=import-outside-toplevel
     save_session(session)
 
     # Tools
@@ -29,7 +31,7 @@ def verify_multi_user():
         "person_type": "individual"
     }, {})
     print(f"Result: {res}")
-    
+
     # 3. Fill Lessor Name
     print("\n3. Filling Lessor Name -> 'Ivan Lessor'...")
     res = upsert_tool.execute({
@@ -60,10 +62,10 @@ def verify_multi_user():
     # 6. Verify Data Separation
     print("\n6. Verifying Data Separation...")
     session = load_session(session_id)
-    
+
     lessor_name_state = session.party_fields.get("lessor", {}).get("name")
     lessee_name_state = session.party_fields.get("lessee", {}).get("name")
-    
+
     print(f"Lessor Name State: {lessor_name_state}")
     print(f"Lessee Name State: {lessee_name_state}")
 
@@ -81,7 +83,9 @@ def verify_multi_user():
     # 7. Verify Party Types
     print("\n7. Verifying Party Types...")
     print(f"Party Types: {session.party_types}")
-    if session.party_types.get("lessor") == "individual" and session.party_types.get("lessee") == "company":
+    lessor_ok = session.party_types.get("lessor") == "individual"
+    lessee_ok = session.party_types.get("lessee") == "company"
+    if lessor_ok and lessee_ok:
         print("[SUCCESS] Party types stored correctly.")
     else:
         print("[FAILURE] Party types mismatch.")

@@ -15,6 +15,10 @@ load_dotenv(BASE_DIR / ".env")
 
 class Settings:
     def __init__(self) -> None:
+        self.env: str = os.getenv("ENV", "dev").lower()
+        self.is_prod: bool = self.env in {"prod", "production"}
+        self.is_dev: bool = not self.is_prod
+
         # Усі артефакти (meta + документи) лежать під assets/
         self.documents_root: Path = BASE_DIR / "assets"
         # Аліас для сумісності з кодом динамічних шаблонів
@@ -47,7 +51,8 @@ class Settings:
 
         # Сторедж сесій
         self.redis_url: str | None = os.getenv("REDIS_URL")
-        self.session_backend: str = os.getenv("SESSION_BACKEND", "redis").lower()
+        _session_backend_env = os.getenv("SESSION_BACKEND")
+        self.session_backend: str = (_session_backend_env or "redis").lower()
         try:
             self.session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "24"))
         except ValueError:
@@ -94,6 +99,20 @@ class Settings:
         # Зворотна сумісність з попередніми назвами (якщо десь ще використовуються):
         self.openai_api_key: str | None = self.llm_api_key
         self.openai_model: str = self.llm_model
+
+        # Контракти (БД)
+        self.contracts_db_url: str | None = os.getenv("CONTRACTS_DB_URL")
+        # Опційний файловий fallback для контрактів (для міграції/бекупів). За замовчуванням вимкнено.
+        self.contracts_fs_fallback: bool = os.getenv("CONTRACTS_FS_FALLBACK", "false").lower() == "true"
+
+        # Auth
+        self.auth_mode: str = os.getenv("AUTH_MODE", "auto").lower()
+        self.auth_jwt_secret: str | None = os.getenv("AUTH_JWT_SECRET")
+        self.auth_jwt_audience: str | None = os.getenv("AUTH_JWT_AUDIENCE")
+        self.auth_jwt_algorithm: str = os.getenv("AUTH_JWT_ALGO", "HS256")
+        self.auth_jwt_issuer: str | None = os.getenv("AUTH_JWT_ISSUER")
+        # Префікс для внутрішнього user_id (наприклад, diia:<sub>)
+        self.auth_user_prefix: str = os.getenv("AUTH_USER_PREFIX", "diia:")
 
         # CORS (origins для фронтенду)
         _cors_origins_env = os.getenv("CORS_ORIGINS")

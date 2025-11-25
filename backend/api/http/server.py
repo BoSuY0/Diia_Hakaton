@@ -1,19 +1,22 @@
+"""FastAPI HTTP server for the Contract Builder ChatBot."""
 from __future__ import annotations
 
-import json
-from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
+import asyncio
 import inspect
-from datetime import datetime
+import json
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Header, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from backend.agent.tools.registry import tool_registry
 from backend.agent.llm_client import chat_with_tools_async, load_system_prompt
 from backend.api.http.state import Conversation, conversation_store
 from backend.api.tool_adapter.tool_router import (
@@ -33,6 +36,8 @@ from backend.api.tool_adapter.tool_router import (
 
 # Backwards-compatible alias for sync monkeypatches in tests
 tool_build_contract = tool_build_contract_async
+
+# pylint: disable=wrong-import-position
 from backend.shared.errors import SessionNotFoundError
 from backend.shared.logging import get_logger, setup_logging
 from backend.infra.config.settings import settings
@@ -47,23 +52,31 @@ from backend.infra.persistence.store import (
 )
 from backend.domain.sessions.models import Session, SessionState
 from backend.domain.services.fields import collect_missing_fields
+from backend.domain.categories.index import (
+    list_party_fields, list_entities, store as cat_store, load_meta, list_templates,
+)
 from backend.infra.storage.fs import ensure_directories
 from backend.domain.validation.pii_tagger import sanitize_typed
 from backend.shared.async_utils import run_sync, ensure_awaitable
+from backend.shared.auth import resolve_user_id, diia_profile_from_token
+from backend.shared import metrics
+# pylint: enable=wrong-import-position
 
 
 setup_logging()
 logger = get_logger(__name__)
+security_logger = get_logger("security")
 chat_with_tools = chat_with_tools_async  # backward compatibility for existing patches/tests
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):  # noqa: ARG001
+    """Application lifespan context manager."""
     ensure_directories()
     await ainit_store()
-    
-    import asyncio
+
+    # pylint: disable=import-outside-toplevel
     from backend.domain.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
-    
+
     stop_event = asyncio.Event()
 
     async def cleanup_loop():
@@ -77,11 +90,9 @@ async def lifespan(app: FastAPI):
 
             while not stop_event.is_set():
                 try:
-                    # Import stream_manager here to avoid circular/early import issues
-                    # (It is defined in this file but later)
-                    from backend.api.http.server import stream_manager
-                    
-                    active_ids = set(stream_manager.connections.keys())
+                    # Access stream_manager from globals (defined later in this file)
+                    _stream_mgr = globals().get('stream_manager')
+                    active_ids = set(_stream_mgr.connections.keys()) if _stream_mgr else set()
 
                     # Run cleanup in background threads with таймаутами
                     try:
@@ -95,8 +106,8 @@ async def lifespan(app: FastAPI):
                                 asyncio.to_thread(clean_abandoned_sessions, active_ids, 5),
                                 timeout=2.0,
                             )
-                    except Exception as e:
-                        logger.error(f"Abandoned cleanup error/timeout: {e}")
+                    except (asyncio.TimeoutError, OSError) as e:
+                        logger.error("Abandoned cleanup error/timeout: %s", e)
 
                     try:
                         if inspect.iscoroutinefunction(clean_stale_sessions):
@@ -106,12 +117,12 @@ async def lifespan(app: FastAPI):
                                 asyncio.to_thread(clean_stale_sessions),
                                 timeout=2.0,
                             )
-                    except Exception as e:
-                        logger.error(f"Stale cleanup error/timeout: {e}")
-                    
-                except Exception as e:
-                    logger.error(f"Background cleanup error: {e}")
-                
+                    except (asyncio.TimeoutError, OSError) as e:
+                        logger.error("Stale cleanup error/timeout: %s", e)
+
+                except (OSError, RuntimeError) as e:
+                    logger.error("Background cleanup error: %s", e)
+
                 # Wait for 60 seconds or until stop signal
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=60)
@@ -123,22 +134,22 @@ async def lifespan(app: FastAPI):
                     return
         except asyncio.CancelledError:
             logger.info("Cleanup loop cancelled (outer); exiting")
-        except Exception as e:
-            logger.error(f"Cleanup loop stopped with error: {e}")
+        except (OSError, RuntimeError) as e:
+            logger.error("Cleanup loop stopped with error: %s", e)
 
     cleanup_task = None
     if settings.session_backend == "fs":
         cleanup_task = asyncio.create_task(cleanup_loop())
     else:
         logger.info("Filesystem cleanup loop skipped (backend=%s)", settings.session_backend)
-        
+
     logger.info("Server started")
     yield
-    
+
     # Shutdown logic
     logger.info("Shutting down server...")
     stop_event.set()
-    
+
     if cleanup_task:
         try:
             # Give cleanup task a moment to exit gracefully
@@ -152,16 +163,16 @@ async def lifespan(app: FastAPI):
                 pass
         except asyncio.CancelledError:
             logger.info("Cleanup task cancelled during shutdown; exiting quietly")
-        except Exception as e:
-            logger.error(f"Error waiting for cleanup task: {e}")
+        except (OSError, RuntimeError) as e:
+            logger.error("Error waiting for cleanup task: %s", e)
 
     try:
         # Force close all SSE streams
         if 'stream_manager' in globals():
             await asyncio.wait_for(stream_manager.shutdown(), timeout=2.0)
-    except Exception:
+    except (asyncio.TimeoutError, asyncio.CancelledError):
         pass
-        
+
     logger.info("Server shutdown complete")
 
 app = FastAPI(title="Contract Builder ChatBot", lifespan=lifespan)
@@ -179,29 +190,41 @@ app.add_middleware(
 
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
+    """Log HTTP requests with timing and user context."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
     session_id = request.path_params.get("session_id") if hasattr(request, "path_params") else None
     user_id = request.headers.get("X-User-ID")
+    auth_header = request.headers.get("Authorization")
     role = None
+
+    try:
+        resolved_for_logging = resolve_user_id(user_id, auth_header, allow_anonymous=True)
+        if resolved_for_logging:
+            user_id = resolved_for_logging
+    except HTTPException:
+        # For logging we keep raw headers to avoid masking auth issues
+        pass
 
     # Peek into body for additional context
     if request.method in {"POST", "PUT", "PATCH"}:
         try:
             body_bytes = await request.body()
             # Re-attach body for downstream handlers
-            request._body = body_bytes
+            request._body = body_bytes  # noqa: SLF001  # pylint: disable=protected-access
             if body_bytes:
                 try:
                     payload = json.loads(body_bytes.decode("utf-8"))
                     role = payload.get("role")
                     session_id = session_id or payload.get("session_id") or payload.get("sessionId")
-                except Exception:
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
-        except Exception:
+        except (RuntimeError, ConnectionError):
             pass
 
     try:
         response = await call_next(request)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         error_id = str(uuid4())
         logger.exception(
             "request_error error_id=%s method=%s path=%s session_id=%s user_id=%s role=%s",
@@ -220,7 +243,8 @@ async def logging_middleware(request: Request, call_next):
     status = response.status_code
     log_fn = logger.info if status < 400 else logger.warning
     log_fn(
-        "request method=%s path=%s status=%s session_id=%s user_id=%s role=%s",
+        "request id=%s method=%s path=%s status=%s session_id=%s user_id=%s role=%s",
+        request_id,
         request.method,
         request.url.path,
         status,
@@ -228,60 +252,110 @@ async def logging_middleware(request: Request, call_next):
         user_id,
         role,
     )
+    try:
+        metrics.record_request(request.method, request.url.path, status)
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
+    try:
+        response.headers["X-Request-ID"] = request_id
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
     return response
 
 
-def _require_user_id(x_user_id: Optional[str]) -> str:
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
-    return x_user_id
+def _require_user_id(x_user_id: Optional[str], authorization: Optional[str] = None) -> str:
+    return resolve_user_id(x_user_id, authorization)
 
 
 class ChatRequest(BaseModel):
+    """Request model for chat endpoint."""
+
     session_id: str
     message: str
 
 
 class ChatResponse(BaseModel):
+    """Response model for chat endpoint."""
+
     session_id: str
     reply: str
 
 
-
 class FindCategoryRequest(BaseModel):
+    """Request model for category search."""
+
     query: str
 
 
 class CreateSessionRequest(BaseModel):
+    """Request model for session creation."""
+
     session_id: Optional[str] = None
     user_id: Optional[str] = None
 
 
+@app.get("/metrics")
+async def metrics_endpoint() -> Dict[str, Any]:
+    """
+    Прості метрики по запитах (in-memory лічильники).
+    """
+    return {
+        "requests": metrics.snapshot(),
+    }
+
+
+@app.get("/me/profile")
+async def me_profile(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+):
+    """Get current user profile from JWT token."""
+    user_id = resolve_user_id(x_user_id, authorization)
+    token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    profile = diia_profile_from_token(token) if token else {}
+    return {
+        "user_id": user_id,
+        "profile": profile,
+    }
+
+
 class CreateSessionResponse(BaseModel):
+    """Response model for session creation."""
+
     session_id: str
 
 
 class SetCategoryRequest(BaseModel):
+    """Request model for setting session category."""
+
     category_id: str
 
 
-
-
 class UpsertFieldRequest(BaseModel):
+    """Request model for upserting a field value."""
+
     field: str
     value: Any
     role: Optional[str] = None
 
 
 class SetTemplateRequest(BaseModel):
+    """Request model for setting session template."""
+
     template_id: str
 
 
 class BuildContractRequest(BaseModel):
+    """Request model for building a contract."""
+
     template_id: str
 
 
 class SetPartyContextRequest(BaseModel):
+    """Request model for setting party context."""
+
     role: str
     person_type: str
     filling_mode: Optional[str] = None
@@ -339,7 +413,7 @@ PARAM_CANON_BY_ALIAS: Dict[str, str] = {
 
 
 # Які тулли дозволені моделі на кожному етапі життєвого циклу сесії
-# TODO: Move this to a configuration or tool metadata
+# Note: Consider moving this to a configuration or tool metadata in the future
 ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
     "idle": [
         "route_message",
@@ -413,7 +487,7 @@ def _inject_session_id(args_json: str, conv_session_id: str, tool_name: str) -> 
     """
     try:
         raw_args = json.loads(args_json or "{}")
-    except Exception:
+    except (json.JSONDecodeError, TypeError):
         raw_args = {}
 
     # Перекладаємо alias-ключі у канонічні імена параметрів.
@@ -434,7 +508,7 @@ def _canonical_args(args_json: str) -> str:
     """
     try:
         parsed = json.loads(args_json or "{}")
-    except Exception:
+    except (json.JSONDecodeError, TypeError):
         return args_json or "{}"
     try:
         return json.dumps(
@@ -443,11 +517,13 @@ def _canonical_args(args_json: str) -> str:
             sort_keys=True,
             separators=(",", ":"),
         )
-    except Exception:
+    except (TypeError, ValueError):
         return args_json or "{}"
 
 
-def _build_initial_messages(user_message: str, session_id: str) -> List[Dict[str, Any]]:
+def _build_initial_messages(
+    user_message: str, _session_id: str,  # noqa: ARG001
+) -> List[Dict[str, Any]]:
     system_prompt = load_system_prompt()
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -555,7 +631,7 @@ def _t(key: str, lang: str) -> str:
 
 async def _get_effective_state(
     session_id: str,
-    messages: List[Dict[str, Any]],
+    _messages: List[Dict[str, Any]],  # noqa: ARG001 - used indirectly via has_category_tool
     *,
     has_category_tool: bool = False,
 ) -> str:
@@ -567,8 +643,8 @@ async def _get_effective_state(
     """
     try:
         session = await aload_session(session_id)
-    except Exception:
-        # Якщо сесію ще не створено або сталася помилка — вважаємо стан "idle".
+    except SessionNotFoundError:
+        # Якщо сесію ще не створено — вважаємо стан "idle".
         return "idle"
 
     # Якщо в історії поточної розмови ще не було set_category, але сесія вже має категорію/шаблон,
@@ -598,11 +674,11 @@ async def _filter_tools_for_session(
         has_category_tool=has_category_tool,
     )
     allowed = set(ALLOWED_TOOLS_BY_STATE.get(state, []))
-    
+
     # Get all definitions from registry (minified by default)
-    from backend.agent.tools.registry import tool_registry
+    from backend.agent.tools.registry import tool_registry  # pylint: disable=import-outside-toplevel
     all_tools = tool_registry.get_definitions(minified=True)
-    
+
     if not allowed:
         return []
 
@@ -617,7 +693,7 @@ async def _filter_tools_for_session(
         tool = tool_registry.get_by_alias(func_name)
         if tool and tool.name in allowed:
             filtered_tools.append(tool_def)
-            
+
     return filtered_tools
 
 
@@ -640,7 +716,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                 t.get("function", {}).get("name", "<unknown>") for t in tools
             ]
             logger.info("toolset_for_state session_id=%s tools=%s", conv.session_id, tool_names)
-        except Exception:
+        except (AttributeError, TypeError):
             logger.info(
                 "toolset_for_state session_id=%s tools_count=%d",
                 conv.session_id,
@@ -660,17 +736,14 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
         # Idle: коротка відповідь-вступ, інші стани — детальні пояснення.
         max_tokens = 96 if state == "idle" else 256
 
-        try:
-            response = await ensure_awaitable(
-                chat_with_tools(
-                    messages,
-                    tools,
-                    require_tools=require_tools,
-                    max_completion_tokens=max_tokens,
-                )
+        response = await ensure_awaitable(
+            chat_with_tools(
+                messages,
+                tools,
+                require_tools=require_tools,
+                max_completion_tokens=max_tokens,
             )
-        except RuntimeError as exc:
-            raise
+        )
         choice = response.choices[0]
         message = choice.message
 
@@ -740,7 +813,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                     # в межах цієї розмови (для state-gating).
                     try:
                         conv.has_category_tool = True
-                    except Exception:
+                    except AttributeError:
                         pass
 
                 # tool_result is now already a string (VSC or JSON)
@@ -759,7 +832,6 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
             # Обрізаємо історію перед наступною ітерацією tool-loop
             pruned = _prune_messages(messages)
             messages = pruned
-            conv.messages = pruned
             conv.messages = pruned
             continue
 
@@ -790,7 +862,7 @@ def _strip_orphan_tools(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             for tc in m.get("tool_calls") or []:
                 try:
                     allowed_ids.add(tc.get("id"))
-                except Exception:
+                except (AttributeError, TypeError):
                     pass
 
     # Фільтруємо tool-повідомлення без відповідних id
@@ -907,26 +979,51 @@ async def healthz() -> Dict[str, Any]:
     Повертає статус сервера та ознаку наявності залежності для роботи з DOCX.
     """
     try:
-        from docx import Document  # type: ignore
+        from docx import Document  # type: ignore  # pylint: disable=import-outside-toplevel
 
         # Перевіряємо, що можна створити порожній документ
         Document()
         docx_ok = True
-    except Exception:
+    except (ImportError, OSError):
         docx_ok = False
+
+    redis_ok = False
+    if settings.redis_url:
+        try:
+            from backend.infra.storage.redis_client import get_redis  # pylint: disable=import-outside-toplevel
+            client = await get_redis()
+            await client.ping()
+            redis_ok = True
+        except (ImportError, OSError, ConnectionError):
+            redis_ok = False
+
+    db_ok = False
+    if settings.contracts_db_url:
+        try:
+            if settings.contracts_db_url.startswith("mysql"):
+                import pymysql  # pylint: disable=import-outside-toplevel
+                parsed = urlparse(settings.contracts_db_url)
+                conn = pymysql.connect(host=parsed.hostname or "localhost", connect_timeout=2)
+                conn.close()
+            db_ok = True
+        except (pymysql.Error, OSError):
+            db_ok = False
+    else:
+        db_ok = True  # SQLite local by default
 
     return {
         "status": "ok",
         "docx_ok": docx_ok,
+        "redis_ok": redis_ok,
+        "contracts_db_ok": db_ok,
     }
 
 
 @app.get("/categories")
 async def list_categories() -> List[Dict[str, str]]:
-    from backend.domain.categories.index import store as category_store
-
+    """List all available contract categories."""
     categories = []
-    for category in category_store.categories.values():
+    for category in cat_store.categories.values():
         if category.id == "custom":
             continue
         categories.append({"id": category.id, "label": category.label})
@@ -935,11 +1032,13 @@ async def list_categories() -> List[Dict[str, str]]:
 
 @app.post("/categories/find")
 async def find_category(req: FindCategoryRequest) -> Dict[str, Any]:
+    """Find category by natural language query."""
     return await tool_find_category_by_query_async(req.query)
 
 
 @app.get("/categories/{category_id}/templates")
 async def get_category_templates(category_id: str) -> Dict[str, Any]:
+    """Get available templates for a category."""
     try:
         return await tool_get_templates_for_category_async(category_id)
     except ValueError as exc:
@@ -948,6 +1047,7 @@ async def get_category_templates(category_id: str) -> Dict[str, Any]:
 
 @app.get("/categories/{category_id}/entities")
 async def get_category_entities(category_id: str) -> Dict[str, Any]:
+    """Get contract field entities for a category."""
     try:
         return await tool_get_category_entities_async(category_id)
     except ValueError as exc:
@@ -956,6 +1056,7 @@ async def get_category_entities(category_id: str) -> Dict[str, Any]:
 
 @app.get("/categories/{category_id}/parties")
 async def get_category_parties(category_id: str) -> Dict[str, Any]:
+    """Get party roles for a category."""
     try:
         return await tool_get_category_parties_async(category_id)
     except ValueError as exc:
@@ -979,8 +1080,10 @@ async def set_session_party_context(
     session_id: str,
     req: SetPartyContextRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    user_id = _require_user_id(x_user_id)
+    """Set party context (role, person type) for a session."""
+    user_id = _require_user_id(x_user_id, authorization)
 
     result = await tool_set_party_context_async(
         session_id=session_id,
@@ -1013,16 +1116,16 @@ async def set_session_party_context(
 async def create_session(
     req: CreateSessionRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> CreateSessionResponse:
-    from backend.infra.persistence.store import generate_readable_id
+    """Create a new contract session."""
+    from backend.infra.persistence.store import generate_readable_id  # pylint: disable=import-outside-toplevel
 
     # Якщо ID не передано, генеруємо читабельний.
     # За замовчуванням префікс "new", але якщо клієнт знає шаблон,
     # він може передати його як частину логіки (поки що просто new).
     session_id = req.session_id or generate_readable_id("new")
-    creator_user_id = x_user_id or req.user_id
-    if not creator_user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    creator_user_id = req.user_id or resolve_user_id(x_user_id, authorization)
     session = await aget_or_create_session(session_id, user_id=creator_user_id)
     return CreateSessionResponse(session_id=session.session_id)
 
@@ -1033,56 +1136,82 @@ def check_session_access(
     *,
     require_participant: bool = False,
     allow_owner: bool = False,
-):
+) -> None:
     """
+    Check if user has access to a session.
+
     Enforces strict access control:
     - If session is full (all roles taken), only participants can access.
     - If session is not full, allow read access so new users can claim a free role.
-    - If require_participant=True, enforce participant header even if session is not full (for sensitive endpoints).
-    - allow_owner: treat session.creator_user_id як учасника.
+    - If require_participant=True, enforce participant header even if session
+      is not full (for sensitive endpoints).
+    - allow_owner: treat session.creator_user_id as participant.
     """
+    def _deny(status: int, reason: str) -> None:
+        security_logger.warning(
+            "acl_denied status=%s reason=%s session_id=%s user_id=%s",
+            status,
+            reason,
+            session.session_id,
+            user_id,
+        )
+
     is_owner = bool(
         allow_owner and user_id and session.creator_user_id and user_id == session.creator_user_id
     )
 
     # If participant-level access is required, enforce header presence early
     if require_participant and not user_id:
+        _deny(401, "missing_user_id")
         raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
     # 1. If no category, we can't determine roles, so allow access (setup phase)
     if not session.category_id:
-        # If some roles are already claimed, still enforce participant ownership when explicitly required
-        if require_participant and session.role_owners and user_id not in session.role_owners.values() and not is_owner:
-            raise HTTPException(status_code=403, detail="You are not a participant of this session.")
+        # If some roles are already claimed, enforce participant ownership
+        is_participant = user_id in session.role_owners.values()
+        not_allowed = not is_participant and not is_owner
+        if require_participant and session.role_owners and not_allowed:
+            _deny(403, "not_participant_setup_phase")
+            raise HTTPException(
+                status_code=403, detail="You are not a participant of this session."
+            )
         return
 
     # 2. Load metadata to count roles
-    from backend.domain.categories.index import store as category_store
-    cat = category_store.get(session.category_id)
+    cat = cat_store.get(session.category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
 
     try:
-        meta = _load_meta(cat)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to load category metadata")
+        meta = load_meta(cat)
+    except (FileNotFoundError, OSError, KeyError) as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to load category metadata"
+        ) from exc
 
     roles = meta.get("roles", {})
-    expected_roles_count = len(roles) if roles else max(len(session.party_types), len(session.role_owners))
-    
+    fallback_count = max(len(session.party_types), len(session.role_owners))
+    expected_roles_count = len(roles) if roles else fallback_count
+
     occupied_roles = len(session.role_owners)
     is_full = expected_roles_count > 0 and occupied_roles >= expected_roles_count
 
     # Enforce participant-only access when explicitly required or when session is already full
     if require_participant or is_full:
         if not user_id:
+            _deny(401, "missing_user_id")
             raise HTTPException(status_code=401, detail="Missing X-User-ID")
 
-        if session.role_owners and user_id not in session.role_owners.values() and not is_owner:
-            raise HTTPException(status_code=403, detail="You are not a participant of this session.")
+        is_participant = user_id in session.role_owners.values()
+        if session.role_owners and not is_participant and not is_owner:
+            _deny(403, "not_participant_full_session")
+            raise HTTPException(
+                status_code=403, detail="You are not a participant of this session."
+            )
         return
 
-    # Session is not full: allow access even if some roles are already claimed, so new users can observe free roles
+    # Session is not full: allow access even if some roles are already claimed,
+    # so new users can observe free roles
     return
 
 
@@ -1090,8 +1219,10 @@ def check_session_access(
 async def get_session(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    user_id = _require_user_id(x_user_id)
+    """Get session details and summary."""
+    user_id = _require_user_id(x_user_id, authorization)
     try:
         # We need to load session to check access.
         # tool_get_session_summary loads it internally.
@@ -1110,6 +1241,7 @@ async def get_session(
 async def get_user_document_api(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """
     Повертає user-document JSON у форматі example_user_document.json
@@ -1120,7 +1252,7 @@ async def get_user_document_api(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
 
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
@@ -1132,6 +1264,7 @@ async def get_user_document_api(
 
 @app.post("/sessions/{session_id}/category")
 async def set_session_category(session_id: str, req: SetCategoryRequest) -> Dict[str, Any]:
+    """Set category for a session."""
     result = await tool_set_category_async(session_id=session_id, category_id=req.category_id)
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1140,6 +1273,7 @@ async def set_session_category(session_id: str, req: SetCategoryRequest) -> Dict
 
 @app.post("/sessions/{session_id}/template")
 async def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, Any]:
+    """Set template for a session."""
     result = await tool_set_template_async(session_id=session_id, template_id=req.template_id)
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1147,6 +1281,8 @@ async def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict
 
 
 class SetFillingModeRequest(BaseModel):
+    """Request model for setting filling mode."""
+
     mode: str
 
 
@@ -1155,9 +1291,11 @@ async def set_session_filling_mode(
     session_id: str,
     req: SetFillingModeRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    user_id = _require_user_id(x_user_id)
-    from backend.api.tool_adapter.tool_router import tool_registry
+    """Set filling mode for a session."""
+    user_id = _require_user_id(x_user_id, authorization)
+    from backend.api.tool_adapter.tool_router import tool_registry  # pylint: disable=import-outside-toplevel
     tool = tool_registry.get("set_filling_mode")
     if not tool:
         raise HTTPException(status_code=500, detail="Tool not found")
@@ -1171,12 +1309,9 @@ async def set_session_filling_mode(
     return result
 
 
-from fastapi.responses import StreamingResponse
-import asyncio
-from collections import defaultdict
-
-# Custom StreamingResponse that swallows cancellation during shutdown
 class SafeStreamingResponse(StreamingResponse):
+    """Custom StreamingResponse that swallows cancellation during shutdown."""
+
     async def __call__(self, scope, receive, send):
         try:
             await super().__call__(scope, receive, send)
@@ -1186,15 +1321,19 @@ class SafeStreamingResponse(StreamingResponse):
             return
 
 class StreamManager:
+    """Manager for SSE connections per session."""
+
     def __init__(self):
         self.connections: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
     async def connect(self, session_id: str, user_id: Optional[str]) -> asyncio.Queue:
+        """Connect a user to session SSE stream."""
         queue = asyncio.Queue(maxsize=100)
         self.connections[session_id].append({"queue": queue, "user_id": user_id})
         return queue
 
     def disconnect(self, session_id: str, queue: asyncio.Queue):
+        """Disconnect a queue from session."""
         if session_id not in self.connections:
             return
         filtered = [c for c in self.connections[session_id] if c.get("queue") is not queue]
@@ -1203,14 +1342,17 @@ class StreamManager:
         else:
             del self.connections[session_id]
 
-    async def broadcast(self, session_id: str, message: dict, exclude_user_id: Optional[str] = None):
+    async def broadcast(
+        self, session_id: str, message: dict, exclude_user_id: Optional[str] = None
+    ):
+        """Broadcast message to all connected clients for a session."""
         if session_id not in self.connections:
             return
-        
+
         # Create SSE formatted message
         data = json.dumps(message)
         msg = f"data: {data}\n\n"
-        
+
         to_remove = []
         # Iterate over a copy to avoid issues if queues are modified during iteration
         for conn in list(self.connections[session_id]):
@@ -1221,12 +1363,12 @@ class StreamManager:
                     continue
                 if queue is None:
                     continue
-                # Use put_nowait to avoid blocking if queue is full (though unlikely with infinite queue)
+                # Use put_nowait to avoid blocking if queue is full
                 queue.put_nowait(msg)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 if queue:
                     to_remove.append(queue)
-        
+
         for queue in to_remove:
             self.disconnect(session_id, queue)
 
@@ -1235,14 +1377,14 @@ class StreamManager:
         Gracefully close all connections.
         """
         # Iterate over a copy of items because disconnect() might modify the dictionary
-        for session_id, conns in list(self.connections.items()):
+        for _sess_id, conns in list(self.connections.items()):
             for conn in conns:
                 queue = conn.get("queue")
                 if queue is None:
                     continue
                 try:
                     queue.put_nowait(None)
-                except Exception:
+                except asyncio.QueueFull:
                     pass
 
 stream_manager = StreamManager()
@@ -1251,21 +1393,28 @@ stream_manager = StreamManager()
 async def stream_session_events(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     user_id_query: Optional[str] = Query(None, alias="user_id"),
+    token_query: Optional[str] = Query(None, alias="token"),
 ):
     """
     Server-Sent Events endpoint for real-time session updates.
     """
-    user_id = x_user_id or user_id_query
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    auth_header = authorization
+    if not auth_header and token_query:
+        auth_header = f"Bearer {token_query}"
+
+    if settings.auth_mode == "jwt":
+        user_id = resolve_user_id(None, auth_header)
+    else:
+        user_id = user_id_query or resolve_user_id(x_user_id, auth_header)
 
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Дозволяємо підключення навіть якщо клієнт ще не учасник (щоб бачити зміни ролей у реальному часі)
+    # Allow connection even if not participant yet (to see role changes in real time)
     check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
     queue = await stream_manager.connect(session_id, user_id)
@@ -1283,8 +1432,8 @@ async def stream_session_events(
             # Client disconnected or server shutting down
             # We just exit silently
             pass
-        except Exception as e:
-            logger.error(f"SSE stream error for {session_id}: {e}")
+        except (OSError, RuntimeError) as e:
+            logger.error("SSE stream error for %s: %s", session_id, e)
         finally:
             stream_manager.disconnect(session_id, queue)
 
@@ -1293,17 +1442,19 @@ async def stream_session_events(
 
 @app.post("/sessions/{session_id}/fields")
 async def upsert_session_field(
-    session_id: str, 
+    session_id: str,
     req: UpsertFieldRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    # Якщо у сесії вже є учасники — вимагаємо автентифікацію через заголовок.
+    """Upsert a field value in a session."""
+    # If session has participants, require authentication via header.
     try:
-        session = await aload_session(session_id)
+        await aload_session(session_id)  # Validate session exists
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
 
     result = await tool_upsert_field_async(
         session_id=session_id,
@@ -1330,10 +1481,11 @@ async def upsert_session_field(
             exclude_user_id=sender_id,
         )
 
-    # Для REST-інтерфейсу явні помилки користувача сигналізуємо через 400
+    # Для REST-інтерфейсу явні помилки користувача сигналізуємо через статус з тулза (fallback 400)
     if not result.get("ok", False) and result.get("error"):
+        status_code = int(result.get("status_code") or 400)
         raise HTTPException(
-            status_code=400,
+            status_code=status_code,
             detail={
                 "message": result["error"],
                 "field": req.field,
@@ -1346,7 +1498,8 @@ async def upsert_session_field(
 
 @app.post("/sessions/{session_id}/build")
 async def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str, Any]:
-    from backend.shared.errors import MetaNotFoundError
+    """Build contract document from session data."""
+    from backend.shared.errors import MetaNotFoundError  # pylint: disable=import-outside-toplevel
     # ensure session exists
     try:
         await aload_session(session_id)
@@ -1361,11 +1514,15 @@ async def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str
 
 
 class PartyData(BaseModel):
+    """Party data for sync request."""
+
     person_type: str
     fields: Dict[str, str]
 
 
 class SyncSessionRequest(BaseModel):
+    """Request model for syncing session data."""
+
     category_id: Optional[str] = None
     template_id: Optional[str] = None
     parties: Dict[str, PartyData]
@@ -1376,25 +1533,22 @@ async def sync_session(
     session_id: str,
     req: SyncSessionRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """
     Універсальний ендпоінт для пакетного оновлення даних сесії.
     Підтримує One-shot (все одразу) та Two-shot (по частинах) флоу.
     """
-    from backend.domain.categories.index import store as category_store, list_templates
-    from backend.shared.errors import MetaNotFoundError
-    from backend.domain.sessions.models import FieldState
-
     # Якщо сесія ще не створена — створюємо файл-чернетку
     await aget_or_create_session(session_id)
 
     # Access control: only participants can sync when roles are claimed/full.
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
     session_for_acl = await aload_session(session_id)
     check_session_access(session_for_acl, user_id, require_participant=True, allow_owner=True)
 
     # Під час тестів метадані можуть змінюватися на льоту — перезавантажуємо індекс
-    await run_sync(category_store.load)
+    await run_sync(cat_store.load)
 
     missing_contract: list[str] = []
     missing_roles: Dict[str, Any] = {}
@@ -1405,17 +1559,21 @@ async def sync_session(
     async with atransactional_session(session_id) as session:
         # 2. Set Category / Template if provided
         if req.category_id:
-            if req.category_id not in category_store.categories:
+            if req.category_id not in cat_store.categories:
                 raise HTTPException(status_code=400, detail=f"Category {req.category_id} not found")
-            from backend.domain.sessions.actions import set_session_category
+            # pylint: disable=import-outside-toplevel
+            from backend.domain.sessions.actions import (
+                set_session_category as apply_category,
+            )
             # Якщо категорія змінюється — робимо повне очищення стану.
             if session.category_id != req.category_id:
-                ok = set_session_category(session, req.category_id)
+                ok = apply_category(session, req.category_id)
                 if not ok:
                     raise HTTPException(status_code=400, detail="Failed to set category")
 
         if req.template_id:
-            templates = {t.id for t in list_templates(session.category_id)} if session.category_id else set()
+            cat_templates = list_templates(session.category_id) if session.category_id else []
+            templates = {t.id for t in cat_templates}
             if templates and req.template_id not in templates:
                 raise HTTPException(status_code=400, detail="Template does not belong to category")
             session.template_id = req.template_id
@@ -1424,14 +1582,15 @@ async def sync_session(
         if not session.category_id:
             raise HTTPException(status_code=400, detail="Category not set")
 
-        category = category_store.get(session.category_id)
+        category = cat_store.get(session.category_id)
         if not category:
             raise HTTPException(status_code=400, detail="Invalid category_id")
 
-        category_meta = _load_meta(category)
+        category_meta = load_meta(category)
         defined_roles = category_meta.get("roles", {})
 
         # Import service
+        # pylint: disable=import-outside-toplevel
         from backend.domain.services.session import update_session_field
 
         # 3. Process Parties
@@ -1461,7 +1620,7 @@ async def sync_session(
                 )
 
         # 4. Check Readiness using shared schema helper
-        from backend.domain.services.fields import get_required_fields
+        from backend.domain.services.fields import get_required_fields  # pylint: disable=import-outside-toplevel
         required_fields = get_required_fields(session)
         for f in required_fields:
             if f.role:
@@ -1498,8 +1657,8 @@ async def sync_session(
         try:
             result = await tool_build_contract_async(session_id, template_id_local)
             document_url = result.get("document_url") or result.get("file_path")
-        except Exception as e:
-            logger.error(f"sync_session auto-build failed: {e}")
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error("sync_session auto-build failed: %s", e)
             document_url = None
 
         resp = {
@@ -1523,18 +1682,11 @@ async def sync_session(
         "session_id": session_id
     }
 
-def _load_meta(category) -> dict:
-    # Helper to load meta (duplicated from index.py, should be imported but index.py is not fully exposed)
-    # Better to expose _load_meta from index.py or use public API
-    # We will use a temporary hack or fix index.py
-    with category.meta_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> ChatResponse:
     """
     Основна точка входу для діалогу.
@@ -1544,7 +1696,7 @@ async def chat(
     на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
     """
     conv = conversation_store.get(req.session_id)
-    user_id = x_user_id
+    user_id = resolve_user_id(x_user_id, authorization, allow_anonymous=True)
     if user_id:
         conv.user_id = user_id
     # Гарантуємо існування сесії (стан і поля зберігаються окремо)
@@ -1558,7 +1710,7 @@ async def chat(
     # Зберігаємо останню мову користувача для i18n серверних відповідей
     try:
         conv.last_lang = _detect_lang(req.message)
-    except Exception:
+    except (AttributeError, TypeError):
         conv.last_lang = "uk"
 
     # Синхронізуємо локаль у Session для summary JSON
@@ -1567,7 +1719,7 @@ async def chat(
         # Run locale update in threadpool to avoid blocking event loop
         async with atransactional_session(req.session_id) as s:
             s.locale = conv.last_lang
-    except Exception:
+    except (SessionNotFoundError, OSError):
         pass
 
     if not conv.messages:
@@ -1586,7 +1738,7 @@ async def chat(
     last_user = _last_user_message_text(final_messages)
     try:
         session = await aload_session(req.session_id)
-    except Exception:
+    except SessionNotFoundError:
         session = None
 
     if session and session.can_build_contract and session.template_id:
@@ -1620,11 +1772,12 @@ async def chat(
 @app.get("/my-sessions")
 async def get_my_sessions(
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
-    user_id = x_user_id
+    """Get all sessions for the current user."""
+    user_id = resolve_user_id(x_user_id, authorization, allow_anonymous=True)
     if not user_id:
         return []
-    from backend.domain.categories.index import list_templates
 
     sessions = await alist_user_sessions(user_id)
     results = []
@@ -1637,7 +1790,7 @@ async def get_my_sessions(
                     if t.id == s.template_id:
                         title = t.name
                         break
-            except Exception:
+            except (KeyError, ValueError, AttributeError):
                 pass
 
         results.append({
@@ -1654,10 +1807,8 @@ async def get_my_sessions(
 @app.get("/users/{user_id}/sessions")
 async def get_user_sessions(user_id: str):
     """
-    Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (role_owners).
+Повертає всі сесії/договори, в яких user_id прив'язаний до ролі (role_owners).
     """
-    from backend.domain.categories.index import list_templates
-
     sessions = await alist_user_sessions(user_id)
     results = []
     for s in sessions:
@@ -1669,7 +1820,7 @@ async def get_user_sessions(user_id: str):
                     if t.id == s.template_id:
                         title = t.name
                         break
-            except Exception:
+            except (KeyError, ValueError, AttributeError):
                 pass
 
         results.append({
@@ -1687,13 +1838,15 @@ async def get_user_sessions(user_id: str):
 async def get_contract_info(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
+    """Get contract info including signing status and download URLs."""
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
 
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
@@ -1730,16 +1883,16 @@ async def get_contract_info(
 async def preview_contract(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
+    """Preview contract as HTML."""
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = x_user_id or user_id_query
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    user_id = user_id_query or _require_user_id(x_user_id, authorization)
     # Превʼю доступне лише учасникам або власнику
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
@@ -1747,25 +1900,28 @@ async def preview_contract(
         raise HTTPException(status_code=400, detail="Template not selected")
 
     # Будуємо тимчасовий DOCX з плейсхолдерами (partial=True), конвертуємо у HTML
+    # pylint: disable=import-outside-toplevel
     from backend.infra.storage.fs import output_document_path
     from backend.domain.documents.converter import convert_to_html
 
     try:
         build_result = await build_contract_async(session_id, session.template_id, partial=True)
         doc_path = Path(build_result["file_path"])
-    except Exception as e:
-        logger.error(f"Preview auto-build failed: {e}")
+    except (OSError, ValueError, RuntimeError) as e:
+        logger.error("Preview auto-build failed: %s", e)
         # fallback: спробувати існуючий драфт/фінальний файл
         final_doc = settings.filled_documents_root / f"contract_{session_id}.docx"
         draft_doc = output_document_path(session.template_id, session_id, ext="docx")
         doc_path = final_doc if final_doc.exists() else draft_doc
         if not Path(doc_path).exists():
-            raise HTTPException(status_code=500, detail="Failed to build preview")
+            raise HTTPException(
+                status_code=500, detail="Failed to build preview"
+            ) from e
 
     try:
         html = convert_to_html(Path(doc_path))
-    except Exception as e:
-        logger.error(f"Failed to convert preview to HTML: {e}")
+    except (OSError, ValueError) as e:
+        logger.error("Failed to convert preview to HTML: %s", e)
         raise HTTPException(status_code=500, detail="Failed to render preview") from e
 
     return HTMLResponse(content=html, media_type="text/html; charset=utf-8")
@@ -1776,22 +1932,23 @@ async def download_contract(
     session_id: str,
     final: bool = False,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
-    from backend.infra.storage.fs import output_document_path
-    from backend.infra.config.settings import settings
+    """Download contract document as DOCX."""
+    from backend.infra.storage.fs import output_document_path  # pylint: disable=import-outside-toplevel
 
     try:
         session = await aload_session(session_id)
-    except SessionNotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
 
-    user_id = x_user_id or user_id_query
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
-    check_session_access(session, user_id, require_participant=True, allow_owner=True)
+    user_id = user_id_query or _require_user_id(x_user_id, authorization)
+    check_session_access(
+        session, user_id, require_participant=True, allow_owner=True
+    )
 
-    # Enforce security: strictly forbid downloading if not signed (except for specific roles/cases not defined here).
+    # Enforce security: strictly forbid downloading if not signed.
     # The test verify_contract_api expects 403 if not signed.
     if not session.is_fully_signed and session.state != SessionState.COMPLETED:
         raise HTTPException(status_code=403, detail="Contract must be signed to download.")
@@ -1799,7 +1956,9 @@ async def download_contract(
     if final:
         # Ensure session is actually in a final state
         if session.state not in [SessionState.READY_TO_SIGN, SessionState.COMPLETED]:
-            raise HTTPException(status_code=409, detail="Document has been modified. Please order again.")
+            raise HTTPException(
+                status_code=409, detail="Document has been modified. Please order again."
+            )
 
         filename = f"contract_{session_id}.docx"
         path = settings.filled_documents_root / filename
@@ -1816,8 +1975,10 @@ async def download_contract(
             if session.can_build_contract:
                 try:
                     await tool_build_contract_async(session_id, session.template_id)
-                except Exception:
-                    raise HTTPException(status_code=404, detail="Document not built yet")
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise HTTPException(
+                        status_code=404, detail="Document not built yet"
+                    ) from exc
             else:
                 raise HTTPException(status_code=404, detail="Document not built yet")
 
@@ -1832,11 +1993,11 @@ async def download_contract(
 async def sign_contract(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    user_id = x_user_id
-    logger.info(f"Sign request: session_id={session_id}, user_id={user_id}")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+    """Sign contract for the current user's role."""
+    user_id = _require_user_id(x_user_id, authorization)
+    logger.info("Sign request: session_id=%s, user_id=%s", session_id, user_id)
     try:
         async with atransactional_session(session_id) as session:
             logger.info(
@@ -1884,17 +2045,9 @@ async def sign_contract(
             if session.is_fully_signed:
                 session.state = SessionState.COMPLETED
             if signed_roles:
-                session.sign_history.append(
-                    {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "user_id": user_id,
-                        "roles": signed_roles,
-                        "state": session.state.value,
-                    }
-                )
                 session.history.append(
                     {
-                        "ts": datetime.utcnow().isoformat() + "Z",
+                        "ts": datetime.now(timezone.utc).isoformat(),
                         "type": "sign",
                         "user_id": user_id,
                         "roles": signed_roles,
@@ -1936,6 +2089,7 @@ async def get_session_schema(
     scope: str = Query("all", enum=["all", "required"]),
     data_mode: str = Query("values", enum=["values", "status", "none"]),
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """
     Універсальний ендпоінт для отримання структури форми та даних.
@@ -1951,22 +2105,20 @@ async def get_session_schema(
 
     try:
         session = await aload_session(session_id)
-    except SessionNotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
     check_session_access(session, user_id, allow_owner=True)
 
     if not session.category_id:
         return {"sections": []}
 
-    from backend.domain.categories.index import list_party_fields, store as cat_store, _load_meta, list_entities
-
     category_def = cat_store.get(session.category_id)
     if not category_def:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    meta = _load_meta(category_def)
+    meta = load_meta(category_def)
     roles = meta.get("roles", {})
     # main_role використовується лише для порядку відображення в UI
     main_role = next(iter(roles.keys()), None)
@@ -1985,28 +2137,36 @@ async def get_session_schema(
         }
     }
 
+    # Get party_modules for dynamic labels
+    party_modules = meta.get("party_modules", {})
+
     # --- 1. Parties Section ---
     for role_key, role_info in roles.items():
-        # Determine person type (default to individual if not set)
+        # Determine person type using centralized logic
         party_types = session.party_types or {}
-        p_type = party_types.get(role_key, "individual")
+        p_type = party_types.get(role_key)
+        if not p_type:
+            # Use default_person_type from role or first allowed type
+            p_type = role_info.get("default_person_type")
+            if not p_type:
+                allowed = role_info.get("allowed_person_types", [])
+                p_type = allowed[0] if allowed else next(iter(party_modules.keys()), "individual")
 
-        # Get allowed types for selector
+        # Get allowed types for selector - labels come from party_modules metadata
         allowed_types = []
-        for t in role_info.get("allowed_person_types", ["individual"]):
-            # Simple mapping for labels, ideally should be in metadata
-            label_map = {
-                "individual": "Фізична особа",
-                "fop": "ФОП",
-                "company": "Юридична особа"
-            }
-            allowed_types.append({"value": t, "label": label_map.get(t, t)})
+        for t in role_info.get("allowed_person_types", list(party_modules.keys())):
+            # Get label from party_modules metadata, fallback to type name
+            module_info = party_modules.get(t, {})
+            label = module_info.get("label", t)
+            allowed_types.append({"value": t, "label": label})
 
         party_obj = {
             "role": role_key,
             "label": role_info.get("label", role_key),
             "person_type": p_type,
-            "person_type_label": next((x["label"] for x in allowed_types if x["value"] == p_type), p_type),
+            "person_type_label": next(
+                (x["label"] for x in allowed_types if x["value"] == p_type), p_type
+            ),
             "allowed_types": allowed_types,
             "fields": [],
             "claimed_by": session.role_owners.get(role_key)
@@ -2024,7 +2184,8 @@ async def get_session_schema(
 
             # Determine value based on data_mode using FieldState status
             val = None
-            fs = (session.party_fields.get(role_key, {}) if session.party_fields else {}).get(pf.field)
+            party_fields = session.party_fields.get(role_key, {}) if session.party_fields else {}
+            fs = party_fields.get(pf.field)
             if data_mode != "none":
                 current_entry = session.all_data.get(field_key) if session.all_data else None
                 raw_val = current_entry.get("current", "") if current_entry else ""
@@ -2090,6 +2251,7 @@ async def get_session_schema(
 async def get_session_requirements(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """
     Повертає список незаповнених обов'язкових полів для відображення на фронті.
@@ -2099,7 +2261,7 @@ async def get_session_requirements(
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     missing = collect_missing_fields(session)
@@ -2125,13 +2287,15 @@ async def get_session_requirements(
 async def get_session_history(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
+    """Get session history of field updates."""
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = _require_user_id(x_user_id)
+    user_id = _require_user_id(x_user_id, authorization)
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     return {
@@ -2146,6 +2310,7 @@ async def get_session_history(
 async def order_contract(
     session_id: str,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """
     Фіналізує документ:
@@ -2153,16 +2318,14 @@ async def order_contract(
     2. Генерує DOCX у filled_documents.
     3. Змінює статус на READY_TO_SIGN.
     """
-    from backend.domain.sessions.models import SessionState
-    from backend.infra.config.settings import settings
-    import shutil
-    
+    import shutil  # pylint: disable=import-outside-toplevel
+
     try:
         session = await aload_session(session_id)
-    except SessionNotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
 
-    user_id_local = _require_user_id(x_user_id)
+    user_id_local = _require_user_id(x_user_id, authorization)
     check_session_access(session, user_id_local, require_participant=True, allow_owner=True)
 
     if not session.template_id:
@@ -2189,10 +2352,10 @@ async def order_contract(
                 "message": str(e),
                 "missing": collect_missing_fields(await aload_session(session_id)),
             },
-        )
-    except Exception as e:
-        logger.error(f"Order failed: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        ) from e
+    except (OSError, RuntimeError) as e:
+        logger.error("Order failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
     # 2. Move to filled_documents
     # We want a stable path for the ordered document
@@ -2201,9 +2364,9 @@ async def order_contract(
 
     try:
         await run_sync(shutil.copy, temp_path, final_path)
-    except Exception as e:
-        logger.error(f"Failed to save final document: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save document")
+    except (OSError, shutil.Error) as e:
+        logger.error("Failed to save final document: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to save document") from e
 
     # 3. Update session state
     async with atransactional_session(session_id) as session_inner:

@@ -1,10 +1,11 @@
+"""In-memory session store implementation."""
 from __future__ import annotations
 
 import json
 import asyncio
 import threading
 from contextlib import contextmanager, asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Generator
 
 from backend.infra.config.settings import settings
@@ -25,10 +26,11 @@ _async_global_lock = asyncio.Lock()
 
 
 def _session_ttl_seconds(session) -> int:
+    """Calculate session TTL in seconds."""
     try:
-        from backend.domain.sessions.ttl import ttl_hours_for_session
+        from backend.domain.sessions.ttl import ttl_hours_for_session  # pylint: disable=import-outside-toplevel
         ttl_hours = ttl_hours_for_session(session)
-    except Exception:
+    except (ImportError, AttributeError):
         try:
             ttl_hours = int(getattr(settings, "session_ttl_hours", 24))
         except (TypeError, ValueError):
@@ -46,15 +48,16 @@ def _get_lock(session_id: str) -> threading.RLock:
 
 
 def _get_async_lock(session_id: str) -> asyncio.Lock:
-    # This is intentionally not awaited; contention is low and lock creation is cheap.
-    if session_id not in _async_locks:
-        _async_locks[session_id] = asyncio.Lock()
-    return _async_locks[session_id]
+    # Use global lock to ensure atomic check-and-create
+    with _global_lock:
+        if session_id not in _async_locks:
+            _async_locks[session_id] = asyncio.Lock()
+        return _async_locks[session_id]
 
 
 def _evict_if_expired(session_id: str) -> bool:
     expire = _expires_at.get(session_id)
-    if expire and datetime.now() > expire:
+    if expire and datetime.now(timezone.utc) > expire:
         _remove_session(session_id)
         return True
     return False
@@ -92,7 +95,8 @@ def _update_indexes(session: Session) -> None:
 
 
 def save_session(session: Session) -> None:
-    session.updated_at = datetime.now()
+    """Save session to in-memory store."""
+    session.updated_at = datetime.now(timezone.utc)
     data = session_to_dict(session)
     payload = json.dumps(data, ensure_ascii=False)
     ttl_seconds = _session_ttl_seconds(session)
@@ -105,11 +109,12 @@ def save_session(session: Session) -> None:
 
     try:
         save_user_document(session)
-    except Exception:
+    except (OSError, ValueError):
         pass
 
 
 def load_session(session_id: str) -> Session:
+    """Load session from in-memory store."""
     with _global_lock:
         if _evict_if_expired(session_id):
             raise SessionNotFoundError(f"Session '{session_id}' not found")
@@ -121,6 +126,7 @@ def load_session(session_id: str) -> Session:
 
 
 def get_or_create_session(session_id: str, user_id: str | None = None) -> Session:
+    """Get existing session or create a new one."""
     try:
         return load_session(session_id)
     except SessionNotFoundError:
@@ -131,6 +137,7 @@ def get_or_create_session(session_id: str, user_id: str | None = None) -> Sessio
 
 @contextmanager
 def transactional_session(session_id: str) -> Generator[Session, None, None]:
+    """Context manager for transactional session access."""
     lock = _get_lock(session_id)
     with lock:
         session = load_session(session_id)
@@ -139,6 +146,7 @@ def transactional_session(session_id: str) -> Generator[Session, None, None]:
 
 
 def list_user_sessions(user_id: str) -> list[Session]:
+    """List all sessions for a user."""
     if not user_id:
         return []
 
@@ -181,7 +189,8 @@ def _reset_for_tests() -> None:
 
 # Async variants (lightweight locking; reuses same in-memory structures)
 async def asave_session(session: Session) -> None:
-    session.updated_at = datetime.now()
+    """Save session to in-memory store (async)."""
+    session.updated_at = datetime.now(timezone.utc)
     data = session_to_dict(session)
     payload = json.dumps(data, ensure_ascii=False)
     ttl_seconds = _session_ttl_seconds(session)
@@ -194,11 +203,12 @@ async def asave_session(session: Session) -> None:
 
     try:
         await run_sync(save_user_document, session)
-    except Exception:
+    except (OSError, ValueError):
         pass
 
 
 async def aload_session(session_id: str) -> Session:
+    """Load session from in-memory store (async)."""
     async with _async_global_lock:
         if _evict_if_expired(session_id):
             raise SessionNotFoundError(f"Session '{session_id}' not found")
@@ -210,6 +220,7 @@ async def aload_session(session_id: str) -> Session:
 
 
 async def aget_or_create_session(session_id: str, user_id: str | None = None) -> Session:
+    """Get existing session or create a new one (async)."""
     try:
         return await aload_session(session_id)
     except SessionNotFoundError:
@@ -220,6 +231,7 @@ async def aget_or_create_session(session_id: str, user_id: str | None = None) ->
 
 @asynccontextmanager
 async def atransactional_session(session_id: str):
+    """Async context manager for transactional session access."""
     lock = _get_async_lock(session_id)
     async with lock:
         session = await aload_session(session_id)
@@ -228,6 +240,7 @@ async def atransactional_session(session_id: str):
 
 
 async def alist_user_sessions(user_id: str) -> list[Session]:
+    """List all sessions for a user (async)."""
     if not user_id:
         return []
 

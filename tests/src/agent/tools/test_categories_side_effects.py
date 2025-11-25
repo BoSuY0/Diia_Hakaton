@@ -1,13 +1,14 @@
-
+"""Tests for category tool side effects."""
 import pytest
 from backend.agent.tools.categories import FindCategoryByQueryTool
 from backend.infra.persistence.store import get_or_create_session, load_session
-from backend.domain.categories.index import store, Category
-from pathlib import Path
+from backend.domain.categories.index import store
 
-# This test verifies that FindCategoryByQueryTool does NOT automatically update the session state.
+
 @pytest.mark.asyncio
-async def test_find_category_no_side_effect(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_find_category_no_side_effect(mock_categories_data):
+    """Test that FindCategoryByQueryTool does NOT automatically update session state."""
     # Setup: ensure category exists (provided by mock_categories_data fixture)
     # and create a fresh session
     session_id = "test_sess_side_effect"

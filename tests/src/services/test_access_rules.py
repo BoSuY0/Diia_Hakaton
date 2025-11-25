@@ -1,3 +1,4 @@
+"""Tests for session access control rules."""
 import pytest
 
 from backend.domain.services.session import can_edit_party_field, can_edit_contract_field
@@ -13,7 +14,9 @@ def _session_with_category(session_id: str, category_id: str, creator: str = "cr
     return s
 
 
-def test_creator_full_can_prefill_free_roles(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_creator_full_can_prefill_free_roles(mock_categories_data):
+    """Test that creator can prefill free roles in full mode."""
     s = _session_with_category("acl_full_prefill", mock_categories_data, creator="user1")
     s.filling_mode = "full"
     # No owners yet -> creator can edit both roles
@@ -21,7 +24,9 @@ def test_creator_full_can_prefill_free_roles(mock_settings, mock_categories_data
     assert can_edit_party_field(s, acting_user_id="user1", target_role="lessee") is True
 
 
-def test_creator_blocked_after_role_claim(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_creator_blocked_after_role_claim(mock_categories_data):
+    """Test that creator is blocked from editing claimed roles."""
     s = _session_with_category("acl_role_claim", mock_categories_data, creator="user1")
     s.filling_mode = "full"
     s.role_owners = {"lessee": "user2"}
@@ -31,7 +36,9 @@ def test_creator_blocked_after_role_claim(mock_settings, mock_categories_data):
     assert can_edit_party_field(s, acting_user_id="user2", target_role="lessee") is True
 
 
-def test_contract_fields_access(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_contract_fields_access(mock_categories_data):
+    """Test contract fields access control rules."""
     s = _session_with_category("acl_contract", mock_categories_data, creator="creator")
     # No owners -> only creator can edit contract
     assert can_edit_contract_field(s, acting_user_id="creator", field_name="cf1") is True

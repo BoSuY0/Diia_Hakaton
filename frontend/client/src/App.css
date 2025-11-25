@@ -216,6 +216,99 @@ body {
   color: var(--text-primary);
 }
 
+.btn-tertiary {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #111827;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.btn-tertiary:hover {
+  background: #eef2ff;
+}
+
+.btn-tertiary:active {
+  transform: scale(0.98);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.pill-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill-positive {
+  background: #dcfce7;
+  color: #065f46;
+}
+
+.pill-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pill-neutral {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.pill-muted {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.share-card {
+  border: 1px dashed #e5e7eb;
+  box-shadow: none;
+}
+
+.share-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.share-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.share-role-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #f3f4f6;
+  border-radius: 14px;
+  background: #f9fafb;
+}
+
+.share-role-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
 .loading-overlay {
   position: fixed;
   top: 0;

@@ -23,7 +23,7 @@ def _write_category_with_template(settings, cat_id="tmpl_cat", templ_id="t1", fi
     idx_path = settings.meta_categories_root / "categories_index.json"
     idx_path.write_text(json.dumps({"categories": [{"id": cat_id, "label": "Label"}]}), encoding="utf-8")
     from backend.domain.categories.index import store as category_store
-    category_store._categories = {}
+    category_store.clear()
     category_store.load()
 
     # Prepare docx path

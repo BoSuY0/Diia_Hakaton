@@ -1,8 +1,19 @@
+"""Example script demonstrating Valkey/Redis Glide client usage."""
 from __future__ import annotations
 
 import asyncio
 import os
-from glide import GlideClusterClient, GlideClusterClientConfiguration, NodeAddress
+import sys
+
+try:
+    from glide import GlideClusterClient, GlideClusterClientConfiguration, NodeAddress
+except ImportError:
+    print(
+        "ERROR: 'glide' package is not installed.\n"
+        "Install it with: pip install valkey-glide",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _load_addresses() -> list[NodeAddress]:
@@ -24,6 +35,7 @@ def _load_addresses() -> list[NodeAddress]:
 
 
 async def main() -> None:
+    """Connect to Valkey cluster and perform basic operations."""
     addresses = _load_addresses()
     use_tls = os.getenv("VALKEY_USE_TLS", "true").lower() == "true"
     config = GlideClusterClientConfiguration(addresses=addresses, use_tls=use_tls)

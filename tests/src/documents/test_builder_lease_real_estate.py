@@ -1,3 +1,4 @@
+"""Integration tests for lease real estate contract builder."""
 import json
 import shutil
 from pathlib import Path
@@ -17,11 +18,14 @@ async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
     """
     # Copy real metadata into temp workspace
     repo_root = Path(__file__).resolve().parents[3]
-    meta_src = repo_root / "assets" / "meta_data" / "meta_data_categories_documents" / "lease_real_estate.json"
+    meta_src = (
+        repo_root / "assets" / "meta_data" / "meta_data_categories_documents"
+        / "lease_real_estate.json"
+    )
     meta_dst_dir = mock_settings.meta_categories_root
     meta_dst_dir.mkdir(parents=True, exist_ok=True)
     meta_dst = meta_dst_dir / "lease_real_estate.json"
-    meta_dst.write_text(meta_backend.read_text(encoding="utf-8"), encoding="utf-8")
+    meta_dst.write_text(meta_src.read_text(encoding="utf-8"), encoding="utf-8")
 
     # Write categories_index.json for store
     index_path = meta_dst_dir / "categories_index.json"
@@ -30,13 +34,16 @@ async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
 
     # Patch categories index path and reload store
     monkeypatch.setattr("backend.domain.categories.index._CATEGORIES_PATH", index_path)
-    from backend.domain.categories import index as cat_index
+    from backend.domain.categories import index as cat_index  # pylint: disable=import-outside-toplevel
 
-    cat_index.store._categories = {}
+    cat_index.store.clear()
     cat_index.store.load()
 
     # Copy real DOCX template into temp workspace
-    tmpl_src = repo_root / "assets" / "documents_files" / "default_documents_files" / "lease_real_estate.docx"
+    tmpl_src = (
+        repo_root / "assets" / "documents_files" / "default_documents_files"
+        / "lease_real_estate.docx"
+    )
     tmpl_dst_dir = mock_settings.default_documents_root / "lease_real_estate"
     tmpl_dst_dir.mkdir(parents=True, exist_ok=True)
     tmpl_dst = tmpl_dst_dir / "lease_real_estate.docx"

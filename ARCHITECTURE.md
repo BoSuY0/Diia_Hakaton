@@ -80,27 +80,32 @@ POST   /chat                        # AI чат інтерфейс
 @dataclass
 class Session:
     session_id: str
-    user_id: Optional[str]
-    updated_at: datetime
-    
+    creator_user_id: Optional[str]
+    role_owners: Dict[str, str]      # role -> user_id (єдина істина власників ролей)
+    updated_at: datetime             # UTC
+
     # Метадані договору
     category_id: Optional[str]
     template_id: Optional[str]
-    
+
     # Стан та ролі
     state: SessionState
-    role: Optional[str]
+    role: Optional[str]              # поточний контекст користувача (не власність ролі)
     person_type: Optional[str]
     party_types: Dict[str, str]      # role -> person_type
-    party_users: Dict[str, str]      # role -> user_id
-    
+
     # Дані полів
     party_fields: Dict[str, Dict[str, FieldState]]  # role -> field -> state
     contract_fields: Dict[str, FieldState]
-    
+    all_data: Dict[str, Any]         # агрегатор значень для builder/user_document
+    history: List[Dict[str, Any]]    # події field_update / sign
+
     # Підписи
     signatures: Dict[str, bool]
-    is_fully_signed: bool
+    filling_mode: str                # partial | full | ai
+
+    @property
+    def is_fully_signed(self) -> bool: ...
 ```
 
 ##### Session States
@@ -367,11 +372,11 @@ def check_session_access(
     require_participant: bool = False
 ):
     # Check if session is full (all roles taken)
-    is_full = len(session.party_users) >= expected_roles_count
+    is_full = len(session.role_owners) >= expected_roles_count
     
     if is_full or require_participant:
         # Only participants can access
-        if user_id not in session.party_users.values():
+        if user_id not in session.role_owners.values():
             raise HTTPException(403, "Not a participant")
 ```
 

@@ -1,22 +1,44 @@
+"""Tests for category query search."""
 import json
 
-from backend.domain.categories.index import store as category_store, find_category_by_query
+from backend.domain.categories.index import (
+    store as category_store,
+    find_category_by_query,
+)
 
 
-def test_find_category_by_keywords(tmp_path, mock_settings):
-    # Build custom index with two categories
+def test_find_category_by_keywords(mock_settings):
+    """Test that find_category_by_query matches keywords."""
     idx = {
         "categories": [
-            {"id": "lease", "label": "Оренда житла", "keywords": ["оренда", "квартира"], "meta_filename": "lease.json"},
-            {"id": "sale", "label": "Купівля", "keywords": ["купівля"], "meta_filename": "sale.json"},
+            {
+                "id": "lease",
+                "label": "Оренда житла",
+                "keywords": ["оренда", "квартира"],
+                "meta_filename": "lease.json",
+            },
+            {
+                "id": "sale",
+                "label": "Купівля",
+                "keywords": ["купівля"],
+                "meta_filename": "sale.json",
+            },
         ]
     }
-    (mock_settings.meta_categories_root / "categories_index.json").write_text(json.dumps(idx), encoding="utf-8")
-    # Meta files (minimal)
+    index_path = mock_settings.meta_categories_root / "categories_index.json"
+    index_path.write_text(json.dumps(idx), encoding="utf-8")
     for cid in ["lease", "sale"]:
-        (mock_settings.meta_categories_root / f"{cid}.json").write_text(json.dumps({"id": cid, "templates": [], "roles": {}, "party_modules": {}, "contract_fields": []}), encoding="utf-8")
+        meta = {
+            "id": cid,
+            "templates": [],
+            "roles": {},
+            "party_modules": {},
+            "contract_fields": [],
+        }
+        meta_path = mock_settings.meta_categories_root / f"{cid}.json"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
-    category_store._categories = {}
+    category_store.clear()
     category_store.load()
 
     best = find_category_by_query("хочу орендувати квартиру")
@@ -24,19 +46,33 @@ def test_find_category_by_keywords(tmp_path, mock_settings):
     assert best.id == "lease"
 
 
-def test_find_category_returns_custom_when_present(mock_settings, monkeypatch):
-    # Prepare store with only custom
+def test_find_category_returns_custom_when_present(mock_settings):
+    """Test that find_category_by_query returns custom category as fallback."""
     idx = {
         "categories": [
-            {"id": "custom", "label": "Custom", "keywords": ["будь-що"], "meta_filename": "custom.json"},
+            {
+                "id": "custom",
+                "label": "Custom",
+                "keywords": ["будь-що"],
+                "meta_filename": "custom.json",
+            },
         ]
     }
-    (mock_settings.meta_categories_root / "categories_index.json").write_text(json.dumps(idx), encoding="utf-8")
-    (mock_settings.meta_categories_root / "custom.json").write_text(json.dumps({"id": "custom", "templates": [], "roles": {}, "party_modules": {}, "contract_fields": []}), encoding="utf-8")
+    index_path = mock_settings.meta_categories_root / "categories_index.json"
+    index_path.write_text(json.dumps(idx), encoding="utf-8")
+    custom_meta = {
+        "id": "custom",
+        "templates": [],
+        "roles": {},
+        "party_modules": {},
+        "contract_fields": [],
+    }
+    custom_path = mock_settings.meta_categories_root / "custom.json"
+    custom_path.write_text(json.dumps(custom_meta), encoding="utf-8")
 
-    from backend.domain.categories import index as idx_module
-    category_store._categories = {}
-    idx_module.store._categories = {}
+    from backend.domain.categories import index as idx_module  # noqa: PLC0415
+    category_store.clear()
+    idx_module.store.clear()
     category_store.load()
 
     best = find_category_by_query("будь-що")

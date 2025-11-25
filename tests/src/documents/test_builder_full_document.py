@@ -1,3 +1,4 @@
+"""Full document build integration tests."""
 import pytest
 from docx import Document
 
@@ -8,10 +9,7 @@ from backend.domain.sessions.models import FieldState
 
 @pytest.mark.asyncio
 async def test_build_contract_with_all_fields(mock_settings, mock_categories_data):
-    """
-    Integration-style check: create a real DOCX template with all placeholders,
-    fill all required fields, and ensure the generated document contains values.
-    """
+    """Integration test: build contract with all fields and verify output."""
     session_id = "full_contract_doc"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data

@@ -1,16 +1,92 @@
+"""Session management service functions."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
-from datetime import datetime
 
-from backend.shared.logging import get_logger
-from backend.domain.sessions.models import Session, FieldState, SessionState
-from backend.domain.validation.core import validate_value
-from backend.domain.categories.index import list_entities, list_party_fields, store as category_store, _load_meta
-from backend.domain.services.fields import validate_session_readiness, get_required_fields
+from backend.domain.categories.index import (
+    list_entities,
+    list_party_fields,
+    load_meta,
+    store as category_store,
+)
+from backend.domain.services.fields import get_required_fields, validate_session_readiness
+from backend.domain.sessions.models import FieldState, Session, SessionState
+from backend.domain.validation.core import infer_value_type, validate_value
 from backend.shared.enums import FillingMode
+from backend.shared.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_effective_person_type(
+    session: Session,
+    role: str,
+    *,
+    apply_fallback: bool = True,
+) -> Optional[str]:
+    """Get the effective person type for a role in the session.
+
+    This centralizes the logic for determining person_type to avoid
+    inconsistent fallback behavior across different parts of the codebase.
+
+    Args:
+        session: The session object.
+        role: The role to get person type for.
+        apply_fallback: If True, will try to infer from category metadata
+                       and default to "individual" if not found.
+
+    Returns:
+        The person type string or None if not determinable.
+    """
+    # 1. Check party_types mapping first (the primary source)
+    if session.party_types and role in session.party_types:
+        return session.party_types[role]
+
+    # 2. Check if role matches current session context
+    if role == session.role and session.person_type:
+        return session.person_type
+
+    # 3. Apply fallback logic if requested
+    if not apply_fallback:
+        return None
+
+    fallback_type = None
+
+    # Try to get from category metadata
+    if session.category_id:
+        try:
+            category = category_store.get(session.category_id)
+            if category:
+                meta = load_meta(category)
+                role_meta = (meta.get("roles") or {}).get(role) or {}
+
+                # 1. Check for explicit default_person_type in role metadata
+                default_type = role_meta.get("default_person_type")
+                if default_type:
+                    fallback_type = default_type
+                else:
+                    # 2. Use first allowed type as fallback
+                    allowed = role_meta.get("allowed_person_types") or []
+                    if allowed:
+                        fallback_type = allowed[0]
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    # Ultimate fallback: first available party_module or "individual"
+    if not fallback_type and session.category_id:
+        try:
+            category = category_store.get(session.category_id)
+            if category:
+                meta = load_meta(category)
+                party_modules = meta.get("party_modules") or {}
+                if party_modules:
+                    fallback_type = next(iter(party_modules.keys()))
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    return fallback_type or "individual"
+
 
 def update_session_field(
     session: Session,
@@ -20,9 +96,8 @@ def update_session_field(
     tags: Optional[Dict[str, str]] = None,
     context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str], FieldState]:
-    """
-    Updates a single field in the session with validation, history tracking, and state recalculation.
-    
+    """Update a field in the session with validation and state recalculation.
+
     Args:
         session: The session object to update.
         field: The field name (e.g. "iban", "name").
@@ -34,7 +109,6 @@ def update_session_field(
     Returns:
         Tuple[success, error_message, field_state]
     """
-    
     ctx = context or {}
     raw_value = "" if value is None else str(value)
 
@@ -48,7 +122,11 @@ def update_session_field(
 
     # 1. Determine Context (Entity vs Party Field)
     if not session.category_id:
-        return False, "Спочатку потрібно обрати категорію (set_category).", FieldState(status="error", error="No category")
+        return (
+            False,
+            "Спочатку потрібно обрати категорію (set_category).",
+            FieldState(status="error", error="No category"),
+        )
 
     entities = {e.field: e for e in list_entities(session.category_id)}
     entity = entities.get(field)
@@ -59,36 +137,21 @@ def update_session_field(
         # It must be a party field
         effective_role = role or session.role
         if not effective_role:
-             return False, "Спочатку потрібно обрати роль (set_party_context) або передати її явно.", FieldState(status="error", error="Role not determined")
+            return (
+                False,
+                "Спочатку потрібно обрати роль (set_party_context) або передати її явно.",
+                FieldState(status="error", error="Role not determined"),
+            )
 
-        effective_person_type = None
-        if session.party_types and effective_role in session.party_types:
-            effective_person_type = session.party_types[effective_role]
-        elif effective_role == session.role:
-            effective_person_type = session.person_type
+        # Use centralized function for determining person type with fallback
+        effective_person_type = get_effective_person_type(
+            session, effective_role, apply_fallback=True
+        )
 
-        if not effective_person_type:
-            # Спробувати підставити дефолтний тип з метаданих ролі, щоб не блокувати введення
-            fallback_type = None
-            try:
-                category = category_store.get(session.category_id)
-                if category:
-                    meta = _load_meta(category)
-                    role_meta = (meta.get("roles") or {}).get(effective_role) or {}
-                    allowed = role_meta.get("allowed_person_types") or []
-                    if allowed:
-                        fallback_type = allowed[0]
-            except Exception:
-                fallback_type = None
-
-            if not fallback_type:
-                fallback_type = "individual"
-
-            effective_person_type = fallback_type
-            if session.party_types is None:
-                session.party_types = {}
-            # Записуємо дефолт, якщо раніше тип не був встановлений для цієї ролі
-            session.party_types.setdefault(effective_role, effective_person_type)
+        # Store the fallback type if it was applied
+        if session.party_types is None:
+            session.party_types = {}
+        session.party_types.setdefault(effective_role, effective_person_type)
 
         party_fields_map = {
             f.field: f
@@ -96,7 +159,11 @@ def update_session_field(
         }
         party_meta = party_fields_map.get(field)
         if party_meta is None:
-            return False, "Поле не належить до обраної категорії.", FieldState(status="error", error="Unknown field")
+            return (
+                False,
+                "Поле не належить до обраної категорії.",
+                FieldState(status="error", error="Unknown field"),
+            )
         is_party_field = True
     else:
         # Contract field
@@ -116,7 +183,11 @@ def update_session_field(
     # 2. Check Signature Constraints
     # If CURRENT role has signed, they cannot edit.
     if session.signatures.get(effective_role or session.role):
-         return False, "Ви вже підписали цей документ. Редагування заборонено.", FieldState(status="error", error="Signed by user")
+        return (
+            False,
+            "Ви вже підписали цей документ. Редагування заборонено.",
+            FieldState(status="error", error="Signed by user"),
+        )
 
     # If ANY OTHER role has signed, we must invalidate their signatures.
     # We will do this AFTER validation, only if the update is valid.
@@ -126,17 +197,8 @@ def update_session_field(
     if entity:
         value_type = entity.type
     elif is_party_field:
-         # Heuristic mapping for party fields (duplicated from UpsertFieldTool, but centralized here)
-         if "rnokpp" in field or "tax_id" in field:
-             value_type = "rnokpp"
-         elif "edrpou" in field:
-             value_type = "edrpou"
-         elif "iban" in field:
-             value_type = "iban"
-         elif "date" in field:
-             value_type = "date"
-         elif "email" in field:
-             value_type = "email"
+        # Use centralized heuristic for inferring type from field name
+        value_type = infer_value_type(field)
 
     normalized, error = validate_value(value_type, value)
     if error_override:
@@ -146,7 +208,11 @@ def update_session_field(
     # 3. Update Field State
     if is_party_field:
         if not effective_role:
-             return False, "Role not determined.", FieldState(status="error", error="Role missing")
+            return (
+                False,
+                "Role not determined.",
+                FieldState(status="error", error="Role missing"),
+            )
 
         if effective_role not in session.party_fields:
             session.party_fields[effective_role] = {}
@@ -185,7 +251,7 @@ def update_session_field(
     # Add global history event
     session.history.append(
         {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": datetime.now(timezone.utc).isoformat(),
             "type": "field_update",
             "key": key,
             "user_id": ctx.get("user_id"),
@@ -198,12 +264,11 @@ def update_session_field(
     )
 
     # Also store flat key for simple access if unique (backward compat)
-    # But be careful about collisions. 
+    # But be careful about collisions.
     # The builder uses specific keys, so we should ensure we populate what builder expects.
     # Builder expects keys from list_entities and list_party_fields.
     # If it's a party field, builder constructs key as "{role}.{field}".
     # So 'key' variable above is correct.
-    
     session.all_data = all_data
 
     # 5. Recalculate Session State
@@ -219,18 +284,20 @@ def update_session_field(
 
     # 7. Invalidate Signatures of OTHER parties
     if ok:
-        # If we successfully updated a field, any existing signatures from OTHER parties are now invalid
-        # because the document content has changed.
+        # If we successfully updated a field, any existing signatures from
+        # OTHER parties are now invalid because the document content changed.
         invalidated_roles = []
         for r, signed in session.signatures.items():
             if signed and r != (effective_role or session.role):
                 session.signatures[r] = False
                 invalidated_roles.append(r)
-        
+
         if invalidated_roles:
             logger.info(
-                "update_session_field: Invalidated signatures for roles=%s due to update by %s",
-                invalidated_roles, effective_role or session.role
+                "update_session_field: Invalidated signatures for roles=%s "
+                "due to update by %s",
+                invalidated_roles,
+                effective_role or session.role,
             )
             # Optionally log to history as separate events? Skip for now.
 
@@ -270,7 +337,7 @@ def set_party_type(session: Session, role: str, person_type: str) -> None:
         session.party_types = {}
 
     old_type = session.party_types.get(role)
-    
+
     # Update mapping
     session.party_types[role] = person_type
 
@@ -282,7 +349,7 @@ def set_party_type(session: Session, role: str, person_type: str) -> None:
         )
         if role in session.party_fields:
             session.party_fields[role].clear()
-        
+
         # Also clear from all_data?
         # all_data keys are like "{role}.{field}".
         # We should find all keys starting with "{role}." and remove them?
@@ -297,9 +364,12 @@ def set_party_type(session: Session, role: str, person_type: str) -> None:
 
         # Invalidate signatures for this role (and re-evaluate state)
         if role in session.signatures:
-            logger.info("set_party_type: Invalidating signature for role=%s due to type change", role)
+            logger.info(
+                "set_party_type: Invalidating signature for role=%s due to type change",
+                role,
+            )
             session.signatures[role] = False
-            
+
         # Re-calculate readiness
         is_ready = validate_session_readiness(session)
         session.can_build_contract = is_ready
@@ -307,7 +377,7 @@ def set_party_type(session: Session, role: str, person_type: str) -> None:
             session.state = SessionState.READY_TO_BUILD
         else:
             session.state = SessionState.COLLECTING_FIELDS
-            
+
         _update_progress(session)
 
 
@@ -319,29 +389,26 @@ def set_session_template(session: Session, template_id: str) -> None:
     # Ideally we should validate that template_id belongs to session.category_id
     # But to avoid circular imports or heavy loading, we might skip it or do it lightly.
     # The tools usually check this. Let's assume valid input or add check if needed.
-    
     if session.template_id == template_id:
         return
 
     session.template_id = template_id
     session.state = SessionState.TEMPLATE_SELECTED
-    
-    # Reset fields? 
+
+    # Reset fields?
     # If we switch template within same category, maybe keep fields?
     # But different templates might have different fields.
     # For safety, we might want to warn or clear.
     # Current logic in tools didn't clear fields.
     # Let's keep it as is (preserve data), but maybe re-validate readiness?
-    
     is_ready = validate_session_readiness(session)
     session.can_build_contract = is_ready
     if is_ready:
         session.state = SessionState.READY_TO_BUILD
-    
+
     # If not ready, stay at TEMPLATE_SELECTED (or COLLECTING_FIELDS if we had data?)
     # Actually, if we just selected template, we are likely at TEMPLATE_SELECTED.
     # Unless we already have enough data to be ready.
-    
     _update_progress(session)
 
 
@@ -365,13 +432,12 @@ def claim_session_role(session: Session, role: str, user_id: str) -> None:
     if not session.category_id:
         raise ValueError("Category is not set for the session.")
 
-    from backend.domain.categories.index import store as category_store, _load_meta
-
+    # category_store and load_meta already imported at module level
     category = category_store.get(session.category_id)
     if not category:
         raise ValueError(f"Category '{session.category_id}' not found.")
 
-    meta = _load_meta(category)
+    meta = load_meta(category)
     roles_meta = meta.get("roles") or {}
     if role not in roles_meta:
         raise ValueError(f"Role '{role}' does not exist in category '{session.category_id}'.")
@@ -381,12 +447,18 @@ def claim_session_role(session: Session, role: str, user_id: str) -> None:
             # Already owns this role; nothing to change.
             return
         if uid == user_id and existing_role != role:
-            logger.warning("User %s already owns role %s in session %s", user_id, existing_role, session.session_id)
+            logger.warning(
+                "User %s already owns role %s in session %s",
+                user_id, existing_role, session.session_id,
+            )
             raise PermissionError(f"User already owns role '{existing_role}'.")
 
     current_owner = (session.role_owners or {}).get(role)
     if current_owner and current_owner != user_id:
-        logger.warning("Role %s already claimed by %s in session %s", role, current_owner, session.session_id)
+        logger.warning(
+            "Role %s already claimed by %s in session %s",
+            role, current_owner, session.session_id,
+        )
         raise PermissionError(f"Role '{role}' is already claimed.")
 
     session.role_owners[role] = user_id
@@ -435,13 +507,14 @@ def can_edit_contract_field(
     session: Session,
     *,
     acting_user_id: str,
-    field_name: str,
+    field_name: str,  # noqa: ARG001
 ) -> bool:
+    """Access control for editing contract fields.
+
+    Any participant (role owner) can edit.
+    Creator can edit even if roles are not claimed yet.
     """
-    Access control for editing contract fields.
-    - Any participant (role owner) can edit.
-    - Creator can edit even if roles не закріплені.
-    """
+    del field_name  # unused, kept for API consistency
     if not session.category_id:
         return False
 

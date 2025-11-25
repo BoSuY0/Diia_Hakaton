@@ -1,31 +1,34 @@
+"""Session management tools for the AI agent."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from datetime import datetime
+import json
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from backend.agent.tools.base import BaseTool
 from backend.agent.tools.registry import register_tool
 from backend.domain.categories.index import (
-    Entity,
     PartyField,
     list_entities,
     list_party_fields,
     list_templates,
     store as category_store,
+    load_meta,
 )
-from backend.shared.enums import PersonType, FillingMode
-from backend.shared.logging import get_logger
-from backend.shared.errors import SessionNotFoundError
-from backend.domain.services.session import can_edit_contract_field, can_edit_party_field
 from backend.domain.documents.builder import build_contract as build_contract_document
-from backend.domain.sessions.models import FieldState, SessionState
+from backend.domain.services.session import (
+    can_edit_contract_field,
+    can_edit_party_field,
+    get_effective_person_type,
+)
+from backend.domain.sessions.models import SessionState
 from backend.infra.persistence.store import (
     aload_session,
     atransactional_session,
-    aget_or_create_session,
 )
-from backend.domain.validation.core import validate_value
-from backend.domain.services.fields import validate_session_readiness
+from backend.shared.enums import PersonType, FillingMode
+from backend.shared.errors import SessionNotFoundError
+from backend.shared.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,36 +40,34 @@ def _get_main_role(category_id: str | None) -> str | None:
     if not category_id:
         return None
     try:
-        from backend.domain.categories.index import store as category_store, _load_meta
-
         cat = category_store.get(category_id)
         if not cat:
             return None
-        meta = _load_meta(cat)
+        meta = load_meta(cat)
         roles = meta.get("roles") or {}
         for role_key in roles.keys():
             return role_key
-    except Exception:
+    except (FileNotFoundError, KeyError, TypeError):
         return None
     return None
 
 
 def _template_ids() -> List[str]:
-    # This helper might need to be more efficient or cached,
-    # but for now we replicate original logic
-    from backend.domain.categories.index import store as category_store
+    """Get all template IDs from all categories."""
     ids: set[str] = set()
     try:
         for category in category_store.categories.values():
             for t in list_templates(category.id):
                 ids.add(t.id)
-    except Exception:
+    except (AttributeError, TypeError):
         return []
     return sorted(ids)
 
 
 @register_tool
 class SetTemplateTool(BaseTool):
+    """Tool to set contract template within a category."""
+
     @property
     def name(self) -> str:
         return "set_template"
@@ -126,7 +127,7 @@ class SetTemplateTool(BaseTool):
                     "error": "Шаблон не належить до обраної категорії.",
                 }
 
-            from backend.domain.services.session import set_session_template
+            from backend.domain.services.session import set_session_template  # pylint: disable=import-outside-toplevel
             set_session_template(session, template_id)
 
             return {
@@ -138,6 +139,8 @@ class SetTemplateTool(BaseTool):
 
 @register_tool
 class SetPartyContextTool(BaseTool):
+    """Tool to set user role and person type for a session."""
+
     @property
     def name(self) -> str:
         return "set_party_context"
@@ -182,13 +185,13 @@ class SetPartyContextTool(BaseTool):
         try:
             PersonType(person_type)
         except ValueError:
-             return {
+            return {
                 "ok": False,
-                "error": f"Невідомий тип особи. Допустимі: {', '.join([p.value for p in PersonType])}",
+                "error": f"Невідомий тип особи. Допустимі: "
+                         f"{', '.join([p.value for p in PersonType])}",
             }
 
         # Validate person_type against category metadata
-        from backend.domain.categories.index import store as category_store, _load_meta
         user_id = context.get("user_id") or args.get("user_id")
         if not user_id:
             return {"ok": False, "error": "Необхідний заголовок X-User-ID.", "status_code": 401}
@@ -197,7 +200,7 @@ class SetPartyContextTool(BaseTool):
         if category_store.categories is None or not category_store.categories:
             try:
                 category_store.load()
-            except Exception as exc:
+            except (FileNotFoundError, OSError) as exc:
                 logger.error("set_party_context: failed to load categories: %s", exc)
                 return {"ok": False, "error": "Не вдалося завантажити метадані категорій."}
 
@@ -208,26 +211,43 @@ class SetPartyContextTool(BaseTool):
 
                 cat = category_store.get(session.category_id)
                 if not cat:
-                    return {"ok": False, "error": f"Невідома категорія: {session.category_id}.", "status_code": 404}
+                    return {
+                        "ok": False,
+                        "error": f"Невідома категорія: {session.category_id}.",
+                        "status_code": 404,
+                    }
 
                 try:
-                    meta = _load_meta(cat)
+                    meta = load_meta(cat)
                 except FileNotFoundError:
                     return {"ok": False, "error": "Метадані категорії відсутні."}
-                except Exception as exc:
-                    logger.error("set_party_context: failed to read meta for %s: %s", session.category_id, exc)
+                except (OSError, KeyError) as exc:
+                    logger.error(
+                        "set_party_context: failed to read meta for %s: %s",
+                        session.category_id, exc,
+                    )
                     return {"ok": False, "error": "Не вдалося прочитати метадані категорії."}
 
                 roles_meta = (meta.get("roles") or {})
                 role_meta = roles_meta.get(role)
                 if not role_meta:
-                    return {"ok": False, "error": "Невідома роль для цієї категорії.", "status_code": 400}
+                    return {
+                        "ok": False,
+                        "error": "Невідома роль для цієї категорії.",
+                        "status_code": 400,
+                    }
 
                 allowed_types = role_meta.get("allowed_person_types", []) if role_meta else []
                 if allowed_types and person_type not in allowed_types:
-                    return {"ok": False, "error": "Невірний тип особи для ролі.", "status_code": 400}
+                    return {
+                        "ok": False,
+                        "error": "Невірний тип особи для ролі.",
+                        "status_code": 400,
+                    }
 
-                from backend.domain.services.session import set_party_type, claim_session_role
+                from backend.domain.services.session import (  # pylint: disable=import-outside-toplevel
+                    set_party_type, claim_session_role,
+                )
                 try:
                     claim_session_role(session, role, user_id)
                 except PermissionError as exc:
@@ -240,8 +260,8 @@ class SetPartyContextTool(BaseTool):
 
                 if filling_mode:
                     try:
-                        session.filling_mode = FillingMode(filling_mode)
-                    except Exception:
+                        session.filling_mode = FillingMode(filling_mode).value
+                    except ValueError:
                         session.filling_mode = filling_mode
 
                 return {
@@ -252,10 +272,17 @@ class SetPartyContextTool(BaseTool):
                     "filling_mode": session.filling_mode,
                 }
         except SessionNotFoundError:
-            return {"ok": False, "error": "Сесію не знайдено або вона недоступна.", "status_code": 404}
-            
+            return {
+                "ok": False,
+                "error": "Сесію не знайдено або вона недоступна.",
+                "status_code": 404,
+            }
+
+
 @register_tool
 class GetPartyFieldsForSessionTool(BaseTool):
+    """Tool to get party fields for the current session role/type."""
+
     @property
     def name(self) -> str:
         return "get_party_fields_for_session"
@@ -288,14 +315,15 @@ class GetPartyFieldsForSessionTool(BaseTool):
                 "ok": False,
                 "error": "Спочатку потрібно обрати категорію договору.",
             }
-        # Determine person type for the current role
-        # Fallback to session.person_type if not in party_types (backward compat)
-        current_person_type = session.person_type
-        if session.role and session.party_types and session.role in session.party_types:
-            current_person_type = session.party_types[session.role]
+        # Use centralized function for determining person type
+        current_person_type = None
+        if session.role:
+            current_person_type = get_effective_person_type(
+                session, session.role, apply_fallback=False
+            )
 
         if not current_person_type:
-             return {
+            return {
                 "ok": False,
                 "error": "Спочатку потрібно обрати тип особи (individual/fop/company).",
             }
@@ -311,7 +339,6 @@ class GetPartyFieldsForSessionTool(BaseTool):
         try:
             cat = category_store.get(session.category_id)
             if cat:
-                import json
                 meta = json.loads(cat.meta_path.read_text(encoding="utf-8"))
                 role_label = meta.get("roles", {}).get(session.role, {}).get("label")
                 person_type_label = (
@@ -319,7 +346,7 @@ class GetPartyFieldsForSessionTool(BaseTool):
                     .get(current_person_type, {})
                     .get("label")
                 )
-        except Exception:
+        except (FileNotFoundError, KeyError, json.JSONDecodeError):
             pass
 
         return {
@@ -342,6 +369,8 @@ class GetPartyFieldsForSessionTool(BaseTool):
 
 @register_tool
 class UpsertFieldTool(BaseTool):
+    """Tool to update a field value in a session."""
+
     @property
     def name(self) -> str:
         return "upsert_field"
@@ -362,7 +391,7 @@ class UpsertFieldTool(BaseTool):
                 "role": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Optional. Explicitly specify which party this field belongs to. If not provided, uses the current session role.",
+                    "description": "Optional. Party this field belongs to.",
                 },
                 "field": {
                     "type": "string",
@@ -389,7 +418,7 @@ class UpsertFieldTool(BaseTool):
         # The mapping is usually in context["pii_tags"] if we support that flow.
         # For now, we assume value might contain tags, and we try to unmask if tags are provided.
         tags = context.get("pii_tags") or context.get("tags")
-        
+
         # Unmask value if needed (for storage)
         # Actually, we want to store the REAL value, so we unmask.
         real_value = self._unmask_value(value, tags)
@@ -401,29 +430,35 @@ class UpsertFieldTool(BaseTool):
             if not user_id:
                 return {"ok": False, "error": "Необхідний заголовок X-User-ID."}
 
-            entities = {e.field: e for e in list_entities(session.category_id)} if session.category_id else {}
+            if session.category_id:
+                entities = {e.field: e for e in list_entities(session.category_id)}
+            else:
+                entities = {}
             entity = entities.get(field)
 
             # Доступ до умов договору (contract fields)
             if entity is not None:
                 if not can_edit_contract_field(session, acting_user_id=user_id, field_name=field):
-                    return {"ok": False, "error": "Вам не дозволено редагувати це поле договору."}
+                    return {
+                        "ok": False,
+                        "error": "Вам не дозволено редагувати це поле договору.",
+                        "status_code": 403,
+                    }
             elif session.category_id:
                 # It is a party field
                 effective_role = role_arg or session.role
                 if effective_role:
-                    if not can_edit_party_field(session, acting_user_id=user_id, target_role=effective_role):
+                    can_edit = can_edit_party_field(
+                        session, acting_user_id=user_id, target_role=effective_role
+                    )
+                    if not can_edit:
                         return {
                             "ok": False,
-                            "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'."
+                            "error": f"Ви не маєте права редагувати поля ролі '{effective_role}'.",
+                            "status_code": 403,
                         }
 
-            # Normalize context so downstream history uses the declared user_id
-            normalized_context = dict(context)
-            normalized_context["client_id"] = user_id
-            normalized_context["user_id"] = user_id
-
-            from backend.domain.services.session import update_session_field
+            from backend.domain.services.session import update_session_field  # pylint: disable=import-outside-toplevel
 
             ok, error, fs = update_session_field(
                 session=session,
@@ -463,6 +498,8 @@ class UpsertFieldTool(BaseTool):
 
 @register_tool
 class GetSessionSummaryTool(BaseTool):
+    """Tool to get session field status summary."""
+
     @property
     def name(self) -> str:
         return "get_session_summary"
@@ -531,12 +568,14 @@ class GetSessionSummaryTool(BaseTool):
         }
 
     def format_result(self, result: Any) -> str:
-        from backend.shared.vsc import vsc_summary
+        from backend.shared.vsc import vsc_summary  # pylint: disable=import-outside-toplevel
         return vsc_summary(result)
 
 
 @register_tool
 class SetFillingModeTool(BaseTool):
+    """Tool to set the filling mode for a session."""
+
     @property
     def name(self) -> str:
         return "set_filling_mode"
@@ -582,8 +621,11 @@ class SetFillingModeTool(BaseTool):
                 "filling_mode": mode,
             }
 
+
 @register_tool
 class BuildContractTool(BaseTool):
+    """Tool to generate the final DOCX contract."""
+
     @property
     def name(self) -> str:
         return "build_contract"
@@ -624,16 +666,21 @@ class BuildContractTool(BaseTool):
         logger.info(
             "tool=build_contract session_id=%s template_id=%s", session_id, template_id
         )
-        # build_contract_document is async; call it directly to avoid wrapping a coroutine in run_sync
-        result = await build_contract_document(session_id=session_id, template_id=template_id)
+        # build_contract_document is async; call it directly
+        result = await build_contract_document(
+            session_id=session_id, template_id=template_id
+        )
 
         async with atransactional_session(session_id) as session:
             session.state = SessionState.BUILT
 
         return result
 
+
 @register_tool
 class SignContractTool(BaseTool):
+    """Tool to sign the contract for a specific role."""
+
     @property
     def name(self) -> str:
         return "sign_contract"
@@ -654,7 +701,7 @@ class SignContractTool(BaseTool):
                 "role": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Role to sign as (must match session role or be explicit)"
+                    "description": "Role to sign as."
                 }
             },
             "required": ["session_id"],
@@ -670,16 +717,18 @@ class SignContractTool(BaseTool):
             # Determine role
             role = role_arg or session.role
             if not role:
-                 return {
+                return {
                     "ok": False,
-                    "error": "Не визначена роль для підпису. Встановіть контекст або передайте роль.",
+                    "error": "Не визначена роль для підпису. "
+                           "Встановіть контекст або передайте роль.",
                 }
 
             # Check state
             if session.state not in [SessionState.BUILT, SessionState.READY_TO_SIGN]:
-                 return {
+                return {
                     "ok": False,
-                    "error": f"Не можна підписати договір у стані {session.state.value}. Спочатку сформуйте його.",
+                    "error": f"Не можна підписати договір у стані "
+                           f"{session.state.value}. Спочатку сформуйте його.",
                 }
 
             if not user_id:
@@ -693,7 +742,7 @@ class SignContractTool(BaseTool):
 
             # Check if already signed
             if session.signatures.get(role):
-                 return {
+                return {
                     "ok": False,
                     "error": "Ви вже підписали цей договір.",
                 }
@@ -708,17 +757,9 @@ class SignContractTool(BaseTool):
             else:
                 session.state = SessionState.READY_TO_SIGN
 
-            session.sign_history.append(
-                {
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
-                    "user_id": user_id,
-                    "roles": [role],
-                    "state": session.state.value,
-                }
-            )
             session.history.append(
                 {
-                    "ts": datetime.utcnow().isoformat() + "Z",
+                    "ts": datetime.now(timezone.utc).isoformat(),
                     "type": "sign",
                     "user_id": user_id,
                     "roles": [role],

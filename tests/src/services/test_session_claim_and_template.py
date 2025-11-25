@@ -1,7 +1,7 @@
+"""Tests for session role claiming and template setting."""
 import pytest
 
 from backend.domain.services.session import claim_session_role, set_session_template
-import pytest
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState, FieldState
 
@@ -15,7 +15,9 @@ def _session(cat_id="test_cat"):
     return s
 
 
-def test_claim_session_role_blocks_second_role_in_partial(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_claim_session_role_blocks_second_role_in_partial(mock_categories_data):
+    """Test that user cannot claim second role in partial mode."""
     s = _session(mock_categories_data)
     s.role_owners = {"lessor": "user1"}
     save_session(s)
@@ -24,7 +26,9 @@ def test_claim_session_role_blocks_second_role_in_partial(mock_settings, mock_ca
         claim_session_role(s, "lessee", "user1")
 
 
-def test_claim_session_role_allows_second_role_in_full_mode(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_claim_session_role_allows_second_role_in_full_mode(mock_categories_data):
+    """Test that user cannot claim second role even in full mode."""
     s = _session(mock_categories_data)
     s.filling_mode = "full"
     s.role_owners = {"lessor": "user1"}
@@ -33,7 +37,9 @@ def test_claim_session_role_allows_second_role_in_full_mode(mock_settings, mock_
         claim_session_role(s, "lessee", "user1")
 
 
-def test_claim_session_role_blocks_taken_role(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_claim_session_role_blocks_taken_role(mock_categories_data):
+    """Test that user cannot claim already taken role."""
     s = _session(mock_categories_data)
     s.role_owners = {"lessor": "owner1"}
     save_session(s)
@@ -41,7 +47,9 @@ def test_claim_session_role_blocks_taken_role(mock_settings, mock_categories_dat
         claim_session_role(s, "lessor", "intruder")
 
 
-def test_set_session_template_updates_state_based_on_readiness(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_set_session_template_updates_state_based_on_readiness(mock_categories_data):
+    """Test that setting template updates state based on field readiness."""
     s = _session(mock_categories_data)
     s.template_id = None
     # Fill all required fields to be ready

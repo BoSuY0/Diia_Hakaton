@@ -1,13 +1,11 @@
-import json
+"""Tests for access control and signing workflows."""
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.http.server import app
 from backend.infra.persistence.store import get_or_create_session, load_session, save_session
-from backend.domain.sessions.models import SessionState, FieldState
-import asyncio
-
-from backend.agent.tools.session import SetPartyContextTool
+from backend.domain.sessions.models import SessionState
+from backend.agent.tools.session import SetPartyContextTool, UpsertFieldTool
 from backend.shared.enums import FillingMode
 
 client = TestClient(app)
@@ -21,7 +19,6 @@ def _bootstrap_session(cat_id: str, template_id: str = "t1"):
     s.party_types = {"lessor": "individual", "lessee": "individual"}
     s.state = SessionState.TEMPLATE_SELECTED
     s.role_owners = {}
-    s.party_users = {}
     s.signatures = {}
     s.history = []
     s.all_data = {}
@@ -36,7 +33,6 @@ def _fresh_session(session_id: str, cat_id: str, template_id: str = "t1") -> str
     s.party_types = {"lessor": "individual", "lessee": "individual"}
     s.state = SessionState.TEMPLATE_SELECTED
     s.role_owners = {}
-    s.party_users = {}
     s.signatures = {}
     s.history = []
     s.all_data = {}
@@ -44,11 +40,13 @@ def _fresh_session(session_id: str, cat_id: str, template_id: str = "t1") -> str
     return session_id
 
 
-def test_fields_endpoint_requires_header_when_participant(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_fields_endpoint_requires_header_when_participant(mock_categories_data):
+    """Test that fields endpoint requires X-User-ID header when session has participants."""
     session_id = _bootstrap_session(mock_categories_data)
     # Claim a role to mark participants
     s = load_session(session_id)
-    s.party_users = {"lessor": "owner1"}
+    s.role_owners = {"lessor": "owner1"}
     save_session(s)
 
     # Without header -> 401
@@ -75,7 +73,9 @@ def test_fields_endpoint_requires_header_when_participant(mock_settings, mock_ca
     assert resp.status_code == 200
 
 
-def test_fields_header_required_even_without_participants(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_fields_header_required_even_without_participants(mock_categories_data):
+    """Test that fields endpoint requires header even without participants."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.role_owners = {"lessor": "u_header"}
@@ -95,7 +95,9 @@ def test_fields_header_required_even_without_participants(mock_settings, mock_ca
     assert resp.status_code == 200
 
 
-def test_sign_full_mode_with_empty_owners(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sign_full_mode_with_empty_owners(mock_categories_data):
+    """Test signing in full mode with no role owners claimed."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.state = SessionState.BUILT
@@ -123,12 +125,14 @@ def test_sign_full_mode_with_empty_owners(mock_settings, mock_categories_data):
     assert signed.get("lessee") is not True
 
 
-def test_sign_full_mode_conflict_owner(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sign_full_mode_conflict_owner(mock_categories_data):
+    """Test that non-owner cannot sign in full mode."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.state = SessionState.BUILT
     s.filling_mode = FillingMode.FULL
-    s.party_users = {"lessor": "owner1", "lessee": "owner2"}
+    s.role_owners = {"lessor": "owner1", "lessee": "owner2"}
     save_session(s)
 
     resp = client.post(
@@ -138,7 +142,9 @@ def test_sign_full_mode_conflict_owner(mock_settings, mock_categories_data):
     assert resp.status_code in (400, 403)
 
 
-def test_download_forbidden_until_signed(mock_settings, mock_categories_data, monkeypatch):
+@pytest.mark.usefixtures("mock_settings")
+def test_download_forbidden_until_signed(mock_categories_data, monkeypatch):
+    """Test that contract download is forbidden until fully signed."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.state = SessionState.BUILT
@@ -146,7 +152,7 @@ def test_download_forbidden_until_signed(mock_settings, mock_categories_data, mo
     save_session(s)
 
     # Mock builder to avoid file IO
-    async def _mock_build(session_id, template_id):
+    async def _mock_build(_session_id, _template_id):
         return {"file_path": "tmp.docx"}
 
     monkeypatch.setattr("backend.api.http.server.tool_build_contract_async", _mock_build)
@@ -170,19 +176,25 @@ def test_download_forbidden_until_signed(mock_settings, mock_categories_data, mo
 
 
 @pytest.mark.asyncio
-async def test_set_party_context_requires_category_and_allowed_type(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_set_party_context_requires_category_and_allowed_type(mock_categories_data):
+    """Test that setting party context requires valid category and allowed person type."""
     tool = SetPartyContextTool()
     session_id = "ctx_access_test"
     s = get_or_create_session(session_id)
     save_session(s)  # no category
-    res = await tool.execute({"session_id": session_id, "role": "lessor", "person_type": "individual"}, {})
+    res = await tool.execute(
+        {"session_id": session_id, "role": "lessor", "person_type": "individual"}, {}
+    )
     assert res["ok"] is False
 
     s = load_session(session_id)
     s.category_id = mock_categories_data
     save_session(s)
     # Disallowed type
-    res = await tool.execute({"session_id": session_id, "role": "lessor", "person_type": "fop"}, {})
+    res = await tool.execute(
+        {"session_id": session_id, "role": "lessor", "person_type": "fop"}, {}
+    )
     assert res["ok"] is False
 
     # Allowed type
@@ -192,10 +204,12 @@ async def test_set_party_context_requires_category_and_allowed_type(mock_setting
     )
     assert res["ok"] is True
     s = load_session(session_id)
-    assert s.party_users["lessor"] == "user_ctx"
+    assert s.role_owners["lessor"] == "user_ctx"
 
 
-def test_sign_contract_records_history(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sign_contract_records_history(mock_categories_data):
+    """Test that signing contract records event in session history."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.state = SessionState.BUILT
@@ -213,10 +227,17 @@ def test_sign_contract_records_history(mock_settings, mock_categories_data):
     entry = signed_session.history[-1]
     assert entry["user_id"] == "user_history"
     assert set(entry["roles"]) == {"lessor"}
-    assert entry["state"] in {SessionState.BUILT.value, SessionState.READY_TO_SIGN.value, SessionState.COMPLETED.value}
+    valid_states = {
+        SessionState.BUILT.value,
+        SessionState.READY_TO_SIGN.value,
+        SessionState.COMPLETED.value,
+    }
+    assert entry["state"] in valid_states
 
 
-def test_session_history_endpoint_requires_auth(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_session_history_endpoint_requires_auth(mock_categories_data):
+    """Test that session history endpoint requires authentication."""
     session_id = _bootstrap_session(mock_categories_data)
     s = load_session(session_id)
     s.state = SessionState.BUILT
@@ -235,7 +256,9 @@ def test_session_history_endpoint_requires_auth(mock_settings, mock_categories_d
     assert "history" in payload
 
 
-def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_requirements_endpoint_reports_missing_fields(mock_categories_data):
+    """Test that requirements endpoint reports missing fields correctly."""
     session_id = _bootstrap_session(mock_categories_data)
 
     # Requires participant header
@@ -253,7 +276,9 @@ def test_requirements_endpoint_reports_missing_fields(mock_settings, mock_catego
     assert data["missing"]["contract"] or data["missing"]["roles"]
 
 
-def test_user_cannot_claim_multiple_roles_even_full(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_user_cannot_claim_multiple_roles_even_full(mock_categories_data):
+    """Test that user cannot claim multiple roles even in full mode."""
     session_id = _fresh_session("acl_single_role", mock_categories_data)
     s = load_session(session_id)
     s.filling_mode = FillingMode.FULL
@@ -275,7 +300,9 @@ def test_user_cannot_claim_multiple_roles_even_full(mock_settings, mock_categori
 
 
 @pytest.mark.asyncio
-async def test_creator_full_mode_prefill_blocked_after_claim(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_creator_full_mode_prefill_blocked_after_claim(mock_categories_data):
+    """Test that creator cannot edit fields after another user claims the role."""
     session_id = _fresh_session("acl_creator_full", mock_categories_data)
     s = load_session(session_id)
     s.filling_mode = FillingMode.FULL

@@ -31,7 +31,8 @@ def ready_session(mock_settings, mock_categories_data):
     save_session(s)
     return session_id
 
-def test_build_contract_success(ready_session, mock_settings):
+@pytest.mark.asyncio
+async def test_build_contract_success(ready_session, mock_settings):
     # Mock fill_docx_template to avoid needing a real docx file
     with patch("backend.domain.documents.builder.fill_docx_template") as mock_fill:
         # Also ensure the template file check passes
@@ -42,7 +43,7 @@ def test_build_contract_success(ready_session, mock_settings):
         template_path.parent.mkdir(parents=True, exist_ok=True)
         template_path.touch()
 
-        res = build_contract(ready_session, "t1")
+        res = await build_contract(ready_session, "t1")
 
         assert res["filename"].endswith(".docx")
         assert "application/vnd.openxmlformats" in res["mime"]
@@ -55,7 +56,8 @@ def test_build_contract_success(ready_session, mock_settings):
         assert values_arg["cf1"] == "Contract Val"
         assert values_arg["lessor.name"] == "Lessor Name"
 
-def test_build_contract_missing_field(ready_session):
+@pytest.mark.asyncio
+async def test_build_contract_missing_field(ready_session):
     # Invalidate a field
     from backend.infra.persistence.store import load_session
     s = load_session(ready_session)
@@ -63,12 +65,13 @@ def test_build_contract_missing_field(ready_session):
     save_session(s)
 
     with pytest.raises(ValueError, match="Missing required fields"):
-        build_contract(ready_session, "t1")
+        await build_contract(ready_session, "t1")
 
-def test_build_contract_wrong_template(ready_session):
+@pytest.mark.asyncio
+async def test_build_contract_wrong_template(ready_session):
     with pytest.raises(Exception, match="Template in session does not match"):
         from backend.shared.errors import MetaNotFoundError
         try:
-            build_contract(ready_session, "t2")
+            await build_contract(ready_session, "t2")
         except MetaNotFoundError as e:
             raise Exception(str(e))

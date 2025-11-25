@@ -1,16 +1,26 @@
+"""Field schema and session readiness validation utilities."""
 from __future__ import annotations
 
-from typing import Any, List, Dict, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
+from backend.domain.categories.index import (
+    PartyField,
+    list_entities,
+    list_party_fields,
+    load_meta,
+    store as cat_store,
+)
 from backend.domain.sessions.models import Session
-from backend.domain.categories.index import list_entities, list_party_fields, store as cat_store, _load_meta
+
 
 @dataclass
 class FieldSchema:
+    """Schema for a field in a session (contract or party field)."""
+
     key: str  # e.g. "lessor.name" or "contract_date"
-    field_name: str # e.g. "name" or "contract_date"
-    role: Optional[str] # e.g. "lessor" or None
+    field_name: str  # e.g. "name" or "contract_date"
+    role: Optional[str]  # e.g. "lessor" or None
     label: str
     required: bool
     ai_required: bool = False
@@ -47,7 +57,7 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
     # 2. Party Fields
     category_def = cat_store.get(session.category_id)
     if category_def:
-        meta = _load_meta(category_def)
+        meta = load_meta(category_def)
         roles = meta.get("roles") or {}
         modules = meta.get("party_modules") or {}
     else:
@@ -71,23 +81,37 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
             # Fallback for backward compatibility
             p_type = session.person_type
 
-        # Default to individual if unknown, to ensure we list something
+        # Use metadata-based fallback if still unknown
         if not p_type:
-            p_type = "individual"
+            role_meta = roles.get(role_key, {})
+            # 1. Check for explicit default_person_type
+            p_type = role_meta.get("default_person_type")
+            if not p_type:
+                # 2. Use first allowed type
+                allowed = role_meta.get("allowed_person_types", [])
+                if allowed:
+                    p_type = allowed[0]
+                elif modules:
+                    # 3. Use first available module
+                    p_type = next(iter(modules.keys()), "individual")
 
         party_fields_list = []
         module = modules.get(p_type)
         if module:
-            from backend.domain.categories.index import PartyField
             for raw in module.get("fields", []):
-                party_fields_list.append(PartyField(field=raw["field"], label=raw.get("label", raw["field"]), required=raw.get("required", True)))
-        
+                party_fields_list.append(PartyField(
+                    field=raw["field"],
+                    label=raw.get("label", raw["field"]),
+                    required=raw.get("required", True),
+                ))
+
         if not party_fields_list:
             party_fields_list = list_party_fields(session.category_id, p_type)
 
         for pf in party_fields_list:
             if pf.required:
                 key = f"{role_key}.{pf.field}"
+                # Party fields use validator heuristic for type inference
                 result.append(FieldSchema(
                     key=key,
                     field_name=pf.field,
@@ -95,7 +119,7 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
                     label=pf.label,
                     required=True,
                     ai_required=False,
-                    type="text" # Party fields usually don't have type in metadata yet, handled by validator heuristic
+                    type="text",
                 ))
 
     return result
@@ -135,7 +159,7 @@ def collect_missing_fields(session: Session) -> Dict[str, Any]:
     if session.category_id:
         category_def = cat_store.get(session.category_id)
         if category_def:
-            meta = _load_meta(category_def)
+            meta = load_meta(category_def)
             role_labels = {
                 k: v.get("label", k) for k, v in (meta.get("roles") or {}).items()
             }

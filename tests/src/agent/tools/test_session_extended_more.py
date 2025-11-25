@@ -1,6 +1,4 @@
-import pytest
-from unittest.mock import patch
-
+"""Extended tests for session tools."""
 import pytest
 from backend.agent.tools.session import (
     UpsertFieldTool,
@@ -22,7 +20,9 @@ def _session_with_category(cat_id: str):
 
 
 @pytest.mark.asyncio
-async def test_upsert_contract_field_validation_error(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_upsert_contract_field_validation_error(mock_categories_data):
+    """Test that upserting empty contract field returns validation error."""
     s = _session_with_category(mock_categories_data)
     s.role_owners = {"lessor": "user1"}
     save_session(s)
@@ -36,7 +36,9 @@ async def test_upsert_contract_field_validation_error(mock_settings, mock_catego
 
 
 @pytest.mark.asyncio
-async def test_upsert_requires_person_type_for_party_field(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_upsert_requires_person_type_for_party_field(mock_categories_data):
+    """Test upsert behavior when person_type is not set."""
     s = _session_with_category(mock_categories_data)
     s.person_type = None
     s.party_types = {}
@@ -51,7 +53,9 @@ async def test_upsert_requires_person_type_for_party_field(mock_settings, mock_c
 
 
 @pytest.mark.asyncio
-async def test_build_contract_tool_sets_state(mock_settings, mock_categories_data, monkeypatch):
+@pytest.mark.usefixtures("mock_settings")
+async def test_build_contract_tool_sets_state(mock_categories_data, monkeypatch):
+    """Test that build contract tool sets session state to BUILT."""
     s = _session_with_category(mock_categories_data)
     save_session(s)
     tool = BuildContractTool()
@@ -72,7 +76,9 @@ async def test_build_contract_tool_sets_state(mock_settings, mock_categories_dat
 
 
 @pytest.mark.asyncio
-async def test_sign_contract_tool_requires_state(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_sign_contract_tool_requires_state(mock_categories_data):
+    """Test that sign contract tool requires proper session state."""
     s = _session_with_category(mock_categories_data)
     s.state = SessionState.CATEGORY_SELECTED
     save_session(s)

@@ -1,8 +1,4 @@
-import json
-import types
-import pytest
-
-import asyncio
+"""Tests for tool state gating."""
 import pytest
 
 from backend.api.http import server
@@ -11,7 +7,9 @@ from backend.domain.sessions.models import SessionState
 
 
 @pytest.mark.asyncio
-async def test_filter_tools_respects_state_allowed(monkeypatch, mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_filter_tools_respects_state_allowed(monkeypatch, mock_categories_data):
+    """Test that tool filtering respects session state."""
     # Prepare session with category and state so _get_effective_state returns category_selected
     s = get_or_create_session("state_gate")
     s.category_id = mock_categories_data

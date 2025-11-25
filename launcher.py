@@ -1,3 +1,4 @@
+"""Application launcher for API server and CLI chat."""
 from __future__ import annotations
 
 import argparse
@@ -22,14 +23,16 @@ def kill_process_on_port(port: int) -> None:
     Знаходить і завершує процес, який слухає на вказаному порту.
     Корисно для автоматичного перезапуску сервера в режимі розробки.
     """
-    import signal
-    import subprocess
-    
+    import signal  # pylint: disable=import-outside-toplevel
+    import subprocess  # pylint: disable=import-outside-toplevel
+
     try:
         if sys.platform == "win32":
             # Windows implementation
             cmd = f"netstat -ano | findstr :{port}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, check=False,
+            )
             if result.stdout:
                 # Parse output to find PID. Format: PROTO Local Address Foreign Address State PID
                 # TCP    0.0.0.0:8000           0.0.0.0:0              LISTENING       1234
@@ -38,10 +41,15 @@ def kill_process_on_port(port: int) -> None:
                     parts = line.split()
                     if len(parts) >= 5 and f":{port}" in parts[1]:
                         pid = int(parts[-1])
-                        logger.info(f"Found process {pid} on port {port}, terminating...")
-                        subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
-                        logger.info(f"Process {pid} terminated")
-                        import time
+                        logger.info(
+                            "Found process %d on port %d, terminating...", pid, port,
+                        )
+                        subprocess.run(
+                            f"taskkill /F /PID {pid}",
+                            shell=True, capture_output=True, check=False,
+                        )
+                        logger.info("Process %d terminated", pid)
+                        import time  # pylint: disable=import-outside-toplevel
                         time.sleep(1)
                         return
         else:
@@ -53,25 +61,27 @@ def kill_process_on_port(port: int) -> None:
                 text=True,
                 check=False,
             )
-            
+
             if result.returncode == 0 and result.stdout.strip():
                 pid = int(result.stdout.strip().split()[0])
-                logger.info(f"Found process {pid} on port {port}, terminating...")
-                
+                logger.info(
+                    "Found process %d on port %d, terminating...", pid, port,
+                )
+
                 try:
                     os.kill(pid, signal.SIGTERM)
-                    logger.info(f"Process {pid} terminated successfully")
+                    logger.info("Process %d terminated successfully", pid)
                     # Дати ОС час звільнити порт
-                    import time
+                    import time  # pylint: disable=import-outside-toplevel
                     time.sleep(1)
                 except ProcessLookupError:
-                    logger.warning(f"Process {pid} already dead")
+                    logger.warning("Process %d already dead", pid)
                 except PermissionError:
-                    logger.error(f"No permission to kill process {pid}")
+                    logger.error("No permission to kill process %d", pid)
                 return
-                
-    except Exception as e:
-        # Fallback or error logging
+
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # Fallback - continue to try fuser
         pass
 
     if sys.platform != "win32":
@@ -84,11 +94,11 @@ def kill_process_on_port(port: int) -> None:
                 check=False,
             )
             if result.returncode == 0:
-                logger.info(f"Killed process on port {port} using fuser")
+                logger.info("Killed process on port %d using fuser", port)
         except FileNotFoundError:
             logger.warning("Neither lsof nor fuser available, cannot auto-kill old server")
-        except Exception as e:
-            logger.warning(f"Could not kill process on port {port}: {e}")
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.warning("Could not kill process on port %d: %s", port, e)
 
 
 def run_app(
@@ -146,8 +156,8 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
 
     Використовує ті самі handler-и, що й HTTP /chat, але без підняття uvicorn.
     """
-    from backend.api.http.server import ChatRequest, chat  # type: ignore[import]
-    from backend.infra.storage.fs import ensure_directories
+    from backend.api.http.server import ChatRequest, chat  # pylint: disable=import-outside-toplevel
+    from backend.infra.storage.fs import ensure_directories  # pylint: disable=import-outside-toplevel
 
     setup_logging()
     ensure_directories()
@@ -174,7 +184,7 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
             req = ChatRequest(session_id=session_id, message=text)
             try:
                 resp = loop.run_until_complete(chat(req))
-            except Exception as exc:  # pragma: no cover - dev helper
+            except (RuntimeError, ValueError, OSError) as exc:  # pragma: no cover
                 logger.exception("CLI chat error: %s", exc)
                 print(f"bot> [error] {exc}")
                 continue
@@ -188,13 +198,14 @@ def run_cli_chat(session_id: Optional[str] = None) -> None:
                 task.cancel()
             if pending:
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception:
+        except (RuntimeError, asyncio.CancelledError):
             pass
         loop.call_soon(loop.stop)
         loop.close()
 
 
 def main(argv: Optional[list[str]] = None) -> None:
+    """Main entry point for the launcher CLI."""
     parser = argparse.ArgumentParser(
         description="Запуск FastAPI-сервера або CLI-чату для девелопмента.",
     )

@@ -1,4 +1,4 @@
-import asyncio
+"""Tests for session sync and schema endpoints."""
 import json
 import pytest
 from fastapi.testclient import TestClient
@@ -37,6 +37,7 @@ def _write_category(settings, cat_id: str, templ_id: str):
 
 
 def test_sync_template_must_match_category(mock_settings):
+    """Test that sync rejects template not matching category."""
     _write_category(mock_settings, "cat_a", "templ_a")
     session_id = "sync_templ_guard"
     payload = {
@@ -54,6 +55,7 @@ def test_sync_template_must_match_category(mock_settings):
 
 @pytest.mark.asyncio
 async def test_sync_partial_and_ready(mock_settings):
+    """Test sync transitions from partial to ready state."""
     _write_category(mock_settings, "cat_a", "templ_a")
     session_id = "sync_ready_flow"
 
@@ -92,7 +94,9 @@ async def test_sync_partial_and_ready(mock_settings):
         assert data["status"] in ("ready", "partial")
 
 
-def test_schema_respects_error_status(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_schema_respects_error_status(mock_categories_data):
+    """Test that schema endpoint respects field error status."""
     session_id = "schema_error_case"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -100,18 +104,27 @@ def test_schema_respects_error_status(mock_settings, mock_categories_data):
     s.all_data = {"cf1": {"current": "text"}}
     save_session(s)
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "values"}, headers={"X-User-ID": "schema_user"})
+    resp = client.get(
+        f"/sessions/{session_id}/schema",
+        params={"data_mode": "values"},
+        headers={"X-User-ID": "schema_user"},
+    )
     assert resp.status_code == 200
     cf = resp.json()["contract"]["fields"][0]
     assert cf["value"] is None  # error state should not expose value
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"data_mode": "status"}, headers={"X-User-ID": "schema_user"})
+    resp = client.get(
+        f"/sessions/{session_id}/schema",
+        params={"data_mode": "status"},
+        headers={"X-User-ID": "schema_user"},
+    )
     assert resp.status_code == 200
     cf = resp.json()["contract"]["fields"][0]
     assert cf["value"] is False
 
 
 def test_schema_required_scope_excludes_optional(mock_settings, mock_categories_data):
+    """Test that schema with scope=required excludes optional fields."""
     # Extend category to add optional field
     cat_path = mock_settings.meta_categories_root / f"{mock_categories_data}.json"
     meta = json.loads(cat_path.read_text(encoding="utf-8"))
@@ -119,8 +132,8 @@ def test_schema_required_scope_excludes_optional(mock_settings, mock_categories_
     cat_path.write_text(json.dumps(meta), encoding="utf-8")
 
     # Reload store to pick updated meta
-    from backend.domain.categories.index import store as category_store
-    category_store._categories = {}
+    from backend.domain.categories.index import store as category_store  # pylint: disable=import-outside-toplevel
+    category_store.clear()
     category_store.load()
 
     session_id = "schema_required_scope"
@@ -128,7 +141,11 @@ def test_schema_required_scope_excludes_optional(mock_settings, mock_categories_
     s.category_id = mock_categories_data
     save_session(s)
 
-    resp = client.get(f"/sessions/{session_id}/schema", params={"scope": "required"}, headers={"X-User-ID": "schema_user"})
+    resp = client.get(
+        f"/sessions/{session_id}/schema",
+        params={"scope": "required"},
+        headers={"X-User-ID": "schema_user"},
+    )
     assert resp.status_code == 200
     fields = resp.json()["contract"]["fields"]
     assert all(f["field_name"] != "optional_field" for f in fields)

@@ -117,6 +117,10 @@ def setup_logging(default_level: int = logging.INFO) -> None:
 def get_logger(name: str) -> logging.Logger:
     setup_logging()
     logger = logging.getLogger(name)
-    # Використовуємо хендлери root через propagate, щоб уникнути дублювання.
-    logger.propagate = True
+    root = logging.getLogger()
+    if not logger.handlers:
+        for handler in root.handlers:
+            logger.addHandler(handler)
+    # Уникаємо дублювання виводу: локальні хендлери достатньо, propagate не потрібен
+    logger.propagate = False
     return logger

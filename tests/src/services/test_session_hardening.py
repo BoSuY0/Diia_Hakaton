@@ -1,6 +1,8 @@
+"""Tests for session field update hardening and validation."""
 import pytest
 
-from backend.domain.services.session import update_session_field, validate_session_readiness
+from backend.domain.services.session import update_session_field
+from backend.domain.services.fields import validate_session_readiness
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import FieldState, SessionState
 
@@ -15,7 +17,9 @@ def _base_session(session_id: str, category_id: str):
     return s
 
 
-def test_update_session_field_requires_category(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings", "mock_categories_data")
+def test_update_session_field_requires_category():
+    """Test that updating field requires category to be set."""
     s = get_or_create_session("no_cat_session")
     ok, err, fs = update_session_field(s, "name", "Some", role="lessor")
     assert ok is False
@@ -23,7 +27,9 @@ def test_update_session_field_requires_category(mock_settings, mock_categories_d
     assert fs.status == "error"
 
 
-def test_update_session_field_requires_role_for_party_field(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_session_field_requires_role_for_party_field(mock_categories_data):
+    """Test that updating party field requires role to be set."""
     s = _base_session("need_role_session", mock_categories_data)
     s.role = None  # unset current role
     ok, err, fs = update_session_field(s, "name", "Some")
@@ -32,7 +38,9 @@ def test_update_session_field_requires_role_for_party_field(mock_settings, mock_
     assert fs.status == "error"
 
 
-def test_update_invalid_field_returns_error(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_invalid_field_returns_error(mock_categories_data):
+    """Test that updating unknown field returns error."""
     s = _base_session("unknown_field_session", mock_categories_data)
     ok, err, fs = update_session_field(s, "nonexistent_field", "Val", role="lessor")
     assert ok is False
@@ -40,7 +48,9 @@ def test_update_invalid_field_returns_error(mock_settings, mock_categories_data)
     assert fs.status == "error"
 
 
-def test_update_blocks_signed_role_and_invalidates_other_signatures(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_blocks_signed_role_and_invalidates_other_signatures(mock_categories_data):
+    """Test that editing signed role is blocked and invalidates other signatures."""
     s = _base_session("sign_guard_session", mock_categories_data)
     s.signatures = {"lessor": True, "lessee": True}
     save_session(s)
@@ -59,7 +69,9 @@ def test_update_blocks_signed_role_and_invalidates_other_signatures(mock_setting
     assert s.signatures.get("lessee") is False  # invalidated
 
 
-def test_validate_session_readiness_partial_vs_full(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_validate_session_readiness_partial_vs_full(mock_categories_data):
+    """Test session readiness validation in partial vs full mode."""
     # Full mode requires both roles
     s = _base_session("readiness_full", mock_categories_data)
     # Fill only lessor
@@ -76,7 +88,9 @@ def test_validate_session_readiness_partial_vs_full(mock_settings, mock_categori
     assert ready_partial is True
 
 
-def test_update_session_field_sets_state_and_progress(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_session_field_sets_state_and_progress(mock_categories_data):
+    """Test that field update sets session state and progress."""
     s = _base_session("progress_session", mock_categories_data)
     ok, _, fs = update_session_field(s, "cf1", "Val", role=None)
     assert ok is True
@@ -86,7 +100,9 @@ def test_update_session_field_sets_state_and_progress(mock_settings, mock_catego
     assert s.progress.get("required_filled") >= 1
 
 
-def test_update_session_field_history_and_current_on_error(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_session_field_history_and_current_on_error(mock_categories_data):
+    """Test that invalid update preserves current value but logs in history."""
     s = _base_session("history_session", mock_categories_data)
     # First valid value sets current
     ok, _, _ = update_session_field(s, "cf1", "Valid", role=None)
@@ -101,7 +117,9 @@ def test_update_session_field_history_and_current_on_error(mock_settings, mock_c
     assert s.all_data["cf1"]["current"] == "Valid"
 
 
-def test_update_session_field_history_includes_actor(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_update_session_field_history_includes_actor(mock_categories_data):
+    """Test that field update history includes actor information."""
     s = _base_session("history_actor_session", mock_categories_data)
     ok, _, _ = update_session_field(
         s,
@@ -114,4 +132,4 @@ def test_update_session_field_history_includes_actor(mock_settings, mock_categor
     entry = s.history[-1]
     assert entry["user_id"] == "user1"
     assert entry["role"] == "lessor"
-    assert entry["ts"].endswith("Z")
+    assert entry["ts"].endswith("Z") or entry["ts"].endswith("+00:00")

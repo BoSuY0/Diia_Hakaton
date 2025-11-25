@@ -28,7 +28,12 @@ export function RoleSelector({ onSelect, parties = [], takenRoles = [], myRoles 
                             }}
                         >
                             <h3>{party.label || party.role}</h3>
-                            <p>{subtitle}</p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                                <span className={`pill ${isMine ? 'pill-positive' : isTaken ? 'pill-warning' : 'pill-neutral'}`}>
+                                    {isMine ? 'Ваша роль' : isTaken ? 'Зайнята іншою стороною' : 'Вільна роль'}
+                                </span>
+                            </div>
+                            <p style={{ marginTop: 8 }}>{subtitle}</p>
                         </div>
                     );
                 })}

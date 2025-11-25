@@ -1,9 +1,14 @@
+"""Extended tests for session actions."""
+import pytest
+
 from backend.domain.sessions.actions import set_session_category
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState, FieldState
 
 
-def test_set_session_category_resets_state_and_data(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_set_session_category_resets_state_and_data(mock_categories_data):
+    """Test that setting category resets session state and data."""
     s = get_or_create_session("action_reset")
     s.category_id = mock_categories_data
     s.template_id = "old_t"
@@ -11,7 +16,7 @@ def test_set_session_category_resets_state_and_data(mock_settings, mock_categori
     s.party_fields["lessor"] = {"name": FieldState(status="ok")}
     s.contract_fields["cf1"] = FieldState(status="ok")
     s.party_types["lessor"] = "individual"
-    s.party_users["lessor"] = "user1"
+    s.role_owners["lessor"] = "user1"
     s.signatures["lessor"] = True
     s.progress = {"required_total": 5}
     save_session(s)
@@ -23,7 +28,7 @@ def test_set_session_category_resets_state_and_data(mock_settings, mock_categori
     assert s.party_fields == {}
     assert s.contract_fields == {}
     assert s.party_types == {}
-    assert s.party_users == {}
+    assert s.role_owners == {}
     assert s.signatures == {}
     assert s.can_build_contract is False
     assert s.progress == {}

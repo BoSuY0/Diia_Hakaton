@@ -1,9 +1,14 @@
+"""Extended tests for user document building."""
+import pytest
+
 from backend.domain.documents.user_document import build_user_document
 from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import SessionState
 
 
-def test_build_user_document_populates_fields(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_build_user_document_populates_fields(mock_categories_data):
+    """Test that build_user_document populates all fields correctly."""
     s = get_or_create_session("user_doc_session")
     s.category_id = mock_categories_data
     s.template_id = "t1"
@@ -25,7 +30,9 @@ def test_build_user_document_populates_fields(mock_settings, mock_categories_dat
     assert doc["parties"]["lessee"]["data"]["name"] == "Lessee LLC"
 
 
-def test_build_user_document_defaults_roles_when_missing(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_build_user_document_defaults_roles_when_missing(mock_categories_data):
+    """Test that build_user_document provides defaults for missing roles."""
     s = get_or_create_session("user_doc_defaults")
     s.category_id = mock_categories_data
     s.all_data = {}

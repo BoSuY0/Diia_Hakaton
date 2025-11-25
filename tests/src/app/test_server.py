@@ -1,3 +1,4 @@
+"""Tests for server endpoints."""
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
@@ -20,7 +21,9 @@ def test_healthz():
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
-def test_chat_simple_response(mock_llm_response, mock_system_prompt, mock_settings):
+@pytest.mark.usefixtures("mock_settings")
+def test_chat_simple_response(mock_llm_response, mock_system_prompt):
+    """Test simple chat response without tool calls."""
     # Mock LLM returning a text message
     mock_choice = MagicMock()
     mock_choice.message.role = "assistant"
@@ -38,7 +41,9 @@ def test_chat_simple_response(mock_llm_response, mock_system_prompt, mock_settin
     assert data["session_id"] == "test_chat_1"
     assert data["reply"] == "Hello from LLM"
 
-def test_chat_with_tool_call(mock_llm_response, mock_system_prompt, mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_chat_with_tool_call(mock_llm_response, mock_system_prompt, mock_categories_data):
+    """Test chat with tool call."""
     # Scenario: User asks for categories -> LLM calls find_category_by_query -> Tool returns -> LLM replies
     
     # 1. First call: LLM returns tool call

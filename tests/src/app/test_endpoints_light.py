@@ -1,3 +1,5 @@
+"""Light tests for basic API endpoints."""
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.http.server import app
@@ -16,7 +18,9 @@ def test_healthz_endpoint():
     assert "docx_ok" in data
 
 
-def test_create_and_get_session(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_create_and_get_session(mock_categories_data):
+    """Test creating and getting a session."""
     resp = client.post("/sessions", json={}, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     session_id = resp.json()["session_id"]
@@ -32,7 +36,9 @@ def test_create_and_get_session(mock_settings, mock_categories_data):
     assert data["category_id"] == mock_categories_data
 
 
-def test_categories_endpoints(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_categories_endpoints(mock_categories_data):
+    """Test category listing and lookup endpoints."""
     # list categories
     resp = client.get("/categories")
     assert resp.status_code == 200
@@ -55,7 +61,9 @@ def test_categories_endpoints(mock_settings, mock_categories_data):
     assert data["person_types"]
 
 
-def test_chat_endpoint_with_mock_llm(monkeypatch, mock_settings):
+@pytest.mark.usefixtures("mock_settings")
+def test_chat_endpoint_with_mock_llm(monkeypatch):
+    """Test chat endpoint with mocked LLM."""
     called = {}
 
     class Msg:
@@ -79,7 +87,9 @@ def test_chat_endpoint_with_mock_llm(monkeypatch, mock_settings):
     assert resp.json()["reply"] == "Mock reply"
 
 
-def test_session_schema_endpoint(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_session_schema_endpoint(mock_categories_data):
+    """Test session schema endpoint."""
     resp = client.post("/sessions", json={}, headers=AUTH_HEADERS)
     sid = resp.json()["session_id"]
     client.post(f"/sessions/{sid}/category", json={"category_id": mock_categories_data}, headers=AUTH_HEADERS)
@@ -96,7 +106,9 @@ def test_session_schema_endpoint(mock_settings, mock_categories_data):
     assert data["parties"]
 
 
-def test_set_template_endpoint(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_set_template_endpoint(mock_categories_data):
+    """Test setting template for a session."""
     resp = client.post("/sessions", json={}, headers=AUTH_HEADERS)
     sid = resp.json()["session_id"]
     client.post(f"/sessions/{sid}/category", json={"category_id": mock_categories_data}, headers=AUTH_HEADERS)

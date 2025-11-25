@@ -1,3 +1,4 @@
+"""Tests for session sync functionality."""
 import pytest
 from fastapi.testclient import TestClient
 from backend.api.http.server import app
@@ -29,7 +30,8 @@ def mock_build_contract(monkeypatch):
 
     monkeypatch.setattr("backend.api.http.server.tool_build_contract_async", mock_build)
 
-def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_contract, temp_workspace):
+@pytest.mark.usefixtures("mock_settings", "temp_workspace")
+def test_sync_session_full_flow(mock_categories_data, mock_build_contract):
     """Test one-shot sync with full data."""
     # 1. Create session
     response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})
@@ -65,7 +67,8 @@ def test_sync_session_full_flow(mock_settings, mock_categories_data, mock_build_
     # Якщо контрактні поля ще не передані, статус може бути partial
     assert data["status"] in ("ready", "partial")
 
-def test_sync_session_partial_flow(mock_settings, mock_categories_data, temp_workspace):
+@pytest.mark.usefixtures("mock_settings", "temp_workspace")
+def test_sync_session_partial_flow(mock_categories_data):
     """Test partial sync (one party only)."""
     response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})
     session_id = response.json()["session_id"]
@@ -95,7 +98,8 @@ def test_sync_session_partial_flow(mock_settings, mock_categories_data, temp_wor
     # mock_categories_data defines roles: lessor, lessee. We sent lessor. Missing: lessee.
     assert "lessee" in data["missing"]["roles"]
 
-def test_sync_session_incremental_flow(mock_settings, mock_categories_data, mock_build_contract, temp_workspace):
+@pytest.mark.usefixtures("mock_settings", "temp_workspace")
+def test_sync_session_incremental_flow(mock_categories_data, mock_build_contract):
     """Test incremental sync (add second party later)."""
     # 1. Start with partial
     response = client.post("/sessions", json={}, headers={"X-User-ID": "sync_user"})

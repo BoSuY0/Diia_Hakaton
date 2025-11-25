@@ -1,3 +1,4 @@
+"""Category index and metadata management."""
 from __future__ import annotations
 
 import json
@@ -5,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.infra.config.settings import BASE_DIR, settings
+from backend.infra.config.settings import settings
 from backend.shared.logging import get_logger
 
 
@@ -14,6 +15,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class Category:
+    """Category metadata."""
+
     id: str
     label: str
     meta_path: Path
@@ -22,6 +25,8 @@ class Category:
 
 @dataclass
 class Entity:
+    """Contract field entity."""
+
     field: str
     type: str
     label: str
@@ -31,6 +36,8 @@ class Entity:
 
 @dataclass
 class TemplateInfo:
+    """Template metadata."""
+
     id: str
     name: str
     file: str
@@ -38,6 +45,8 @@ class TemplateInfo:
 
 @dataclass
 class PartyField:
+    """Party field metadata."""
+
     field: str
     label: str
     required: bool
@@ -57,10 +66,13 @@ def _categories_path() -> Path:
 
 
 class CategoryStore:
+    """In-memory store for category metadata."""
+
     def __init__(self) -> None:
         self._categories: Dict[str, Category] = {}
 
     def load(self) -> None:
+        """Load categories from index file."""
         path = _categories_path()
         if not path.exists():
             logger.warning("Categories index not found at %s", path)
@@ -81,27 +93,41 @@ class CategoryStore:
 
     @property
     def categories(self) -> Dict[str, Category]:
+        """Get all categories, loading if necessary."""
         if not self._categories:
             self.load()
         return self._categories
 
     def get(self, category_id: str) -> Optional[Category]:
+        """Get category by ID."""
         return self.categories.get(category_id)
+
+    def clear(self) -> None:
+        """Clear internal cache. Useful for testing."""
+        self._categories = {}
 
 
 store = CategoryStore()
 
 
-def _load_meta(category: Category) -> dict:
+def load_meta(category: Category) -> dict:
+    """
+    Публічний хелпер для читання meta JSON категорії.
+    Використовуйте його замість приватного _load_meta.
+    """
     with category.meta_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+# Зворотна сумісність (не рекомендується використовувати напряму)
+_load_meta = load_meta
+
 
 def list_entities(category_id: str) -> List[Entity]:
+    """List contract field entities for a category."""
     category = store.get(category_id)
     if not category:
         raise ValueError(f"Unknown category_id: {category_id}")
-    data = _load_meta(category)
+    data = load_meta(category)
     entities: List[Entity] = []
 
     # Новий формат: contract_fields як основні ентіті договору.
@@ -133,10 +159,11 @@ def list_entities(category_id: str) -> List[Entity]:
 
 
 def list_templates(category_id: str) -> List[TemplateInfo]:
+    """List available templates for a category."""
     category = store.get(category_id)
     if not category:
         raise ValueError(f"Unknown category_id: {category_id}")
-    data = _load_meta(category)
+    data = load_meta(category)
     templates: List[TemplateInfo] = []
     for raw in data.get("templates", []):
         templates.append(
@@ -157,7 +184,7 @@ def list_party_fields(category_id: str, person_type: str) -> List[PartyField]:
     category = store.get(category_id)
     if not category:
         raise ValueError(f"Unknown category_id: {category_id}")
-    data = _load_meta(category)
+    data = load_meta(category)
     modules = data.get("party_modules") or {}
     module = modules.get(person_type)
     if not module:
@@ -184,7 +211,7 @@ def get_party_schema(category_id: str) -> Dict[str, Any]:
     if not category:
         raise ValueError(f"Unknown category_id: {category_id}")
 
-    data = _load_meta(category)
+    data = load_meta(category)
     roles_raw = data.get("roles") or {}
     modules_raw = data.get("party_modules") or {}
 
@@ -260,7 +287,7 @@ def find_category_by_query(query: str) -> Optional[Category]:
                     kw_score += 1
 
         total_score = kw_score
-        
+
         if total_score > best_score:
             best_score = total_score
             best = category
@@ -268,4 +295,5 @@ def find_category_by_query(query: str) -> Optional[Category]:
     if best:
         return best
 
-    return None
+    # Fallback: якщо є кастомна категорія, повертаємо її як універсальну опцію
+    return store.categories.get("custom")

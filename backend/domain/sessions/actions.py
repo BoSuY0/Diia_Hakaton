@@ -1,3 +1,4 @@
+"""Session state management actions."""
 from __future__ import annotations
 
 from typing import Optional
@@ -18,7 +19,7 @@ def set_session_category(session: Session, category_id: str) -> bool:
     The caller must ensure it's called within a transactional_session context or saved manually.
     """
     category: Optional[Category] = category_store.get(category_id)
-    
+
     if not category:
         return False
 
@@ -32,7 +33,11 @@ def set_session_category(session: Session, category_id: str) -> bool:
     session.role_owners.clear()
     session.signatures.clear()
     session.progress = {}
-    
+    session.all_data.clear()  # Clear all_data to avoid stale data from previous category
+
     # session is yielded by context manager, so changes will be saved on exit.
-    logger.info("set_session_category: session_id=%s category_id=%s", session.session_id, category_id)
+    logger.info(
+        "set_session_category: session_id=%s category_id=%s",
+        session.session_id, category_id,
+    )
     return True

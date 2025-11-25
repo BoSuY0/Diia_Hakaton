@@ -2,15 +2,22 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
+const getAuthToken = () => {
+  if (typeof localStorage === 'undefined') return import.meta.env.VITE_AUTH_TOKEN || null;
+  return localStorage.getItem('diia_auth_token') || import.meta.env.VITE_AUTH_TOKEN || null;
+};
+
 const buildAuthHeaders = (userId) => {
-  if (!userId) return undefined;
-  return {
-    'X-User-ID': userId,
-  };
+  const headers = {};
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (userId) headers['X-User-ID'] = userId;
+  return Object.keys(headers).length > 0 ? headers : undefined;
 };
 
 export const api = {
   API_URL,
+  getAuthToken,
 
   async createSession(userId) {
     const config = {};

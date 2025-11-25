@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class SessionState(str, Enum):
     IDLE = "idle"
@@ -31,7 +31,7 @@ class Session:
     role_owners: Dict[str, str] = field(default_factory=dict)
     
     # Час останнього оновлення (для очищення старих чернеток)
-    updated_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Локаль користувача для серверних відповідей (uk/en/…)
     locale: str = "uk"
@@ -59,8 +59,6 @@ class Session:
 
     # Підписи сторін: Role -> Signed (True/False)
     signatures: Dict[str, bool] = field(default_factory=dict)
-    # Історія підписів
-    sign_history: List[Dict[str, Any]] = field(default_factory=list)
 
     # Глобальна історія подій (оновлення полів, підписи)
     history: List[Dict[str, Any]] = field(default_factory=list)

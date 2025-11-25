@@ -1,27 +1,28 @@
-import sys
-from pathlib import Path
-import shutil
-
-import pytest
+"""Pytest configuration and fixtures for test suite."""
+# pylint: disable=redefined-outer-name,protected-access
 import asyncio
 import inspect
+import sys
+from pathlib import Path
 
-# Додаємо корінь проєкту в sys.path, щоб імпорти backend.* працювали без інсталяції пакету
+import pytest
+
+# Додаємо корінь проєкту в sys.path, щоб імпорти backend.* працювали без інсталяцїї пакету
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-root_str = str(PROJECT_ROOT)
+ROOT_STR = str(PROJECT_ROOT)
 # Щоб backend.* бралося з кореня, а не з tests/src, ставимо корінь на початок sys.path
-if root_str in sys.path:
-    sys.path.remove(root_str)
-sys.path.insert(0, root_str)
+if ROOT_STR in sys.path:
+    sys.path.remove(ROOT_STR)
+sys.path.insert(0, ROOT_STR)
 
 try:
-    from backend.infra.config.settings import Settings
+    from backend.infra.config.settings import Settings  # noqa: F401  # pylint: disable=unused-import
 except ModuleNotFoundError:
     # Додаткова спроба з явним шляхом до кореня
-    if root_str in sys.path:
-        sys.path.remove(root_str)
-    sys.path.insert(0, root_str)
-    from backend.infra.config.settings import Settings
+    if ROOT_STR in sys.path:
+        sys.path.remove(ROOT_STR)
+    sys.path.insert(0, ROOT_STR)
+    from backend.infra.config.settings import Settings  # pylint: disable=unused-import
 
 @pytest.fixture
 def temp_workspace(tmp_path):
@@ -36,9 +37,12 @@ def temp_workspace(tmp_path):
 @pytest.fixture
 def mock_settings(temp_workspace):
     """Overrides settings to use the temporary workspace."""
+    # pylint: disable=import-outside-toplevel
     from backend.infra.config.settings import settings
     from backend.infra.persistence import store_memory, store
-    
+    from backend.infra.persistence import contracts_repository
+    from backend.domain.categories import index as category_index
+
     # Store original values to restore after test
     original_values = {}
     keys_to_update = [
@@ -48,17 +52,19 @@ def mock_settings(temp_workspace):
         "default_documents_root", "users_documents_root",
         "session_backend", "session_ttl_hours", "redis_url",
         "draft_ttl_hours", "filled_ttl_hours", "signed_ttl_days",
+        "contracts_db_url",
+        "auth_mode", "auth_jwt_secret", "auth_jwt_audience", "auth_jwt_algorithm",
+        "env", "is_dev", "is_prod",
     ]
-    
+
     for key in keys_to_update:
         if hasattr(settings, key):
             original_values[key] = getattr(settings, key)
-    
-    # Manually overwrite paths
+
     # Manually overwrite paths
     settings.project_root = temp_workspace
     settings.assets_root = temp_workspace / "assets"
-    
+
     # Re-construct derived paths based on the new assets_root
     settings.documents_root = settings.assets_root
     settings.meta_root = settings.documents_root / "meta_data"
@@ -66,7 +72,7 @@ def mock_settings(temp_workspace):
     settings.meta_users_root = settings.meta_root / "meta_data_users"
     settings.meta_users_documents_root = settings.meta_users_root / "documents"
     settings.sessions_root = settings.meta_users_root / "sessions"
-    
+
     settings.documents_files_root = settings.documents_root / "documents_files"
     settings.filled_documents_root = settings.documents_files_root / "filled_documents"
     settings.default_documents_root = settings.documents_files_root / "default_documents_files"
@@ -77,8 +83,19 @@ def mock_settings(temp_workspace):
     settings.filled_ttl_hours = 24 * 7
     settings.signed_ttl_days = 365
     settings.redis_url = None
+    settings.auth_mode = "auto"
+    settings.auth_jwt_secret = None
+    settings.auth_jwt_audience = None
+    settings.auth_jwt_algorithm = "HS256"
+    settings.env = "test"
+    settings.is_dev = True
+    settings.is_prod = False
     store._redis_disabled = False
     store_memory._reset_for_tests()
+    contracts_repository._contracts_repo = None
+    orig_categories_path = category_index._CATEGORIES_PATH
+    category_index._CATEGORIES_PATH = None
+    category_index.store.clear()
 
     # Ensure directories exist
     settings.meta_categories_root.mkdir(parents=True, exist_ok=True)
@@ -87,18 +104,22 @@ def mock_settings(temp_workspace):
     settings.default_documents_root.mkdir(parents=True, exist_ok=True)
     settings.users_documents_root.mkdir(parents=True, exist_ok=True)
     settings.filled_documents_root.mkdir(parents=True, exist_ok=True)
-    
+
     yield settings
-    
+
     # Restore original values
     for key, value in original_values.items():
         setattr(settings, key, value)
+    category_index._CATEGORIES_PATH = orig_categories_path
+    category_index.store.clear()
 
 @pytest.fixture
-def mock_categories_data(mock_settings, monkeypatch):
+def mock_categories_data(mock_settings, monkeypatch):  # noqa: ARG001
+    """Create mock category data for testing."""
+    # pylint: disable=import-outside-toplevel
     import json
     from backend.domain.categories.index import store
-    
+
     # Create a dummy category file
     cat_id = "test_cat"
     cat_file = mock_settings.meta_categories_root / f"{cat_id}.json"
@@ -125,7 +146,7 @@ def mock_categories_data(mock_settings, monkeypatch):
     }
     with cat_file.open("w", encoding="utf-8") as f:
         json.dump(data, f)
-    
+
     # Update index
     index_file = mock_settings.meta_categories_root / "categories_index.json"
     idx_data = {"categories": [{"id": cat_id, "label": "Test Cat", "keywords": ["test"]}]}
@@ -134,11 +155,11 @@ def mock_categories_data(mock_settings, monkeypatch):
 
     # Patch the module-level variable _CATEGORIES_PATH because it's evaluated at import time
     monkeypatch.setattr("backend.domain.categories.index._CATEGORIES_PATH", index_file)
-        
+
     # Force reload store
-    store._categories = {} # Clear internal cache
-    store.load() # Reload index
-    
+    store.clear()
+    store.load()
+
     return cat_id
 
 

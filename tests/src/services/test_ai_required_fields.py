@@ -63,7 +63,7 @@ def _write_custom_meta(tmp_root):
 
 def _reload_store(index_path):
     categories_index._CATEGORIES_PATH = index_path
-    categories_index.store._categories = {}
+    categories_index.store.clear()
     categories_index.store.load()
 
 

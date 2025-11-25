@@ -1,3 +1,4 @@
+"""Extended tests for category tools."""
 import json
 import pytest
 
@@ -10,7 +11,9 @@ from backend.agent.tools.categories import (
 
 
 @pytest.mark.asyncio
-async def test_get_templates_for_category_returns_list(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_get_templates_for_category_returns_list(mock_categories_data):
+    """Test that GetTemplatesForCategoryTool returns templates list."""
     tool = GetTemplatesForCategoryTool()
     res = await tool.execute({"category_id": mock_categories_data}, {})
     assert "templates" in res
@@ -19,13 +22,15 @@ async def test_get_templates_for_category_returns_list(mock_settings, mock_categ
 
 @pytest.mark.asyncio
 async def test_get_category_entities_unknown_category_raises():
+    """Test that GetCategoryEntitiesTool raises for unknown category."""
     tool = GetCategoryEntitiesTool()
     with pytest.raises(ValueError):
         await tool.execute({"category_id": "unknown"}, {})
 
 
 @pytest.mark.asyncio
-async def test_set_category_rejects_unknown_and_custom(monkeypatch):
+async def test_set_category_rejects_unknown_and_custom():
+    """Test that SetCategoryTool rejects unknown category."""
     tool = SetCategoryTool()
     # Unknown category
     res = await tool.execute({"session_id": "s1", "category_id": "unknown"}, {})
@@ -33,22 +38,33 @@ async def test_set_category_rejects_unknown_and_custom(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_set_category_allows_custom(mock_settings, monkeypatch):
-    # Prepare minimal custom meta
+async def test_set_category_allows_custom(mock_settings):
+    """Test that SetCategoryTool allows custom category."""
     idx = {
         "categories": [
-            {"id": "custom", "label": "Custom", "keywords": ["будь-що"], "meta_filename": "custom.json"},
+            {
+                "id": "custom",
+                "label": "Custom",
+                "keywords": ["будь-що"],
+                "meta_filename": "custom.json",
+            },
         ]
     }
-    (mock_settings.meta_categories_root / "categories_index.json").write_text(json.dumps(idx), encoding="utf-8")
-    (mock_settings.meta_categories_root / "custom.json").write_text(
-        json.dumps({"id": "custom", "templates": [], "roles": {}, "party_modules": {}, "contract_fields": []}),
-        encoding="utf-8",
-    )
+    index_path = mock_settings.meta_categories_root / "categories_index.json"
+    index_path.write_text(json.dumps(idx), encoding="utf-8")
+    custom_meta = {
+        "id": "custom",
+        "templates": [],
+        "roles": {},
+        "party_modules": {},
+        "contract_fields": [],
+    }
+    custom_path = mock_settings.meta_categories_root / "custom.json"
+    custom_path.write_text(json.dumps(custom_meta), encoding="utf-8")
 
     # Refresh store to pick up custom category
-    from backend.domain.categories import index as idx_module
-    idx_module.store._categories = {}
+    from backend.domain.categories import index as idx_module  # pylint: disable=import-outside-toplevel
+    idx_module.store.clear()
     idx_module.store.load()
 
     tool = SetCategoryTool()
@@ -59,11 +75,17 @@ async def test_set_category_allows_custom(mock_settings, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_find_category_by_query_ignores_custom(monkeypatch):
+    """Test that FindCategoryByQueryTool returns custom category."""
     tool = FindCategoryByQueryTool()
-    # Monkeypatch find_category_by_query to return mock custom object
-    class Cat:
+
+    class Cat:  # noqa: D101, D106
+        """Mock category object."""
+
         id = "custom"
         label = "Custom"
-    monkeypatch.setattr("backend.agent.tools.categories.find_category_by_query", lambda q: Cat())
+
+    monkeypatch.setattr(
+        "backend.agent.tools.categories.find_category_by_query", lambda q: Cat()
+    )
     res = await tool.execute({"query": "any"}, {})
     assert res["category_id"] == "custom"

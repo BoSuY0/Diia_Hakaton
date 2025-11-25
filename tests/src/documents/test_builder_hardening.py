@@ -1,3 +1,4 @@
+"""Hardening tests for contract builder."""
 import pytest
 from unittest.mock import patch
 
@@ -21,18 +22,27 @@ def _base_session(session_id: str, cat_id: str, templ_id: str):
     return s
 
 
-def test_build_contract_missing_category_raises(mock_settings):
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_settings")
+async def test_build_contract_missing_category_raises():
+    """Test that building contract without category raises error."""
     with pytest.raises(MetaNotFoundError):
-        build_contract("unknown_session", "any")
+        await build_contract("unknown_session", "any")
 
 
-def test_build_contract_wrong_template(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_settings")
+async def test_build_contract_wrong_template(mock_categories_data):
+    """Test that building contract with wrong template raises error."""
     s = _base_session("wrong_template", mock_categories_data, "t1")
     with pytest.raises(MetaNotFoundError):
-        build_contract(s.session_id, "foreign")
+        await build_contract(s.session_id, "foreign")
 
 
-def test_build_contract_partial_mode_allows_missing(mock_settings, mock_categories_data, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_settings")
+async def test_build_contract_partial_mode_allows_missing(mock_categories_data, monkeypatch, tmp_path):
+    """Test that partial mode allows building with missing fields."""
     s = _base_session("partial_build", mock_categories_data, "t1")
     # Remove a required field
     s.contract_fields["cf1"].status = "empty"
@@ -47,14 +57,17 @@ def test_build_contract_partial_mode_allows_missing(mock_settings, mock_categori
 
     # Patch fill_docx_template to avoid docx processing
     with patch("backend.domain.documents.builder.fill_docx_template") as filler:
-        res = build_contract(s.session_id, "t1", partial=True)
+        res = await build_contract(s.session_id, "t1", partial=True)
         assert res["file_path"]  # returns path even with missing required because partial=True
         filler.assert_called_once()
 
 
-def test_build_contract_requires_fields_when_not_partial(mock_settings, mock_categories_data):
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_settings")
+async def test_build_contract_requires_fields_when_not_partial(mock_categories_data):
+    """Test that building contract requires all fields when not partial."""
     s = _base_session("missing_required", mock_categories_data, "t1")
     s.contract_fields["cf1"].status = "empty"
     save_session(s)
     with pytest.raises(ValueError):
-        build_contract(s.session_id, "t1")
+        await build_contract(s.session_id, "t1")

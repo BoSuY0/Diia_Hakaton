@@ -30,7 +30,7 @@ def _setup_category(settings, roles=True):
     from backend.domain.categories import index as category_index
 
     category_index._CATEGORIES_PATH = idx
-    category_index.store._categories = {}
+    category_index.store.clear()
     category_index.store.load()
 
 

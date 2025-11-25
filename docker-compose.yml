@@ -1,7 +1,28 @@
 services:
+  contracts-db:
+    image: mysql:8.4
+    container_name: contracts_db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: contracts_db
+      MYSQL_USER: contracts
+      MYSQL_PASSWORD: contracts
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - contracts-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: contract_bot
+    depends_on:
+      - contracts-db
     ports:
       - "8000:8000"
     volumes:
@@ -12,8 +33,12 @@ services:
       # - ./assets/meta_data:/app/assets/meta_data
     environment:
       - PYTHONUNBUFFERED=1
+      - CONTRACTS_DB_URL=mysql+pymysql://contracts:contracts@contracts-db:3306/contracts_db
       # Add other env vars here or use env_file
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
     env_file:
       - .env
     restart: unless-stopped
+
+volumes:
+  contracts-db-data:

@@ -1,5 +1,5 @@
+"""Security hardening tests for session operations."""
 import json
-import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -53,12 +53,14 @@ def _add_category(settings, cat_id: str, allowed_types=None, templ_id="t_new"):
     index_path.write_text(json.dumps(idx), encoding="utf-8")
 
     # Point store to updated index and reload
-    category_store._categories = {}
+    category_store.clear()
     category_store.load()
 
 
 @pytest.mark.asyncio
-async def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_upsert_unmasks_pii(mock_categories_data):
+    """Test that PII tags are unmasked when upserting fields."""
     session_id = "pii_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -85,7 +87,9 @@ async def test_upsert_unmasks_pii(mock_settings, mock_categories_data):
 
 
 @pytest.mark.asyncio
-async def test_upsert_requires_client_when_role_claimed(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_upsert_requires_client_when_role_claimed(mock_categories_data):
+    """Test that upsert requires user_id when role is claimed."""
     session_id = "acl_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -105,7 +109,9 @@ async def test_upsert_requires_client_when_role_claimed(mock_settings, mock_cate
 
 
 @pytest.mark.asyncio
-async def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_upsert_blocks_foreign_role(mock_categories_data):
+    """Test that user cannot upsert fields for a role they don't own."""
     session_id = "foreign_field_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -124,7 +130,9 @@ async def test_upsert_blocks_foreign_role(mock_settings, mock_categories_data):
     assert "не маєте права" in res["error"]
 
 
-def test_sign_requires_client_and_ready(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sign_requires_client_and_ready(mock_categories_data):
+    """Test that signing requires authentication and ready state."""
     session_id = "sign_ready_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -147,7 +155,7 @@ def test_sign_requires_client_and_ready(mock_settings, mock_categories_data):
     # Mark as built and owned -> success
     s = load_session(session_id)
     s.state = SessionState.BUILT
-    s.party_users = {"lessor": "user1"}
+    s.role_owners = {"lessor": "user1"}
     save_session(s)
     resp = client.post(
         f"/sessions/{session_id}/contract/sign",
@@ -159,7 +167,9 @@ def test_sign_requires_client_and_ready(mock_settings, mock_categories_data):
     assert data["signatures"]["lessor"] is True
 
 
-def test_sign_full_mode_respects_owners(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sign_full_mode_respects_owners(mock_categories_data):
+    """Test that only role owners can sign in full mode."""
     session_id = "full_mode_conflict"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data
@@ -167,7 +177,7 @@ def test_sign_full_mode_respects_owners(mock_settings, mock_categories_data):
     s.state = SessionState.BUILT
     s.filling_mode = "full"
     s.party_types = {"lessor": "individual", "lessee": "individual"}
-    s.party_users = {"lessor": "user_owner", "lessee": "other_owner"}
+    s.role_owners = {"lessor": "user_owner", "lessee": "other_owner"}
     save_session(s)
 
     resp = client.post(
@@ -178,7 +188,9 @@ def test_sign_full_mode_respects_owners(mock_settings, mock_categories_data):
 
 
 @pytest.mark.asyncio
-async def test_set_party_context_disallows_disallowed_type(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_set_party_context_disallows_disallowed_type(mock_categories_data):
+    """Test that setting party context rejects disallowed person types."""
     tool = SetPartyContextTool()
     session_id = "ctx_session"
     s = get_or_create_session(session_id)
@@ -192,7 +204,9 @@ async def test_set_party_context_disallows_disallowed_type(mock_settings, mock_c
     assert res["ok"] is False
 
 
-def test_sync_changes_category_and_clears_state(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_categories_data")
+def test_sync_changes_category_and_clears_state(mock_settings):
+    """Test that changing category via sync clears signatures and state."""
     session_id = "sync_reset_session"
 
     # Ensure second category exists
@@ -240,7 +254,9 @@ def test_sync_changes_category_and_clears_state(mock_settings, mock_categories_d
     assert s.all_data.get("lessor.name", {}).get("current") == "New Name"
 
 
-def test_sync_template_must_belong_to_category(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_categories_data")
+def test_sync_template_must_belong_to_category(mock_settings):
+    """Test that sync rejects templates not belonging to the category."""
     session_id = "sync_template_guard"
     _add_category(mock_settings, "cat_a", templ_id="templ_a")
 
@@ -259,7 +275,9 @@ def test_sync_template_must_belong_to_category(mock_settings, mock_categories_da
     assert resp.status_code == 400
 
 
-def test_schema_status_uses_field_state(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_schema_status_uses_field_state(mock_categories_data):
+    """Test that schema endpoint uses FieldState status correctly."""
     session_id = "schema_status_session"
     s = get_or_create_session(session_id)
     s.category_id = mock_categories_data

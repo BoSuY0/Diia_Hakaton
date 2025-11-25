@@ -1,3 +1,4 @@
+"""Tests for access control restrictions on session endpoints."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,7 +17,7 @@ def _prepare_full_session(session_id: str, category_id: str) -> str:
     s.category_id = category_id
     s.template_id = "t1"
     s.party_types = {"lessor": "individual", "lessee": "individual"}
-    s.party_users = {"lessor": "owner1", "lessee": "owner2"}
+    s.role_owners = {"lessor": "owner1", "lessee": "owner2"}
     s.state = SessionState.COMPLETED
     s.signatures = {"lessor": True, "lessee": True}
     s.can_build_contract = True
@@ -25,7 +26,9 @@ def _prepare_full_session(session_id: str, category_id: str) -> str:
     return session_id
 
 
-def test_contract_endpoints_reject_foreign_client(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_contract_endpoints_reject_foreign_client(mock_categories_data):
+    """Test that contract endpoints reject non-participant users."""
     session_id = _prepare_full_session("acl_contract", mock_categories_data)
     headers = {"X-User-ID": "intruder"}
 
@@ -39,7 +42,9 @@ def test_contract_endpoints_reject_foreign_client(mock_settings, mock_categories
     assert resp_download.status_code == 403
 
 
-def test_user_document_protected_from_third_party(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_user_document_protected_from_third_party(mock_categories_data):
+    """Test that user document endpoint rejects non-participant users."""
     session_id = _prepare_full_session("acl_user_doc", mock_categories_data)
     headers = {"X-User-ID": "intruder"}
 
@@ -47,7 +52,9 @@ def test_user_document_protected_from_third_party(mock_settings, mock_categories
     assert resp.status_code == 403
 
 
-def test_stream_and_order_require_participant(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_stream_and_order_require_participant(mock_categories_data):
+    """Test that stream and order endpoints require participant access."""
     session_id = _prepare_full_session("acl_stream_order", mock_categories_data)
     headers = {"X-User-ID": "intruder"}
 
@@ -58,7 +65,9 @@ def test_stream_and_order_require_participant(mock_settings, mock_categories_dat
     assert resp_order.status_code == 403
 
 
-def test_sync_requires_participant(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+def test_sync_requires_participant(mock_categories_data):
+    """Test that sync endpoint requires participant access."""
     session_id = _prepare_full_session("acl_sync", mock_categories_data)
     headers = {"X-User-ID": "intruder"}
 

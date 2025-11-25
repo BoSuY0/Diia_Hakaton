@@ -7,6 +7,9 @@ import sqlite3
 
 from backend.domain.sessions.models import Session
 from backend.infra.config.settings import settings
+from backend.shared.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class ContractsRepository:
@@ -124,6 +127,13 @@ _contracts_repo: ContractsRepository | None = None
 def get_contracts_repo() -> ContractsRepository:
     global _contracts_repo
     if _contracts_repo is None:
-        # Поки що тільки SQLite; можна додати MySQL імплементацію через env
-        _contracts_repo = SQLiteContractsRepository()
+        if settings.contracts_db_url and settings.contracts_db_url.startswith("mysql"):
+            try:
+                from backend.infra.persistence.contracts_mysql import MySQLContractsRepository
+                _contracts_repo = MySQLContractsRepository(settings.contracts_db_url)
+            except Exception as exc:
+                logger.error("Failed to init MySQLContractsRepository, fallback to SQLite: %s", exc)
+                _contracts_repo = SQLiteContractsRepository()
+        else:
+            _contracts_repo = SQLiteContractsRepository()
     return _contracts_repo

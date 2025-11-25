@@ -1,3 +1,4 @@
+"""Tests for session service functions."""
 import pytest
 
 from backend.domain.services.session import set_party_type
@@ -5,7 +6,9 @@ from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import FieldState, SessionState
 
 
-def test_set_party_type_invalidates_signature(mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings", "mock_categories_data")
+def test_set_party_type_invalidates_signature():
+    """Test that changing party type invalidates signature and clears fields."""
     session = get_or_create_session("sig_reset")
     session.category_id = "test_cat"
 

@@ -1,3 +1,4 @@
+"""Script to migrate file-based sessions to Redis storage."""
 from __future__ import annotations
 
 import argparse
@@ -11,9 +12,13 @@ from backend.infra.storage.fs import read_json
 
 
 async def migrate_async(delete_files: bool = False) -> None:
+    """Migrate all file-based sessions to Redis asynchronously."""
     sessions_dir = settings.sessions_root
     if settings.session_backend != "redis":
-        print("SESSION_BACKEND is not set to 'redis'; aborting to avoid accidental writes.", file=sys.stderr)
+        print(
+            "SESSION_BACKEND is not set to 'redis'; aborting.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if not settings.redis_url:
@@ -33,13 +38,14 @@ async def migrate_async(delete_files: bool = False) -> None:
             migrated += 1
             if delete_files:
                 path.unlink()
-        except Exception as exc:
+        except (OSError, ValueError, KeyError) as exc:
             print(f"Failed to migrate {path.name}: {exc}", file=sys.stderr)
 
     print(f"Migrated {migrated} sessions to Redis")
 
 
 def migrate(delete_files: bool = False) -> None:
+    """Sync wrapper for migrate_async."""
     asyncio.run(migrate_async(delete_files))
 
 

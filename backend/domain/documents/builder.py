@@ -1,16 +1,26 @@
+"""Contract document builder from templates."""
 from __future__ import annotations
 
-from typing import Dict
 import sys
+from typing import Dict
 
-from backend.domain.categories.index import Category, list_templates, store
+from backend.domain.categories.index import (
+    Category,
+    PartyField,
+    list_entities,
+    list_party_fields,
+    list_templates,
+    load_meta,
+    store,
+)
 from backend.shared.errors import MetaNotFoundError, SessionNotFoundError
 from backend.shared.logging import get_logger
-from backend.domain.documents.docx_filler import fill_docx_template_async
+from backend.domain.documents.docx_filler import fill_docx_template
 from backend.infra.persistence.store import aload_session
 from backend.infra.storage.fs import output_document_path
 from backend.domain.services.fields import get_required_fields
 from backend.infra.config.settings import settings
+from backend.shared.async_utils import run_sync
 
 
 logger = get_logger(__name__)
@@ -18,7 +28,21 @@ logger = get_logger(__name__)
 sys.modules["backend.domain.documents.builder.settings"] = settings
 
 
-async def build_contract(session_id: str, template_id: str, partial: bool = False) -> Dict[str, str]:
+async def build_contract(
+    session_id: str,
+    template_id: str,
+    partial: bool = False,
+) -> Dict[str, str]:
+    """Build a contract document from a template.
+
+    Args:
+        session_id: The session ID.
+        template_id: The template ID to use.
+        partial: If True, allow missing fields with placeholders.
+
+    Returns:
+        Dict with file_path, filename, and mime type.
+    """
     logger.info(
         "builder=build_contract session_id=%s template_id=%s partial_arg=%s",
         session_id,
@@ -29,7 +53,7 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         logger.error("builder=build_contract session_not_found session_id=%s", session_id)
-        raise MetaNotFoundError(str(exc))
+        raise MetaNotFoundError(str(exc)) from exc
 
     if session.template_id and session.template_id != template_id:
         logger.error(
@@ -89,16 +113,7 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
         raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
 
     field_values: Dict[str, str] = {}
-    PLACEHOLDER = "(                 )"
-
-    from backend.domain.categories.index import (
-        list_entities,
-        list_party_fields,
-        _load_meta,
-        store as cat_store,
-        Entity,
-        PartyField,
-    )
+    placeholder = "(                 )"  # pylint: disable=invalid-name
 
     entities = list_entities(session.category_id)
     for entity in entities:
@@ -110,12 +125,12 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
             value = entry
 
         if value is None or str(value).strip() == "":
-            field_values[entity.field] = PLACEHOLDER if partial else ""
+            field_values[entity.field] = placeholder if partial else ""
         else:
             field_values[entity.field] = str(value)
 
-    category_def = cat_store.get(session.category_id)
-    meta = _load_meta(category_def) if category_def else {}
+    category_def = store.get(session.category_id)
+    meta = load_meta(category_def) if category_def else {}
     roles = meta.get("roles") or {}
     modules = meta.get("party_modules") or {}
 
@@ -125,8 +140,20 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
             p_type = session.party_types[role_key]
         elif session.role == role_key and session.person_type:
             p_type = session.person_type
+
+        # Use metadata-based fallback if still unknown
         if not p_type:
-            p_type = "individual"
+            role_meta = roles.get(role_key, {})
+            # 1. Check for explicit default_person_type
+            p_type = role_meta.get("default_person_type")
+            if not p_type:
+                # 2. Use first allowed type
+                allowed = role_meta.get("allowed_person_types", [])
+                if allowed:
+                    p_type = allowed[0]
+                elif modules:
+                    # 3. Use first available module
+                    p_type = next(iter(modules.keys()), "individual")
 
         party_fields_list = []
         module = modules.get(p_type)
@@ -153,7 +180,7 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
                 value = entry
 
             if value is None or str(value).strip() == "":
-                field_values[key] = PLACEHOLDER if partial else ""
+                field_values[key] = placeholder if partial else ""
             else:
                 field_values[key] = str(value)
 
@@ -168,7 +195,8 @@ async def build_contract(session_id: str, template_id: str, partial: bool = Fals
         if fallback.exists():
             template_path = fallback
 
-    await fill_docx_template_async(
+    await run_sync(
+        fill_docx_template,
         template_path,
         field_values,
         output_path,

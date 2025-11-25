@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 // Trigger rebuild
 import './App.css';
-import { api } from './api';
+import { api, getAuthToken } from './api';
 import { SectionCard } from './components/SectionCard';
 import { InputField } from './components/InputField';
 import PreviewDrawer from './components/PreviewDrawer';
@@ -12,6 +12,7 @@ import { RoleSelector } from './components/RoleSelector';
 import { Dashboard } from './components/Dashboard';
 import { ContractDetails } from './components/ContractDetails';
 import { AIChat } from './components/AIChat';
+import { ShareLinkCard } from './components/ShareLinkCard';
 
 // Simple debounce utility
 const debounce = (func, wait) => {
@@ -260,7 +261,9 @@ function App() {
   useEffect(() => {
     if (!sessionId) return;
 
-    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${userId}`);
+    const token = getAuthToken();
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${userId}${tokenParam}`);
 
     eventSource.onopen = () => {
       setIsOnline(true);
@@ -573,7 +576,7 @@ function App() {
     if (!sessionId) return;
 
     if (isOptional) {
-      alert("Дані успішно збережено! Ви можете скопіювати посилання з адресного рядка і надіслати його іншій стороні для заповнення.");
+      alert("Дані успішно збережено! Використайте кнопку «Поділитися посиланням» та надішліть URL іншій стороні.");
       return;
     }
 
@@ -655,6 +658,8 @@ function App() {
 
     return (
       <>
+        <ShareLinkCard sessionId={sessionId} parties={schema.parties} userId={userId} />
+
         {schema.parties.map(party => {
           const isMyRole = party.role === selectedRole;
           const isTaken = takenRoles.includes(party.role);

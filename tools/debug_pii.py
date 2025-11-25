@@ -1,8 +1,9 @@
+"""Debug script for testing PII tagging functionality."""
 from backend.domain.validation.pii_tagger import sanitize_typed
 
-fake_iban = "UA213223130000026007233566001" 
-msg1 = f"Мій IBAN {fake_iban}"
+FAKE_IBAN = "UA213223130000026007233566001"
+TEST_MESSAGE = f"Мій IBAN {FAKE_IBAN}"
 
-print(f"Testing message: {msg1}")
-result = sanitize_typed(msg1)
+print(f"Testing message: {TEST_MESSAGE}")
+result = sanitize_typed(TEST_MESSAGE)
 print("Result:", result)

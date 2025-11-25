@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import logging
@@ -28,7 +28,7 @@ def clean_stale_sessions(max_age_hours: int | None = None):
         logger.warning(f"Sessions directory not found: {sessions_dir}")
         return
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     deleted_count = 0
     errors_count = 0
 
@@ -60,10 +60,12 @@ def clean_stale_sessions(max_age_hours: int | None = None):
             updated_at_str = data.get("updated_at")
             if updated_at_str:
                 updated_at = datetime.fromisoformat(updated_at_str)
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
             else:
                 # Якщо поля немає, використовуємо час модифікації файлу
                 mtime = file_path.stat().st_mtime
-                updated_at = datetime.fromtimestamp(mtime)
+                updated_at = datetime.fromtimestamp(mtime, tz=timezone.utc)
             
             if updated_at < threshold:
                 logger.info(f"Deleting stale session: {file_path.name} (last updated: {updated_at})")
@@ -94,7 +96,7 @@ def clean_abandoned_sessions(active_session_ids: set[str], grace_period_minutes:
     if not sessions_dir.exists():
         return
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     threshold = now - timedelta(minutes=grace_period_minutes)
     
     deleted_count = 0

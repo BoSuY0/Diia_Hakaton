@@ -1,25 +1,29 @@
+"""Demo script for registering a real document (Lease Flat)."""
+import json
 import subprocess
 import sys
-import json
-from pathlib import Path
+
 from backend.infra.config.settings import settings
 
-def run_command(args):
+
+def run_command(args: list[str]) -> bool:
+    """Run manage_content.py with given arguments."""
     cmd = [sys.executable, "manage_content.py"] + args
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         print(f"[ERROR] Command failed: {' '.join(cmd)}")
         print(result.stderr)
         return False
     return True
 
-def demo():
+def demo() -> None:
+    """Demonstrate registering a lease flat document."""
     print("=== Demo: Registering 'Lease Flat' Document ===")
-    
+
     # 1. Create a new category for this demo
     cat_id = "demo_lease_real_estate"
     cat_label = "Демо: Оренда житла"
-    
+
     print(f"\n1. Creating category '{cat_label}'...")
     if not run_command(["add-category", "--id", cat_id, "--label", cat_label]):
         return
@@ -29,9 +33,13 @@ def demo():
     tmpl_id = "demo_lease_flat"
     tmpl_name = "Договір оренди квартири (Демо)"
     tmpl_file = "lease_flat.docx"
-    
+
     print(f"\n2. Adding template '{tmpl_name}' pointing to '{tmpl_file}'...")
-    if not run_command(["add-template", "--category", cat_id, "--id", tmpl_id, "--name", tmpl_name, "--file", tmpl_file]):
+    add_tmpl_args = [
+        "add-template", "--category", cat_id,
+        "--id", tmpl_id, "--name", tmpl_name, "--file", tmpl_file,
+    ]
+    if not run_command(add_tmpl_args):
         return
 
     # 3. Add some fields that match the real document structure (based on lease_real_estate.json)
@@ -39,9 +47,9 @@ def demo():
     fields = [
         ("object_address", "Адреса житла", True),
         ("rent_price_month", "Сума оренди (грн/міс)", True),
-        ("start_date", "Дата початку", True)
+        ("start_date", "Дата початку", True),
     ]
-    
+
     for field, label, required in fields:
         args = ["add-field", "--category", cat_id, "--field", field, "--label", label]
         if required:

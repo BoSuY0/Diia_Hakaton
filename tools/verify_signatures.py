@@ -1,13 +1,15 @@
-import sys
-import os
+"""Verification script for contract signature logic."""
 from backend.domain.sessions.models import Session, SessionState
 from backend.domain.services.session import update_session_field
 
-def test_signature_logic():
+
+def test_signature_logic() -> None:
+    """Test signature logic including signing, blocking edits, and invalidation."""
+    # pylint: disable=import-outside-toplevel
     print("--- Testing Signature Logic ---")
-    
+
     from backend.infra.persistence.store import save_session
-    
+
     # Setup Session
     session = Session(
         session_id="test_sig_session",
@@ -18,26 +20,26 @@ def test_signature_logic():
         signatures={"lessor": False, "lessee": False}
     )
     save_session(session)
-    
+
     # 1. Fill some data
     print("Filling initial data...")
     update_session_field(session, "name", "Lessor Name", role="lessor")
     save_session(session)
-    
+
     # 2. Sign as Lessor using Tool
     print("Signing as Lessor...")
     # Need to mock tool execution or call logic directly?
     # Let's call the logic directly via a helper or just simulate what tool does.
     # Since we want to verify the TOOL logic, we should import it.
     from backend.agent.tools.session import SignContractTool
-    
+
     # We need to be in BUILT state to sign
     session.state = SessionState.BUILT
     save_session(session)
-    
+
     tool = SignContractTool()
     res = tool.execute({"session_id": session.session_id, "role": "lessor"}, {})
-    
+
     if res["ok"] and res["signed"]:
         print("✅ SignContractTool executed successfully")
     else:
@@ -49,7 +51,7 @@ def test_signature_logic():
 
     assert session.signatures["lessor"] is True
     assert session.signatures["lessee"] is False
-    
+
     # 3. Try to edit as Lessor (Should be BLOCKED)
     print("Attempting edit as Lessor (Signed)...")
     ok, err, _ = update_session_field(session, "name", "New Name", role="lessor")
@@ -57,14 +59,14 @@ def test_signature_logic():
         print("✅ Edit blocked for signed party")
     else:
         print(f"❌ Edit NOT blocked! ok={ok}, err={err}")
-        
+
     # 4. Edit as Lessee (Should be ALLOWED and INVALIDATE Lessor)
     print("Attempting edit as Lessee (Unsigned)...")
     # Switch context to lessee
-    session.role = "lessee" 
-    
+    session.role = "lessee"
+
     ok, err, _ = update_session_field(session, "name", "Lessee Name", role="lessee")
-    
+
     if ok:
         print("✅ Edit allowed for unsigned party")
         # Check invalidation
@@ -79,7 +81,7 @@ if __name__ == "__main__":
     try:
         test_signature_logic()
         print("\nAll signature tests passed!")
-    except Exception as e:
+    except (RuntimeError, ValueError, AssertionError) as e:
         print(f"\n❌ Test failed with exception: {e}")
-        import traceback
+        import traceback  # pylint: disable=import-outside-toplevel
         traceback.print_exc()

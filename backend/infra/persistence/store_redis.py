@@ -4,7 +4,7 @@ import json
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Generator, Any
 
 from backend.infra.config.settings import settings
@@ -36,7 +36,7 @@ def _lock_key(session_id: str) -> str:
 
 async def save_session(session: Session) -> None:
     redis = await get_redis()
-    session.updated_at = datetime.now()
+    session.updated_at = datetime.now(timezone.utc)
 
     data = session_to_dict(session)
     payload = json.dumps(data, ensure_ascii=False)

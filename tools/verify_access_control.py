@@ -1,17 +1,19 @@
+"""Verification script for session access control logic."""
 import sys
 import os
+
 from fastapi.testclient import TestClient
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 
-from backend.api.http.server import app
-from backend.infra.persistence.store import get_or_create_session, save_session
-from backend.domain.sessions.models import SessionState
+from backend.api.http.server import app  # pylint: disable=wrong-import-position
 
 client = TestClient(app)
 
-def test_access_control():
+
+def test_access_control() -> None:
+    """Test session access control with multiple users and roles."""
     print("Starting Access Control Verification...")
 
     # 1. Create Session
@@ -33,10 +35,10 @@ def test_access_control():
     if not cats:
         print("No categories found. Skipping test.")
         return
-    
-    cat_id = cats[0]["id"] # Use first category
+
+    cat_id = cats[0]["id"]  # Use first category
     print(f"Using category: {cat_id}")
-    
+
     resp = client.post(
         f"/sessions/{session_id}/category",
         json={"category_id": cat_id},
@@ -56,7 +58,7 @@ def test_access_control():
     schema = schema_resp.json()
     roles = [p["role"] for p in schema["parties"]]
     print(f"Roles found: {roles}")
-    
+
     if len(roles) < 2:
         print("Category has fewer than 2 roles. Cannot test full session blocking effectively.")
         return
@@ -93,7 +95,7 @@ def test_access_control():
     user3_id = "user_3"
     print("User 3 trying to access session (should be BLOCKED)...")
     resp = client.get(f"/sessions/{session_id}", headers={"X-User-ID": user3_id})
-    
+
     if resp.status_code == 403:
         print("SUCCESS: User 3 blocked with 403.")
     else:
@@ -124,7 +126,8 @@ def test_access_control():
         json={"role": role2, "person_type": "individual"},
         headers={"X-User-ID": user1_id}
     )
-    # It might fail with 400 (ValueError) or 200 if we allowed switching (we blocked it in claim_session_role).
+    # It might fail with 400 (ValueError) or 200 if we allowed switching
+    # (we blocked it in claim_session_role).
     if resp.status_code != 200:
         print(f"SUCCESS: User 1 blocked from claiming second role: {resp.text}")
     else:
@@ -135,7 +138,7 @@ def test_access_control():
 if __name__ == "__main__":
     try:
         test_access_control()
-    except Exception as e:
+    except (RuntimeError, ValueError, AssertionError) as e:
         print(f"Test failed with exception: {e}")
         import traceback
         traceback.print_exc()

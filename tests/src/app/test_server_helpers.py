@@ -1,4 +1,4 @@
-import asyncio
+"""Tests for server helper functions."""
 import pytest
 
 from backend.api.http import server
@@ -34,11 +34,10 @@ def test_inject_session_id_adds_and_expands_alias():
     assert data["field"] == "field1"
 
 
-import asyncio
-
-
 @pytest.mark.asyncio
-async def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_settings, mock_categories_data):
+@pytest.mark.usefixtures("mock_settings")
+async def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_categories_data):
+    """Test that _get_effective_state uses saved state correctly."""
     from backend.infra.persistence.store import get_or_create_session, save_session
     s = get_or_create_session("eff_state")
     s.category_id = mock_categories_data

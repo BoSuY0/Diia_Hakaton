@@ -1,3 +1,4 @@
+"""Utility for creating project dump files."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +19,7 @@ GIT_META_ALLOWED_PREFIXES = (".github", ".gitlab", ".gitpod")
 
 
 def ensure_dumps_dir() -> Path:
+    """Ensure the dumps directory exists and return its path."""
     DUMPS_DIR.mkdir(parents=True, exist_ok=True)
     return DUMPS_DIR
 
@@ -47,7 +49,7 @@ def create_dump_file(
     return file_path
 
 
-def _is_git_metadata(rel: Path, *, is_dir: bool = False) -> bool:
+def _is_git_metadata(rel: Path, *, is_dir: bool = False) -> bool:  # noqa: ARG001  # pylint: disable=unused-argument
     """
     Відфільтровує git-службові файли та директорії:
     - усе, що містить компонент .git у шляху;
@@ -84,7 +86,7 @@ def _load_gitignore_patterns(base_dir: Path) -> tuple[list[str], object | None]:
             continue
         patterns.append(line)
     try:
-        from pathspec import PathSpec  # type: ignore
+        from pathspec import PathSpec  # type: ignore  # pylint: disable=import-outside-toplevel
     except ModuleNotFoundError:
         return patterns, None
     return patterns, PathSpec.from_lines("gitwildmatch", patterns)
@@ -167,7 +169,7 @@ def collect_project_files() -> list[Path]:
                 if not file_path.is_file():
                     continue
             except OSError:
-                # Пропускаємо файли/лінки, які неможливо прочитати (наприклад, lib64 у venv на Windows)
+                # Skip unreadable files/links (e.g., lib64 in venv on Windows)
                 continue
             all_paths.append(rel)
     return sorted(all_paths)
@@ -206,6 +208,7 @@ def create_full_project_dump(file_name: Optional[str] = None) -> Path:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Створення дамп-файлу у директорії ./dumps/"
     )
@@ -230,6 +233,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Main entry point for the dump file creator."""
     args = parse_args(argv or sys.argv[1:])
 
     if args.full_project:
