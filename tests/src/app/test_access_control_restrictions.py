@@ -43,6 +43,23 @@ def test_contract_endpoints_reject_foreign_client(mock_categories_data):
 
 
 @pytest.mark.usefixtures("mock_settings")
+def test_contract_endpoints_ignore_query_user_id(mock_categories_data):
+    """Ensure user_id query parameter cannot bypass authentication or ACL."""
+    session_id = _prepare_full_session("acl_contract_query", mock_categories_data)
+
+    resp_no_auth = client.get(
+        f"/sessions/{session_id}/contract/preview?user_id=owner1",
+    )
+    assert resp_no_auth.status_code == 401
+
+    headers = {"X-User-ID": "intruder"}
+    resp_forced = client.get(
+        f"/sessions/{session_id}/contract/download?user_id=owner1", headers=headers
+    )
+    assert resp_forced.status_code == 403
+
+
+@pytest.mark.usefixtures("mock_settings")
 def test_user_document_protected_from_third_party(mock_categories_data):
     """Test that user document endpoint rejects non-participant users."""
     session_id = _prepare_full_session("acl_user_doc", mock_categories_data)

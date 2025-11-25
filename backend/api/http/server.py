@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 from backend.agent.llm_client import chat_with_tools_async, load_system_prompt
 from backend.api.http.state import Conversation, conversation_store
@@ -287,6 +287,11 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
 
+    @validator("session_id")
+    def validate_session_id(cls, value: str) -> str:  # noqa: D417
+        _validate_session_id(value)
+        return value
+
 
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
@@ -318,6 +323,12 @@ class CreateSessionRequest(BaseModel):
     filling_mode: Optional[str] = None  # "full" or "partial"
     role: Optional[str] = None
     person_type: Optional[str] = None
+
+    @validator("session_id")
+    def validate_session_id(cls, value: Optional[str]) -> Optional[str]:  # noqa: D417
+        if value:
+            _validate_session_id(value)
+        return value
 
 
 @app.get("/metrics")
@@ -1124,6 +1135,7 @@ async def get_session_party_fields(session_id: str) -> Dict[str, Any]:
     Повертає перелік полів сторони договору (name, address, тощо)
     для поточної сесії, виходячи з role + person_type.
     """
+    _validate_session_id(session_id)
     result = await tool_get_party_fields_for_session_async(session_id=session_id)
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1138,6 +1150,7 @@ async def set_session_party_context(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Set party context (role, person type) for a session."""
+    _validate_session_id(session_id)
     user_id = _require_user_id(x_user_id, authorization)
 
     result = await tool_set_party_context_async(
@@ -1184,6 +1197,7 @@ async def create_session(
     """
     # Якщо ID не передано, генеруємо читабельний.
     session_id = req.session_id or generate_readable_id("new")
+    _validate_session_id(session_id)
     creator_user_id = req.user_id or resolve_user_id(x_user_id, authorization)
     session = await aget_or_create_session(session_id, user_id=creator_user_id)
     
@@ -1327,6 +1341,7 @@ async def get_session(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Get session details and summary."""
+    _validate_session_id(session_id)
     user_id = _require_user_id(x_user_id, authorization)
     try:
         # We need to load session to check access.
@@ -1352,6 +1367,7 @@ async def get_user_document_api(
     Повертає user-document JSON у форматі example_user_document.json
     для вказаної сесії.
     """
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -1370,6 +1386,7 @@ async def get_user_document_api(
 @app.post("/sessions/{session_id}/category")
 async def set_session_category(session_id: str, req: SetCategoryRequest) -> Dict[str, Any]:
     """Set category for a session."""
+    _validate_session_id(session_id)
     result = await tool_set_category_async(session_id=session_id, category_id=req.category_id)
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1379,6 +1396,7 @@ async def set_session_category(session_id: str, req: SetCategoryRequest) -> Dict
 @app.post("/sessions/{session_id}/template")
 async def set_session_template(session_id: str, req: SetTemplateRequest) -> Dict[str, Any]:
     """Set template for a session."""
+    _validate_session_id(session_id)
     result = await tool_set_template_async(session_id=session_id, template_id=req.template_id)
     if not result.get("ok", False):
         raise HTTPException(status_code=400, detail=result.get("error", "Bad request"))
@@ -1399,6 +1417,7 @@ async def set_session_filling_mode(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Set filling mode for a session."""
+    _validate_session_id(session_id)
     user_id = _require_user_id(x_user_id, authorization)
     tool = adapter_tool_registry.get("set_filling_mode")
     if not tool:
@@ -1504,22 +1523,34 @@ async def stream_session_events(
     """
     Server-Sent Events endpoint for real-time session updates.
     """
+    _validate_session_id(session_id)
     auth_header = authorization
     if not auth_header and token_query:
         auth_header = f"Bearer {token_query}"
 
+    effective_user_query = None if settings.is_prod else user_id_query
+
     if settings.auth_mode == "jwt":
         user_id = resolve_user_id(None, auth_header)
     else:
-        user_id = user_id_query or resolve_user_id(x_user_id, auth_header)
+        user_id = effective_user_query or resolve_user_id(
+            x_user_id, auth_header, allow_anonymous=not settings.is_prod
+        )
 
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Allow connection even if not participant yet (to see role changes in real time)
-    check_session_access(session, user_id, require_participant=False, allow_owner=True)
+    if settings.is_prod and not user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-ID")
+
+    check_session_access(
+        session,
+        user_id,
+        require_participant=settings.is_prod,
+        allow_owner=True,
+    )
 
     queue = await stream_manager.connect(session_id, user_id)
 
@@ -1552,12 +1583,12 @@ async def upsert_session_field(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Upsert a field value in a session."""
+    _validate_session_id(session_id)
     # If session has participants, require authentication via header.
     try:
         await aload_session(session_id)  # Validate session exists
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
     user_id = _require_user_id(x_user_id, authorization)
 
     result = await tool_upsert_field_async(
@@ -1604,6 +1635,7 @@ async def upsert_session_field(
 async def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str, Any]:
     """Build contract document from session data."""
     from backend.shared.errors import MetaNotFoundError  # pylint: disable=import-outside-toplevel
+    _validate_session_id(session_id)
     # ensure session exists
     try:
         await aload_session(session_id)
@@ -1643,6 +1675,7 @@ async def sync_session(
     Універсальний ендпоінт для пакетного оновлення даних сесії.
     Підтримує One-shot (все одразу) та Two-shot (по частинах) флоу.
     """
+    _validate_session_id(session_id)
     # Якщо сесія ще не створена — створюємо файл-чернетку
     await aget_or_create_session(session_id)
 
@@ -1947,6 +1980,7 @@ async def get_contract_info(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Get contract info including signing status and download URLs."""
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -2007,12 +2041,22 @@ async def preview_contract(
     user_id_query: Optional[str] = Query(None, alias="user_id"),
 ):
     """Preview contract as HTML."""
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    user_id = user_id_query or _require_user_id(x_user_id, authorization)
+    caller_id = _require_user_id(x_user_id, authorization)
+    if user_id_query and user_id_query != caller_id:
+        security_logger.warning(
+            "idor_attempt caller=%s target=%s endpoint=/sessions/{session_id}/contract/preview",
+            caller_id,
+            user_id_query,
+        )
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    user_id = caller_id if settings.is_prod else (user_id_query or caller_id)
     # Превʼю доступне лише учасникам або власнику
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
@@ -2058,12 +2102,22 @@ async def download_contract(
     """Download contract document as DOCX."""
     from backend.infra.storage.fs import output_document_path  # pylint: disable=import-outside-toplevel
 
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 
-    user_id = user_id_query or _require_user_id(x_user_id, authorization)
+    caller_id = _require_user_id(x_user_id, authorization)
+    if user_id_query and user_id_query != caller_id:
+        security_logger.warning(
+            "idor_attempt caller=%s target=%s endpoint=/sessions/{session_id}/contract/download",
+            caller_id,
+            user_id_query,
+        )
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    user_id = caller_id if settings.is_prod else (user_id_query or caller_id)
     check_session_access(
         session, user_id, require_participant=True, allow_owner=True
     )
@@ -2116,6 +2170,7 @@ async def sign_contract(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Sign contract for the current user's role."""
+    _validate_session_id(session_id)
     user_id = _require_user_id(x_user_id, authorization)
     logger.info("Sign request: session_id=%s, user_id=%s", session_id, user_id)
     try:
@@ -2223,6 +2278,7 @@ async def get_session_schema(
         - 'none': не повертає даних, тільки метадані
     """
 
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -2376,6 +2432,7 @@ async def get_session_requirements(
     """
     Повертає список незаповнених обов'язкових полів для відображення на фронті.
     """
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -2410,6 +2467,7 @@ async def get_session_history(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Dict[str, Any]:
     """Get session history of field updates."""
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
@@ -2440,6 +2498,7 @@ async def order_contract(
     """
     import shutil  # pylint: disable=import-outside-toplevel
 
+    _validate_session_id(session_id)
     try:
         session = await aload_session(session_id)
     except SessionNotFoundError as exc:
