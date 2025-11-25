@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ class Settings:
         self._init_llm_config()
         self._init_auth_config()
         self._init_cors_config()
+        self._validate_auth_mode()
 
     def _init_env(self) -> None:
         """Initialize environment settings."""
@@ -70,9 +72,8 @@ class Settings:
         self.llm_api_key: str | None = (
             os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         )
-        self.llm_model: str = (
-            os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
-        )
+        raw_model = os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+        self.llm_model: str = self._normalize_llm_model(raw_model)
         self.llm_base_url: str | None = os.getenv("LLM_BASE_URL")
         self.chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"
         self.llm_wire_format: str = os.getenv("LLM_WIRE_FORMAT", "JSON")
@@ -91,6 +92,16 @@ class Settings:
         self.auth_jwt_algorithm: str = os.getenv("AUTH_JWT_ALGO", "HS256")
         self.auth_jwt_issuer: str | None = os.getenv("AUTH_JWT_ISSUER")
         self.auth_user_prefix: str = os.getenv("AUTH_USER_PREFIX", "diia:")
+
+    def _normalize_llm_model(self, name: str) -> str:
+        """Pad day component in model names like yyyy-mm-d → yyyy-mm-dd."""
+
+        match = re.search(r"(\d{4}-\d{2}-)(\d{1,2})$", name)
+        if not match:
+            return name
+
+        prefix, day = match.groups()
+        return f"{name[: match.start()]}{prefix}{day.zfill(2)}"
 
     def _init_cors_config(self) -> None:
         """Initialize CORS configuration."""
@@ -115,6 +126,14 @@ class Settings:
                 stacklevel=2,
             )
         self.cors_allow_credentials: bool = "*" not in self.cors_origins
+
+    def _validate_auth_mode(self) -> None:
+        """Fail fast if insecure auth mode is configured for production."""
+
+        if self.is_prod and self.auth_mode != "jwt":
+            raise RuntimeError(
+                "Invalid AUTH_MODE for production: only 'jwt' is allowed when ENV=prod"
+            )
 
     @staticmethod
     def _get_int_env(key: str, default: int) -> int:

@@ -25,5 +25,6 @@ def test_cors_origins_default(monkeypatch):
     """Test CORS origins default."""
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     s = Settings()
-    assert "*" in s.cors_origins
-    assert s.cors_allow_credentials is False
+    assert "http://localhost:5173" in s.cors_origins
+    assert "http://localhost:3000" in s.cors_origins
+    assert s.cors_allow_credentials is True
