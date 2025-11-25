@@ -54,6 +54,7 @@ from backend.domain.sessions.cleaner import clean_stale_sessions, clean_abandone
 from backend.domain.services.fields import collect_missing_fields
 from backend.domain.categories.index import (
     list_party_fields, list_entities, store as cat_store, load_meta, list_templates,
+    get_party_schema,
 )
 from backend.infra.storage.fs import ensure_directories
 from backend.domain.validation.pii_tagger import sanitize_typed
@@ -301,10 +302,22 @@ class FindCategoryRequest(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """Request model for session creation."""
+    """Request model for session creation.
+    
+    Supports two modes:
+    1. Simple: just create empty session (session_id, user_id only)
+    2. Full init: create session with all parameters at once
+       (category_id, template_id, filling_mode, role, person_type)
+    """
 
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Optional parameters for full initialization
+    category_id: Optional[str] = None
+    template_id: Optional[str] = None
+    filling_mode: Optional[str] = None  # "full" or "partial"
+    role: Optional[str] = None
+    person_type: Optional[str] = None
 
 
 @app.get("/metrics")
@@ -1087,6 +1100,24 @@ async def get_category_parties(category_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/categories/{category_id}/schema")
+async def get_category_schema(category_id: str) -> Dict[str, Any]:
+    """
+    Отримати схему ролей та полів для категорії БЕЗ створення сесії.
+    Використовується для показу форми вибору ролі до створення сесії.
+    
+    Returns:
+        - category_id: ID категорії
+        - main_role: роль за замовчуванням
+        - roles: список ролей з allowed_person_types
+        - person_types: типи осіб з полями для кожного
+    """
+    try:
+        return get_party_schema(category_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/sessions/{session_id}/party-fields")
 async def get_session_party_fields(session_id: str) -> Dict[str, Any]:
     """
@@ -1142,13 +1173,65 @@ async def create_session(
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> CreateSessionResponse:
-    """Create a new contract session."""
+    """Create a new contract session.
+    
+    Supports full initialization with all parameters:
+    - category_id: set category
+    - template_id: set template (requires category_id)
+    - filling_mode: "full" or "partial"
+    - role: claim role for user
+    - person_type: set person type for the role
+    """
     # Якщо ID не передано, генеруємо читабельний.
-    # За замовчуванням префікс "new", але якщо клієнт знає шаблон,
-    # він може передати його як частину логіки (поки що просто new).
     session_id = req.session_id or generate_readable_id("new")
     creator_user_id = req.user_id or resolve_user_id(x_user_id, authorization)
     session = await aget_or_create_session(session_id, user_id=creator_user_id)
+    
+    # Full initialization: apply all parameters if provided
+    errors = []
+    
+    if req.category_id:
+        result = await tool_set_category_async(session.session_id, req.category_id)
+        if not result.get("ok", False):
+            errors.append(f"category: {result.get('error', 'Failed')}")
+    
+    if req.template_id:
+        if not req.category_id:
+            errors.append("template: category_id is required to set template")
+        else:
+            result = await tool_set_template_async(session.session_id, req.template_id)
+            if not result.get("ok", False):
+                errors.append(f"template: {result.get('error', 'Failed')}")
+    
+    if req.filling_mode:
+        tool = adapter_tool_registry.get("set_filling_mode")
+        if tool:
+            result = await tool.execute_async(
+                {"session_id": session.session_id, "mode": req.filling_mode},
+                {"user_id": creator_user_id}
+            )
+            if not result.get("ok", False):
+                errors.append(f"filling_mode: {result.get('error', 'Failed')}")
+    
+    if req.role and req.person_type:
+        result = await tool_set_party_context_async(
+            session_id=session.session_id,
+            role=req.role,
+            person_type=req.person_type,
+            filling_mode=req.filling_mode,
+            _context={"user_id": creator_user_id},
+        )
+        if not result.get("ok", False):
+            errors.append(f"party_context: {result.get('error', 'Failed')}")
+    elif req.role or req.person_type:
+        errors.append("party_context: both role and person_type are required")
+    
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"session_id": session.session_id, "errors": errors}
+        )
+    
     return CreateSessionResponse(session_id=session.session_id)
 
 

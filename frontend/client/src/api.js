@@ -19,13 +19,22 @@ export const api = {
   API_URL,
   getAuthToken,
 
-  async createSession(userId) {
+  async createSession(userId, options = {}) {
     const config = {};
     const headers = buildAuthHeaders(userId);
     if (headers) {
       config.headers = headers;
     }
-    const response = await axios.post(`${API_URL}/sessions`, {}, config);
+    // Support full initialization with options:
+    // { category_id, template_id, filling_mode, role, person_type }
+    const payload = {};
+    if (options.category_id) payload.category_id = options.category_id;
+    if (options.template_id) payload.template_id = options.template_id;
+    if (options.filling_mode) payload.filling_mode = options.filling_mode;
+    if (options.role) payload.role = options.role;
+    if (options.person_type) payload.person_type = options.person_type;
+    
+    const response = await axios.post(`${API_URL}/sessions`, payload, config);
     return response.data;
   },
 
@@ -137,6 +146,15 @@ export const api = {
 
   async getTemplates(categoryId) {
     const res = await axios.get(`${API_URL}/categories/${categoryId}/templates`);
+    return res.data;
+  },
+
+  /**
+   * Get category schema (roles, person types, fields) WITHOUT creating a session.
+   * Use this to show role selection UI before session creation.
+   */
+  async getCategorySchema(categoryId) {
+    const res = await axios.get(`${API_URL}/categories/${categoryId}/schema`);
     return res.data;
   },
 
