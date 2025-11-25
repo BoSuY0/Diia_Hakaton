@@ -144,7 +144,7 @@ except (ImportError, AttributeError):
 def load_system_prompt() -> str:
     """Load and cache the system prompt from file."""
     if _prompt_cache.value is None:
-        path = Path(__file__).with_name("system_prompt.txt")
+        path = Path(__file__).with_name("system_prompt.md")
         _prompt_cache.value = path.read_text(encoding="utf-8")
     return _prompt_cache.value
 
