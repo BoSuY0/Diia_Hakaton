@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { api } from "../api";
 
 const SUGGESTED_QUESTIONS = [
-  "Допоможи заповнити договір оренди квартири",
-  "Допоможи заповнити договір NDA",
+  "Привіт! Допоможи, будь ласка, заповнити договір оренди квартири",
+  "Привіт! Допоможи, будь ласка, заповнити договір NDA",
 ];
 
 export const AIChat = ({ sessionId, userId, onBack }) => {
@@ -39,10 +39,8 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
 
     try {
       const res = await api.chat(sessionId, userMsg.content, userId);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: res.reply },
-      ]);
+      const assistantMsg = { role: "assistant", content: res.reply };
+      setMessages((prev) => [...prev, assistantMsg]);
     } catch (e) {
       console.error("Chat failed", e);
       setMessages((prev) => [
@@ -72,11 +70,10 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
 
       <div className="chat-messages">
         {messages.map((m, idx) => (
-          <div
-            key={`${m.role}-${idx}-${m.content.slice(0, 10)}`}
-            className={`chat-message ${m.role}`}
-          >
-            <div className="message-bubble">{m.content}</div>
+          <div key={`${m.role}-${idx}-${m.content.slice(0, 10)}`}>
+            <div className={`chat-message ${m.role}`}>
+              <div className="message-bubble">{m.content}</div>
+            </div>
           </div>
         ))}
 
@@ -104,6 +101,7 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 

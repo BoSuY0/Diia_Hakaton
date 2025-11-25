@@ -1,17 +1,22 @@
-import axios from 'axios';
+import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 const getAuthToken = () => {
-  if (typeof localStorage === 'undefined') return import.meta.env.VITE_AUTH_TOKEN || null;
-  return localStorage.getItem('diia_auth_token') || import.meta.env.VITE_AUTH_TOKEN || null;
+  if (typeof localStorage === "undefined")
+    return import.meta.env.VITE_AUTH_TOKEN || null;
+  return (
+    localStorage.getItem("diia_auth_token") ||
+    import.meta.env.VITE_AUTH_TOKEN ||
+    null
+  );
 };
 
 const buildAuthHeaders = (userId) => {
   const headers = {};
   const token = getAuthToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (userId) headers['X-User-ID'] = userId;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (userId) headers["X-User-ID"] = userId;
   return Object.keys(headers).length > 0 ? headers : undefined;
 };
 
@@ -33,7 +38,7 @@ export const api = {
     if (options.filling_mode) payload.filling_mode = options.filling_mode;
     if (options.role) payload.role = options.role;
     if (options.person_type) payload.person_type = options.person_type;
-    
+
     const response = await axios.post(`${API_URL}/sessions`, payload, config);
     return response.data;
   },
@@ -44,7 +49,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    return axios.post(`${API_URL}/sessions/${sessionId}/category`, { category_id: categoryId }, config);
+    return axios.post(
+      `${API_URL}/sessions/${sessionId}/category`,
+      { category_id: categoryId },
+      config
+    );
   },
 
   async setTemplate(sessionId, templateId, userId = null) {
@@ -53,7 +62,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    return axios.post(`${API_URL}/sessions/${sessionId}/template`, { template_id: templateId }, config);
+    return axios.post(
+      `${API_URL}/sessions/${sessionId}/template`,
+      { template_id: templateId },
+      config
+    );
   },
 
   async buildContract(sessionId, templateId, userId) {
@@ -62,7 +75,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    return axios.post(`${API_URL}/sessions/${sessionId}/build`, { template_id: templateId }, config);
+    return axios.post(
+      `${API_URL}/sessions/${sessionId}/build`,
+      { template_id: templateId },
+      config
+    );
   },
 
   async setPartyContext(sessionId, role, personType, userId) {
@@ -77,7 +94,7 @@ export const api = {
         role,
         person_type: personType,
       },
-      config,
+      config
     );
   },
 
@@ -87,7 +104,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    return axios.post(`${API_URL}/sessions/${sessionId}/filling-mode`, { mode }, config);
+    return axios.post(
+      `${API_URL}/sessions/${sessionId}/filling-mode`,
+      { mode },
+      config
+    );
   },
 
   async upsertField(sessionId, field, value, role = null, userId = null) {
@@ -100,7 +121,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    return axios.post(`${API_URL}/sessions/${sessionId}/fields`, payload, config);
+    return axios.post(
+      `${API_URL}/sessions/${sessionId}/fields`,
+      payload,
+      config
+    );
   },
 
   async getContract(sessionId, userId) {
@@ -113,11 +138,16 @@ export const api = {
   },
 
   getDownloadUrl(sessionId, userId) {
-    const suffix = userId ? `?user_id=${userId}` : '';
+    const suffix = userId ? `?user_id=${userId}` : "";
     return `${API_URL}/sessions/${sessionId}/contract/download${suffix}`;
   },
 
-  async getSchema(sessionId, scope = 'all', dataMode = 'values', userId = null) {
+  async getSchema(
+    sessionId,
+    scope = "all",
+    dataMode = "values",
+    userId = null
+  ) {
     const config = {
       params: { scope, data_mode: dataMode },
     };
@@ -125,7 +155,10 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.get(`${API_URL}/sessions/${sessionId}/schema`, config);
+    const res = await axios.get(
+      `${API_URL}/sessions/${sessionId}/schema`,
+      config
+    );
     return res.data;
   },
 
@@ -135,7 +168,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.post(`${API_URL}/sessions/${sessionId}/order`, {}, config);
+    const res = await axios.post(
+      `${API_URL}/sessions/${sessionId}/order`,
+      {},
+      config
+    );
     return res.data;
   },
 
@@ -145,7 +182,9 @@ export const api = {
   },
 
   async getTemplates(categoryId) {
-    const res = await axios.get(`${API_URL}/categories/${categoryId}/templates`);
+    const res = await axios.get(
+      `${API_URL}/categories/${categoryId}/templates`
+    );
     return res.data;
   },
 
@@ -164,7 +203,10 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.get(`${API_URL}/sessions/${sessionId}/history`, config);
+    const res = await axios.get(
+      `${API_URL}/sessions/${sessionId}/history`,
+      config
+    );
     return res.data;
   },
 
@@ -174,7 +216,10 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.get(`${API_URL}/sessions/${sessionId}/requirements`, config);
+    const res = await axios.get(
+      `${API_URL}/sessions/${sessionId}/requirements`,
+      config
+    );
     return res.data;
   },
 
@@ -184,10 +229,14 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.post(`${API_URL}/chat`, {
-      session_id: sessionId,
-      message,
-    }, config);
+    const res = await axios.post(
+      `${API_URL}/chat`,
+      {
+        session_id: sessionId,
+        message,
+      },
+      config
+    );
     return res.data;
   },
 
@@ -207,7 +256,11 @@ export const api = {
     if (headers) {
       config.headers = headers;
     }
-    const res = await axios.post(`${API_URL}/sessions/${sessionId}/contract/sign`, {}, config);
+    const res = await axios.post(
+      `${API_URL}/sessions/${sessionId}/contract/sign`,
+      {},
+      config
+    );
     return res.data;
   },
 };

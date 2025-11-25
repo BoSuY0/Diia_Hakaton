@@ -80,9 +80,6 @@ Example:
 - **Clear next steps**: Always end with what user should do next (if applicable)
 
 ## Formatting
-
-- Use **bullet points** for lists (templates, options, missing fields)
-- Use **bold** sparingly for emphasis on key terms or actions
 - Avoid walls of text - break into digestible chunks
 - No excessive punctuation (!!! or ???)
 
