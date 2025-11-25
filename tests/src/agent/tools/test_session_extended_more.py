@@ -5,8 +5,8 @@ from backend.agent.tools.session import (
     BuildContractTool,
     SignContractTool,
 )
-from backend.infra.persistence.store import get_or_create_session, save_session
-from backend.domain.sessions.models import SessionState, FieldState
+from backend.infra.persistence.store import get_or_create_session, load_session, save_session
+from backend.domain.sessions.models import SessionState
 
 
 def _session_with_category(cat_id: str):
@@ -61,7 +61,7 @@ async def test_build_contract_tool_sets_state(mock_categories_data, monkeypatch)
     tool = BuildContractTool()
 
     # Patch builder to avoid heavy work
-    async def fake_build(session_id, template_id):
+    async def fake_build(_session_id, _template_id):
         return {"file_path": "x"}
 
     monkeypatch.setattr(
@@ -70,7 +70,6 @@ async def test_build_contract_tool_sets_state(mock_categories_data, monkeypatch)
     )
     res = await tool.execute({"session_id": s.session_id, "template_id": "t1"}, {})
     assert res["file_path"] == "x"
-    from backend.infra.persistence.store import load_session
     loaded = load_session(s.session_id)
     assert loaded.state == SessionState.BUILT
 

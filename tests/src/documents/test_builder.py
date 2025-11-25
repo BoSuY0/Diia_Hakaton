@@ -36,7 +36,7 @@ def ready_session(mock_settings, mock_categories_data):  # pylint: disable=unuse
     return session_id
 
 @pytest.mark.asyncio
-async def test_build_contract_success(ready_session, mock_settings):  # noqa: ARG001
+async def test_build_contract_success(ready_session, mock_settings):  # noqa: ARG001 pylint: disable=redefined-outer-name
     """Test successful contract building."""
     # Mock fill_docx_template to avoid needing a real docx file
     with patch("backend.domain.documents.builder.fill_docx_template") as mock_fill:
@@ -62,7 +62,7 @@ async def test_build_contract_success(ready_session, mock_settings):  # noqa: AR
         assert values_arg["lessor.name"] == "Lessor Name"
 
 @pytest.mark.asyncio
-async def test_build_contract_missing_field(ready_session):
+async def test_build_contract_missing_field(ready_session):  # pylint: disable=redefined-outer-name
     """Test contract building with missing field."""
     # Invalidate a field
     # pylint: disable-next=import-outside-toplevel
@@ -75,7 +75,7 @@ async def test_build_contract_missing_field(ready_session):
         await build_contract(ready_session, "t1")
 
 @pytest.mark.asyncio
-async def test_build_contract_wrong_template(ready_session):
+async def test_build_contract_wrong_template(ready_session):  # pylint: disable=redefined-outer-name
     """Test contract building with wrong template."""
     # pylint: disable-next=import-outside-toplevel
     from backend.shared.errors import MetaNotFoundError

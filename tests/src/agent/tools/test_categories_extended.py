@@ -78,11 +78,18 @@ async def test_find_category_by_query_ignores_custom(monkeypatch):
     """Test that FindCategoryByQueryTool returns custom category."""
     tool = FindCategoryByQueryTool()
 
-    class Cat:  # noqa: D101, D106
+    class Cat:
         """Mock category object."""
 
         id = "custom"
         label = "Custom"
+
+        def __repr__(self):
+            return f"Cat(id={self.id})"
+
+        def to_dict(self):
+            """Convert to dict."""
+            return {"id": self.id, "label": self.label}
 
     monkeypatch.setattr(
         "backend.agent.tools.categories.find_category_by_query", lambda q: Cat()

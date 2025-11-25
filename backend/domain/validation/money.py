@@ -1,3 +1,4 @@
+"""Money validation and normalization."""
 from __future__ import annotations
 
 import re
@@ -19,8 +20,7 @@ def normalize_money(value: str) -> str:
 
     try:
         amount = Decimal(cleaned)
-    except InvalidOperation:
-        raise ValidationError("Не вдалося розпізнати суму, перевірте формат")
+    except InvalidOperation as exc:
+        raise ValidationError("Не вдалося розпізнати суму, перевірте формат") from exc
 
     return f"{amount:.2f}"
-

@@ -11,7 +11,8 @@ from backend.infra.persistence.store import get_or_create_session, load_session,
 
 
 @pytest.fixture
-def session_with_category(mock_settings, mock_categories_data):  # pylint: disable=unused-argument
+@pytest.mark.usefixtures("mock_settings", "mock_categories_data")
+def session_with_category():
     """Create session with category fixture."""
     # mock_categories_data creates "test_cat" with "individual" party module
     session_id = "tool_test_session"
@@ -32,7 +33,7 @@ async def test_set_party_context(session_with_category):  # pylint: disable=rede
 
     assert res["ok"] is True
     assert res["role"] == "lessor"
-    
+
     s = load_session(session_with_category)
     assert s.role == "lessor"
     assert s.person_type == "individual"
@@ -63,7 +64,7 @@ async def test_upsert_field_party(session_with_category):  # pylint: disable=red
     assert s.all_data["lessor.name"]["current"] == "John Doe"
 
 @pytest.mark.asyncio
-async def test_upsert_field_contract(session_with_category):  # noqa: ARG001
+async def test_upsert_field_contract(session_with_category):  # pylint: disable=redefined-outer-name
     """Test upsert field contract."""
     # "cf1" is a contract field in mock_categories_data
     await SetPartyContextTool().execute(

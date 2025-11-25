@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import importlib
 import os
 import time
 from pathlib import Path
@@ -15,14 +16,30 @@ from backend.shared.logging import get_logger
 
 
 logger = get_logger(__name__)
-_SYSTEM_PROMPT_CACHE: str | None = None
+
+
+class _PromptCache:
+    """Cache container for system prompt."""
+
+    value: str | None = None
+
+    def get(self) -> str | None:
+        """Get cached value."""
+        return self.value
+
+    def set(self, val: str) -> None:
+        """Set cached value."""
+        self.value = val
+
+
+_prompt_cache = _PromptCache()
 
 # Disable LiteLLM telemetry/background logging workers to avoid un-awaited coroutine warnings
 try:
     litellm.telemetry = False  # type: ignore[attr-defined]
     litellm.turn_off_message_logging = True  # type: ignore[attr-defined]
     litellm.disable_streaming_logging = True  # type: ignore[attr-defined]
-except Exception:  # pylint: disable=broad-exception-caught
+except (AttributeError, TypeError, RuntimeError):
     pass
 
 
@@ -34,7 +51,6 @@ def _disable_litellm_logging_workers() -> None:
     Additionally, we patch async logging helpers to no-op to bypass
     background logging entirely.
     """
-    # pylint: disable=import-outside-toplevel,broad-exception-caught
     try:
         class _NoopWorker:
             """No-op stub for LiteLLM logging workers."""
@@ -44,26 +60,30 @@ def _disable_litellm_logging_workers() -> None:
             ) -> None:
                 """No-op method."""
 
+            def __repr__(self) -> str:
+                """Return string representation."""
+                return "<NoopWorker>"
+
         _noop = _NoopWorker()
 
         targets = []
         try:
-            from litellm.litellm_core_utils import logging_worker as _lw  # type: ignore
+            _lw = importlib.import_module("litellm.litellm_core_utils.logging_worker")
             targets.append(_lw)
-        except Exception:
+        except (ImportError, AttributeError, ModuleNotFoundError):
             pass
 
         try:
-            import litellm.utils as _lutils  # type: ignore
+            _lutils = importlib.import_module("litellm.utils")
             targets.append(_lutils)
-        except Exception:
+        except (ImportError, AttributeError, ModuleNotFoundError):
             pass
 
         for mod_name in ("litellm.logging_worker", "litellm.logging"):
             try:
                 module = __import__(mod_name, fromlist=["GLOBAL_LOGGING_WORKER"])
                 targets.append(module)
-            except Exception:
+            except (ImportError, AttributeError, ModuleNotFoundError):
                 pass
 
         for target in targets:
@@ -72,21 +92,20 @@ def _disable_litellm_logging_workers() -> None:
                     target.GLOBAL_LOGGING_WORKER = _noop  # type: ignore
                 if hasattr(target, "GLOBAL_LOGGING_HANDLER"):
                     target.GLOBAL_LOGGING_HANDLER = _noop  # type: ignore
-            except Exception:
+            except (AttributeError, TypeError):
                 pass
 
         # Patch utils async logging helper to a no-op coroutine
         try:
-            import litellm.utils as _u  # type: ignore
+            _u = importlib.import_module("litellm.utils")
 
             async def _no_async_log(*_args: Any, **_kwargs: Any) -> None:
                 """No-op async logging helper."""
 
-            # pylint: disable-next=protected-access
-            _u._client_async_logging_helper = _no_async_log  # type: ignore
-        except Exception:
+            setattr(_u, "_client_async_logging_helper", _no_async_log)
+        except (ImportError, AttributeError, ModuleNotFoundError):
             pass
-    except Exception:
+    except (ImportError, AttributeError, TypeError):
         pass
 
 
@@ -99,7 +118,6 @@ try:
 
     def _close_litellm_clients() -> None:
         """Cleanup LiteLLM async clients on exit."""
-        # pylint: disable=broad-exception-caught
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -108,31 +126,30 @@ try:
                 )
                 try:
                     fut.result(timeout=2)
-                except Exception:
+                except (TimeoutError, RuntimeError, OSError):
                     pass
             else:
                 loop.run_until_complete(close_litellm_async_clients())
-        except Exception:
+        except (RuntimeError, OSError):
             try:
                 asyncio.run(close_litellm_async_clients())
-            except Exception:
+            except (RuntimeError, OSError):
                 pass
 
     atexit.register(_close_litellm_clients)
-except Exception:  # pylint: disable=broad-exception-caught
+except (ImportError, AttributeError):
     pass
 
 
 def load_system_prompt() -> str:
     """Load and cache the system prompt from file."""
-    global _SYSTEM_PROMPT_CACHE  # pylint: disable=global-statement
-    if _SYSTEM_PROMPT_CACHE is None:
+    if _prompt_cache.value is None:
         path = Path(__file__).with_name("system_prompt.txt")
-        _SYSTEM_PROMPT_CACHE = path.read_text(encoding="utf-8")
-    return _SYSTEM_PROMPT_CACHE
+        _prompt_cache.value = path.read_text(encoding="utf-8")
+    return _prompt_cache.value
 
 
-def _ensure_api_key() -> None:
+def ensure_api_key() -> None:
     """
     LiteLLM читає ключі з env змінних (OPENAI_API_KEY, ANTHROPIC_API_KEY тощо).
     Використовуємо один загальний LLM_API_KEY (settings.llm_api_key)
@@ -197,7 +214,7 @@ async def chat_with_tools_async(
     max_completion_tokens: int = 256,
 ) -> Any:
     """Asynchronous wrapper over LiteLLM chat with tools."""
-    _ensure_api_key()
+    ensure_api_key()
 
     kwargs: Dict[str, Any] = {}
     if settings.llm_base_url:
@@ -247,7 +264,7 @@ async def chat_with_tools_async(
                 prompt_tokens = getattr(usage, "prompt_tokens", None)
                 completion_tokens = getattr(usage, "completion_tokens", None)
                 total_tokens = getattr(usage, "total_tokens", None)
-    except Exception:  # pylint: disable=broad-exception-caught
+    except (AttributeError, TypeError, KeyError):
         pass
 
     logger.info(

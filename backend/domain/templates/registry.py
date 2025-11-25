@@ -1,10 +1,13 @@
+"""Template registry for managing contract templates."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
-from backend.domain.categories.index import list_entities, list_templates, store as category_store
+from backend.domain.categories.index import (
+    list_entities, list_templates, store as category_store
+)
 from backend.infra.config.settings import settings
 from backend.shared.errors import MetaNotFoundError
 
@@ -14,7 +17,7 @@ class TemplateMeta:
     """
     Уніфікований опис шаблону договору.
 
-    Побудований поверх нової структури meta-файлів у assets/meta_data/meta_data_categories_documents.
+    Побудований поверх нової структури meta-файлів у assets/meta_data.
     """
 
     template_id: str
@@ -84,6 +87,7 @@ class TemplateRegistry:
         return sorted(self._cache.keys())
 
     def load(self, template_id: str) -> TemplateMeta:
+        """Load template metadata by ID."""
         self._ensure_index()
         if template_id not in self._cache:
             raise MetaNotFoundError(f"Meta for template '{template_id}' not found")

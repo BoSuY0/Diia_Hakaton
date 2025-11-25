@@ -1,6 +1,7 @@
+"""Tool registry for agent tools."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Type
+from typing import Any, Optional, Type
 
 from backend.agent.tools.base import BaseTool
 from backend.shared.registry import Registry
@@ -12,6 +13,7 @@ class ToolRegistry(Registry[BaseTool]):
     """
 
     def register_tool(self, tool: BaseTool) -> BaseTool:
+        """Register a tool instance."""
         return self.register(tool.name, tool)
 
     def get_definitions(self, minified: bool = True) -> list[dict[str, Any]]:
@@ -34,9 +36,9 @@ class ToolRegistry(Registry[BaseTool]):
                     min_props[key] = {"type": value.get("type", "string")}
                     if "enum" in value:
                         min_props[key]["enum"] = value["enum"]
-                
+
                 parameters["properties"] = min_props
-                
+
                 definitions.append(
                     {
                         "type": "function",

@@ -1,32 +1,14 @@
 """Verification script for contract API functionality."""
 import os
 import sys
-from unittest.mock import patch, MagicMock
-
-from fastapi.testclient import TestClient
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from backend.api.http.server import app  # pylint: disable=wrong-import-position
 from backend.infra.persistence.store import load_session  # pylint: disable=wrong-import-position
+from tests.test_utils import setup_mock_chat  # pylint: disable=wrong-import-position
 
-# Mock chat_with_tools to avoid real LLM calls
-# We need to patch it where it is imported in server.py
-patcher = patch("backend.api.http.server.chat_with_tools")
-mock_chat = patcher.start()
-
-# Setup mock return value
-# We want it to return a message with no tool calls by default,
-# or simulate tool calls if needed.
-mock_response = MagicMock()
-mock_response.choices = [MagicMock()]
-mock_response.choices[0].message.role = "assistant"
-mock_response.choices[0].message.content = "Mock response"
-mock_response.choices[0].message.tool_calls = []
-mock_chat.return_value = mock_response
-
-client = TestClient(app)
+patcher, mock_chat, client = setup_mock_chat()
 
 def test_pii_persistence() -> None:
     """Test PII persistence in conversation tags."""

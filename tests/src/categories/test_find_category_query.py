@@ -1,6 +1,7 @@
 """Tests for category query search."""
 import json
 
+from backend.domain.categories import index as idx_module
 from backend.domain.categories.index import (
     store as category_store,
     find_category_by_query,
@@ -70,7 +71,6 @@ def test_find_category_returns_custom_when_present(mock_settings):
     custom_path = mock_settings.meta_categories_root / "custom.json"
     custom_path.write_text(json.dumps(custom_meta), encoding="utf-8")
 
-    from backend.domain.categories import index as idx_module  # noqa: PLC0415
     category_store.clear()
     idx_module.store.clear()
     category_store.load()

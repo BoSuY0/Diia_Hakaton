@@ -6,9 +6,7 @@ from typing import Dict
 
 from backend.domain.categories.index import (
     Category,
-    PartyField,
     list_entities,
-    list_party_fields,
     list_templates,
     load_meta,
     store,
@@ -18,7 +16,7 @@ from backend.shared.logging import get_logger
 from backend.domain.documents.docx_filler import fill_docx_template
 from backend.infra.persistence.store import aload_session
 from backend.infra.storage.fs import output_document_path
-from backend.domain.services.fields import get_required_fields
+from backend.domain.services.fields import get_required_fields, get_party_fields_for_role
 from backend.infra.config.settings import settings
 from backend.shared.async_utils import run_sync
 
@@ -113,7 +111,7 @@ async def build_contract(
         raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
 
     field_values: Dict[str, str] = {}
-    placeholder = "(                 )"  # pylint: disable=invalid-name
+    empty_placeholder = "(                 )"
 
     entities = list_entities(session.category_id)
     for entity in entities:
@@ -125,7 +123,11 @@ async def build_contract(
             value = entry
 
         if value is None or str(value).strip() == "":
-            field_values[entity.field] = placeholder if partial else ""
+            # Показувати placeholder тільки для обов'язкових полів
+            if entity.required and partial:
+                field_values[entity.field] = empty_placeholder
+            else:
+                field_values[entity.field] = ""
         else:
             field_values[entity.field] = str(value)
 
@@ -135,40 +137,7 @@ async def build_contract(
     modules = meta.get("party_modules") or {}
 
     for role_key in roles.keys():
-        p_type = None
-        if session.party_types and role_key in session.party_types:
-            p_type = session.party_types[role_key]
-        elif session.role == role_key and session.person_type:
-            p_type = session.person_type
-
-        # Use metadata-based fallback if still unknown
-        if not p_type:
-            role_meta = roles.get(role_key, {})
-            # 1. Check for explicit default_person_type
-            p_type = role_meta.get("default_person_type")
-            if not p_type:
-                # 2. Use first allowed type
-                allowed = role_meta.get("allowed_person_types", [])
-                if allowed:
-                    p_type = allowed[0]
-                elif modules:
-                    # 3. Use first available module
-                    p_type = next(iter(modules.keys()), "individual")
-
-        party_fields_list = []
-        module = modules.get(p_type)
-        if module:
-            for raw in module.get("fields", []):
-                party_fields_list.append(
-                    PartyField(
-                        field=raw["field"],
-                        label=raw.get("label", raw["field"]),
-                        required=raw.get("required", True),
-                    )
-                )
-
-        if not party_fields_list:
-            party_fields_list = list_party_fields(session.category_id, p_type)
+        party_fields_list = get_party_fields_for_role(session, role_key, roles, modules)
 
         for pf in party_fields_list:
             key = f"{role_key}.{pf.field}"
@@ -180,7 +149,11 @@ async def build_contract(
                 value = entry
 
             if value is None or str(value).strip() == "":
-                field_values[key] = placeholder if partial else ""
+                # Показувати placeholder тільки для обов'язкових полів
+                if pf.required and partial:
+                    field_values[key] = empty_placeholder
+                else:
+                    field_values[key] = ""
             else:
                 field_values[key] = str(value)
 

@@ -1,1 +1,1 @@
-
+"""Storage infrastructure package."""

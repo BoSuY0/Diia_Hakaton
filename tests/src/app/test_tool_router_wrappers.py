@@ -24,15 +24,17 @@ def test_tool_upsert_field_context_tags():
     """Test upsert field context tags."""
     called = {}
 
-    class Dummy:  # pylint: disable=too-few-public-methods
+    class Dummy:
         """Dummy tool for testing."""
 
-        def execute(self, args, ctx):  # pylint: disable=unused-argument
+        name = "upsert_field"
+
+        def execute(self, _args, ctx):
             """Execute dummy tool."""
             called["ctx"] = ctx
             return {"ok": True}
 
-        def format_result(self, r):  # pylint: disable=no-self-use
+        def format_result(self, r):
             """Format result."""
             return json.dumps(r)
 

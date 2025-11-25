@@ -1,8 +1,10 @@
-from backend.infra.storage.fs import ensure_directories
+"""Tests for directory creation utilities."""
 from backend.infra.config.settings import settings
+from backend.infra.storage.fs import ensure_directories
 
 
 def test_ensure_directories_creates_paths(mock_settings):
+    """Test ensure_directories creates all required paths."""
     # Remove dirs to simulate fresh state
     for path in [
         mock_settings.meta_categories_root,
@@ -17,7 +19,7 @@ def test_ensure_directories_creates_paths(mock_settings):
             # safety: only remove empty dirs in temp workspace
             try:
                 path.rmdir()
-            except Exception:
+            except OSError:
                 pass
 
     ensure_directories()

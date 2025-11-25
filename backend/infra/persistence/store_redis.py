@@ -58,7 +58,7 @@ async def save_session(session: Session) -> None:
 
     try:
         await save_user_document_async(session)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (OSError, ValueError, RuntimeError) as exc:
         logger.warning("Failed to save user document for session %s: %s", session.session_id, exc)
 
 
@@ -112,7 +112,7 @@ async def transactional_session(
             val = await redis.get(lock_key)
             if val == token:
                 await redis.delete(lock_key)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (ConnectionError, TimeoutError, OSError):
             pass  # Lock cleanup is best-effort
 
 

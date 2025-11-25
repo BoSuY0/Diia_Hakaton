@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from typing import TYPE_CHECKING
+
 from backend.domain.categories.index import (
     PartyField,
     list_entities,
@@ -12,6 +14,63 @@ from backend.domain.categories.index import (
     store as cat_store,
 )
 from backend.domain.sessions.models import Session
+
+if TYPE_CHECKING:
+    pass
+
+
+def get_party_fields_for_role(
+    session: Session,
+    role: str,
+    roles_meta: Dict[str, Any],
+    modules: Dict[str, Any],
+) -> List[PartyField]:
+    """Get party fields for a specific role.
+
+    Centralizes the logic for determining party fields based on person type
+    and category metadata.
+
+    Args:
+        session: The session object.
+        role: The role to get fields for.
+        roles_meta: The roles metadata from category.
+        modules: The party_modules metadata from category.
+
+    Returns:
+        List of PartyField objects for the role.
+    """
+    p_type = None
+    if session.party_types and role in session.party_types:
+        p_type = session.party_types[role]
+    elif session.role == role and session.person_type:
+        p_type = session.person_type
+
+    if not p_type:
+        role_meta = roles_meta.get(role, {})
+        p_type = role_meta.get("default_person_type")
+        if not p_type:
+            allowed = role_meta.get("allowed_person_types", [])
+            if allowed:
+                p_type = allowed[0]
+            elif modules:
+                p_type = next(iter(modules.keys()), "individual")
+
+    party_fields_list: List[PartyField] = []
+    module = modules.get(p_type)
+    if module:
+        for raw in module.get("fields", []):
+            party_fields_list.append(
+                PartyField(
+                    field=raw["field"],
+                    label=raw.get("label", raw["field"]),
+                    required=raw.get("required", True),
+                )
+            )
+
+    if not party_fields_list and session.category_id:
+        party_fields_list = list_party_fields(session.category_id, p_type)
+
+    return party_fields_list
 
 
 @dataclass
@@ -73,40 +132,7 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
             target_roles = [session.role]
 
     for role_key in target_roles:
-        # Determine person type
-        p_type = None
-        if session.party_types and role_key in session.party_types:
-            p_type = session.party_types[role_key]
-        elif session.role == role_key and session.person_type:
-            # Fallback for backward compatibility
-            p_type = session.person_type
-
-        # Use metadata-based fallback if still unknown
-        if not p_type:
-            role_meta = roles.get(role_key, {})
-            # 1. Check for explicit default_person_type
-            p_type = role_meta.get("default_person_type")
-            if not p_type:
-                # 2. Use first allowed type
-                allowed = role_meta.get("allowed_person_types", [])
-                if allowed:
-                    p_type = allowed[0]
-                elif modules:
-                    # 3. Use first available module
-                    p_type = next(iter(modules.keys()), "individual")
-
-        party_fields_list = []
-        module = modules.get(p_type)
-        if module:
-            for raw in module.get("fields", []):
-                party_fields_list.append(PartyField(
-                    field=raw["field"],
-                    label=raw.get("label", raw["field"]),
-                    required=raw.get("required", True),
-                ))
-
-        if not party_fields_list:
-            party_fields_list = list_party_fields(session.category_id, p_type)
+        party_fields_list = get_party_fields_for_role(session, role_key, roles, modules)
 
         for pf in party_fields_list:
             if pf.required:

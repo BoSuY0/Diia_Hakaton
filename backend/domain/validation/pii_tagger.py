@@ -1,3 +1,4 @@
+"""PII (Personally Identifiable Information) detection and tagging utilities."""
 from __future__ import annotations
 
 import re
@@ -44,7 +45,8 @@ NOISE = set(" \t\r\n-–—_.,:;·•()/\\[]{}<>|`'\"+*")
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9_.%+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+")
 PHONE_RE = re.compile(
-    r"(?:^|(?<=\D))(?:\+?38\s*\(?0\d{2}\)?[\s\-\.]*\d{3}[\s\-\.]*\d{2}[\s\-\.]*\d{2}|0\d{2}[\s\-\.]*\d{3}[\s\-\.]*\d{2}[\s\-\.]*\d{2})(?=\D|$)"
+    r"(?:^|(?<=\D))(?:\+?38\s*\(?0\d{2}\)?[\s\-\.]*\d{3}[\s\-\.]*\d{2}[\s\-\.]*\d{2}"
+    r"|0\d{2}[\s\-\.]*\d{3}[\s\-\.]*\d{2}[\s\-\.]*\d{2})(?=\D|$)"
 )
 # Дозволяємо коротші токени JWT-подібного формату (3+ символи у кожній частині),
 # щоб не пропускати стислі/тестові токени.
@@ -73,6 +75,8 @@ PRIORITY: Dict[str, int] = {
 
 
 class Span(NamedTuple):
+    """Represents a detected PII span in text."""
+
     start: int
     end: int
     typ: str
@@ -86,7 +90,7 @@ def _fold_char(ch: str) -> str | None:
     if unicodedata.category(ch).startswith("Nd"):
         try:
             return str(unicodedata.decimal(ch))
-        except Exception:
+        except (TypeError, ValueError):
             pass
     ch = ch.translate(CONFUSABLES)
     if ch.isdigit():
@@ -210,22 +214,38 @@ def _det_unzr(canon: str, mapping: List[int], src: str) -> List[Span]:
     return out
 
 
-def _det_names(canon: str, mapping: List[int], src: str) -> List[Span]:
+def _det_names(
+    _canon: str, _mapping: List[int], src: str  # noqa: ARG001
+) -> List[Span]:
     out: List[Span] = []
     # Heuristic: 3 capitalized words in Cyrillic (Surname Name Patronymic)
     upper = "А-ЯІЇЄҐ"
-    lower = "а-яіїєґ'’`"
-    
+    lower = "а-яіїєґ''`"
+
     # Pattern: Capitalized word, space, Capitalized word, space, Capitalized word
-    pattern = fr"(?<![{lower}{upper}])[{upper}][{lower}]+\s+[{upper}][{lower}]+\s+[{upper}][{lower}]+(?![{lower}{upper}])"
-    
+    pattern = (
+        fr"(?<![{lower}{upper}])[{upper}][{lower}]+\s+"
+        fr"[{upper}][{lower}]+\s+[{upper}][{lower}]+(?![{lower}{upper}])"
+    )
+
     for m in re.finditer(pattern, src):
         out.append(Span(m.start(), m.end(), "NAME", PRIORITY["NAME"]))
-        
+
     return out
 
 
 def _det_raw(src: str) -> List[Span]:
+    """
+    Detects raw PII in the given text.
+
+    This function detects raw PII such as emails, phones, JWTs, and private keys.
+
+    Args:
+        src (str): The text to search for raw PII.
+
+    Returns:
+        List[Span]: A list of detected raw PII spans.
+    """
     out: List[Span] = []
     for typ, rgx in (
         ("EMAIL", EMAIL_RE),
@@ -261,7 +281,7 @@ def _merge_typed(spans: List[Span]) -> List[Span]:
     events.sort(key=lambda x: (x[0], -x[1] * x[2].prio))
 
     active: List[Span] = []
-    result: List[Span] = []
+    merged_result: List[Span] = []
     last_pos: int | None = None
 
     def winner() -> Span | None:
@@ -274,11 +294,12 @@ def _merge_typed(spans: List[Span]) -> List[Span]:
             w = winner()
             if w:
                 # Якщо попередній спан закінчується тут і має той самий тип — об'єднуємо
-                if result and result[-1].end == last_pos and result[-1].typ == w.typ:
-                    prev = result.pop()
-                    result.append(Span(prev.start, pos, w.typ, w.prio))
+                prev_span = merged_result[-1] if merged_result else None
+                if prev_span and prev_span.end == last_pos and prev_span.typ == w.typ:
+                    prev = merged_result.pop()
+                    merged_result.append(Span(prev.start, pos, w.typ, w.prio))
                 else:
-                    result.append(Span(last_pos, pos, w.typ, w.prio))
+                    merged_result.append(Span(last_pos, pos, w.typ, w.prio))
         if kind == 1:
             active.append(sp)
         else:
@@ -286,7 +307,7 @@ def _merge_typed(spans: List[Span]) -> List[Span]:
                 active.remove(sp)
         last_pos = pos
 
-    return result
+    return merged_result
 
 
 def sanitize_typed(text: str) -> Dict[str, object]:
@@ -334,11 +355,11 @@ def sanitize_typed(text: str) -> Dict[str, object]:
 
 
 if __name__ == "__main__":
-    sample = (
+    SAMPLE = (
         "Мій ІПН 123 456 7890; тел +38(093)123-45-67; картка 4444-3333-2222-1111; "
         "IBAN UA21 3223 1300 0002 6007 2335 6600 1; ПІБ: Іванов Іван"
     )
-    result = sanitize_typed(sample)
+    result = sanitize_typed(SAMPLE)
     print("Sanitized:", result["sanitized_text"])
     print("Tags:")
     for k, v in result["tags"].items():

@@ -141,7 +141,7 @@ def save_user_document(session: Session) -> Path | None:
     repo = get_contracts_repo()
     try:
         repo.create_or_update(session, doc)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (OSError, ValueError, RuntimeError, ConnectionError) as exc:
         logger.error(
             "contracts_repo_write_failed session_id=%s error=%s",
             session.session_id, exc,
@@ -165,7 +165,7 @@ async def save_user_document_async(session: Session) -> Path | None:
     repo = get_contracts_repo()
     try:
         await run_sync(repo.create_or_update, session, doc)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (OSError, ValueError, RuntimeError, ConnectionError) as exc:
         logger.error(
             "contracts_repo_write_failed_async session_id=%s error=%s",
             session.session_id, exc,
@@ -190,7 +190,7 @@ def load_user_document(session_id: str) -> Dict[str, Any]:
         doc = repo.get_by_session_id(session_id)
         if doc:
             return doc
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (OSError, ValueError, RuntimeError, ConnectionError) as exc:
         logger.error(
             "contracts_repo_read_failed session_id=%s error=%s",
             session_id, exc,
@@ -216,7 +216,7 @@ async def load_user_document_async(session_id: str) -> Dict[str, Any]:
         doc = await run_sync(repo.get_by_session_id, session_id)
         if doc:
             return doc
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except (OSError, ValueError, RuntimeError, ConnectionError) as exc:
         logger.error(
             "contracts_repo_read_failed_async session_id=%s error=%s",
             session_id, exc,

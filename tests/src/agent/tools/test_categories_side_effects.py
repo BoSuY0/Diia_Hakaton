@@ -6,8 +6,8 @@ from backend.domain.categories.index import store
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_settings")
-async def test_find_category_no_side_effect(mock_categories_data):
+@pytest.mark.usefixtures("mock_settings", "mock_categories_data")
+async def test_find_category_no_side_effect():
     """Test that FindCategoryByQueryTool does NOT automatically update session state."""
     # Setup: ensure category exists (provided by mock_categories_data fixture)
     # and create a fresh session
@@ -32,4 +32,6 @@ async def test_find_category_no_side_effect(mock_categories_data):
     s_after = load_session(session_id)
 
     # If this assertion fails (is not None), it means the bug is present.
-    assert s_after.category_id is None, "FindCategoryByQueryTool should not automatically set session.category_id"
+    assert s_after.category_id is None, (
+        "FindCategoryByQueryTool should not automatically set session.category_id"
+    )

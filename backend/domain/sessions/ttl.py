@@ -1,3 +1,4 @@
+"""TTL (time-to-live) utilities for session expiration."""
 from __future__ import annotations
 
 from backend.domain.sessions.models import Session, SessionState
@@ -17,12 +18,14 @@ STATE_TTL_HOURS: dict[SessionState, int] = {
 
 
 def ttl_hours_for_state(state: SessionState | str) -> int:
+    """Get TTL hours for a given session state."""
     try:
         st_enum = state if isinstance(state, SessionState) else SessionState(str(state))
-    except Exception:
+    except ValueError:
         return settings.draft_ttl_hours
     return STATE_TTL_HOURS.get(st_enum, settings.draft_ttl_hours)
 
 
 def ttl_hours_for_session(session: Session) -> int:
+    """Get TTL hours for a session based on its current state."""
     return ttl_hours_for_state(session.state)

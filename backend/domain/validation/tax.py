@@ -1,3 +1,4 @@
+"""Tax ID (RNOKPP) and company code (EDRPOU) validation."""
 from __future__ import annotations
 
 import re
@@ -50,6 +51,7 @@ def _edrpou_ok(code: str) -> bool:
 
 
 def normalize_rnokpp(value: str) -> str:
+    """Normalize and validate RNOKPP (Ukrainian tax ID, 10 digits)."""
     cleaned = re.sub(r"\D+", "", value)
     if len(cleaned) != 10:
         raise ValidationError("РНОКПП має містити рівно 10 цифр")

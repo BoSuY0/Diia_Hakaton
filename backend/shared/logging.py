@@ -1,14 +1,44 @@
+"""Logging configuration and utilities."""
 from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+import threading
+from typing import Callable, Optional
+
+# Try to import sanitize_typed at module level (may fail due to circular imports)
+try:
+    from backend.domain.validation.pii_tagger import sanitize_typed as _sanitize_fn
+except ImportError:
+    _sanitize_fn = None
 
 
-_CONFIGURED = False
+class _LoggingState:
+    """
+    Module-level logging state container.
 
-# Опційна подія, яку можна використати для сигналізації про старт сервера
-SERVER_READY_EVENT: Optional["threading.Event"] = None  # type: ignore[name-defined]
+    Tracks logging configuration and server ready events.
+    """
+
+    configured: bool = False
+    server_ready_event: Optional[threading.Event] = None
+
+    def reset(self) -> None:
+        """Reset state for testing."""
+        self.configured = False
+        self.server_ready_event = None
+
+    def is_configured(self) -> bool:
+        """Check if logging is configured."""
+        return self.configured
+
+
+_state = _LoggingState()
+
+
+def _get_sanitizer() -> Optional[Callable[[str], dict]]:
+    """Get sanitize_typed function."""
+    return _sanitize_fn
 
 
 class PiiRedactionFilter(logging.Filter):
@@ -20,18 +50,21 @@ class PiiRedactionFilter(logging.Filter):
     не так — лог не змінюється.
     """
 
-    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
-        try:
-            from backend.domain.validation.pii_tagger import sanitize_typed
-
-            msg = record.getMessage()
-            sanitized = sanitize_typed(str(msg))
-            record.msg = sanitized["sanitized_text"]
-            record.args = ()
-        except Exception:
-            # У разі будь-якої помилки не блокуємо лог
-            pass
+    def filter(self, record: logging.LogRecord) -> bool:
+        sanitizer = _get_sanitizer()
+        if sanitizer is not None:
+            try:
+                msg = record.getMessage()
+                sanitized = sanitizer(str(msg))
+                record.msg = sanitized["sanitized_text"]
+                record.args = ()
+            except (KeyError, TypeError, ValueError, AttributeError):
+                # У разі помилки санітизації не блокуємо лог
+                pass
         return True
+
+    def __repr__(self) -> str:
+        return "PiiRedactionFilter()"
 
 
 class ColorFormatter(logging.Formatter):
@@ -49,9 +82,7 @@ class ColorFormatter(logging.Formatter):
         "CRITICAL": "\033[35m",  # magenta
     }
 
-    def format(self, record: logging.LogRecord) -> str:  # type: ignore[override]
-        import threading
-
+    def format(self, record: logging.LogRecord) -> str:
         original_levelname = record.levelname
         color = self.COLORS.get(original_levelname, "")
         if color:
@@ -59,16 +90,15 @@ class ColorFormatter(logging.Formatter):
         try:
             formatted = super().format(record)
 
-            # Якщо налаштована SERVER_READY_EVENT і це стартовий лог uvicorn —
+            # Якщо налаштована server_ready_event і це стартовий лог uvicorn —
             # сигналізуємо, що сервер готовий (для launcher --test).
-            global SERVER_READY_EVENT
             if (
-                SERVER_READY_EVENT is not None
-                and isinstance(SERVER_READY_EVENT, threading.Event)
+                _state.server_ready_event is not None
+                and isinstance(_state.server_ready_event, threading.Event)
                 and record.name == "uvicorn.error"
                 and "Uvicorn running on" in record.getMessage()
             ):
-                SERVER_READY_EVENT.set()
+                _state.server_ready_event.set()
 
             return formatted
         finally:
@@ -81,17 +111,15 @@ def setup_logging(default_level: int = logging.INFO) -> None:
     Викликається один раз; усі інші логгери (у тому числі uvicorn)
     використовують той самий формат і хендлери.
     """
-    global _CONFIGURED
     root_logger = logging.getLogger()
-    # Якщо хендлерів немає (наприклад, pytest очистив), переналаштовуємо навіть якщо вже конфігурований.
-    if _CONFIGURED and root_logger.handlers:
+    # Якщо хендлерів немає (pytest очистив), переналаштовуємо.
+    if _state.configured and root_logger.handlers:
         return
 
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, default_level)
-    # Уникаємо DEBUG-рівня для прод-оточення, навіть якщо LOG_LEVEL=DEBUG
-    if level < logging.INFO:
-        level = logging.INFO
+    # Уникаємо DEBUG-рівня для прод-оточення
+    level = max(level, logging.INFO)
 
     root_logger.setLevel(level)
 
@@ -111,10 +139,11 @@ def setup_logging(default_level: int = logging.INFO) -> None:
     # Менше шуму від HTTP-доступів, але залишаємо помилки uvicorn
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-    _CONFIGURED = True
+    _state.configured = True
 
 
 def get_logger(name: str) -> logging.Logger:
+    """Get a logger with the given name."""
     setup_logging()
     logger = logging.getLogger(name)
     root = logging.getLogger()
@@ -124,3 +153,14 @@ def get_logger(name: str) -> logging.Logger:
     # Уникаємо дублювання виводу: локальні хендлери достатньо, propagate не потрібен
     logger.propagate = False
     return logger
+
+
+# Backward compatibility aliases
+def set_server_ready_event(event: Optional[threading.Event]) -> None:
+    """Set the server ready event for signaling."""
+    _state.server_ready_event = event
+
+
+def get_server_ready_event() -> Optional[threading.Event]:
+    """Get the server ready event."""
+    return _state.server_ready_event

@@ -4,7 +4,7 @@ import pytest
 from backend.domain.services.session import update_session_field
 from backend.domain.services.fields import validate_session_readiness
 from backend.infra.persistence.store import get_or_create_session, save_session
-from backend.domain.sessions.models import FieldState, SessionState
+from backend.domain.sessions.models import SessionState
 
 
 def _base_session(session_id: str, category_id: str):
@@ -92,7 +92,7 @@ def test_validate_session_readiness_partial_vs_full(mock_categories_data):
 def test_update_session_field_sets_state_and_progress(mock_categories_data):
     """Test that field update sets session state and progress."""
     s = _base_session("progress_session", mock_categories_data)
-    ok, _, fs = update_session_field(s, "cf1", "Val", role=None)
+    ok, _, _fs = update_session_field(s, "cf1", "Val", role=None)
     assert ok is True
     assert s.contract_fields["cf1"].status == "ok"
     assert s.state in {SessionState.READY_TO_BUILD, SessionState.COLLECTING_FIELDS}

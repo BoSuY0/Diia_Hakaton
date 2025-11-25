@@ -2,35 +2,36 @@
 import pytest
 
 from backend.api.http import server
+from backend.infra.persistence.store import get_or_create_session, save_session
 
 
-def test_detect_lang_uk_en():  # pylint: disable=protected-access
+def test_detect_lang_uk_en():
     """Test detect language for Ukrainian and English."""
-    assert server._detect_lang("Привіт") == "uk"
-    assert server._detect_lang("Hello") == "en"
+    assert server.detect_lang("Привіт") == "uk"
+    assert server.detect_lang("Hello") == "en"
 
 
-def test_last_user_message_text_handles_structured():  # pylint: disable=protected-access
+def test_last_user_message_text_handles_structured():
     """Test last user message text handles structured content."""
     msgs = [
         {"role": "user", "content": [{"text": "First"}, {"text": ""}]},
         {"role": "assistant", "content": "Reply"},
         {"role": "user", "content": [{"text": ""}, {"text": "Second"}]},
     ]
-    assert server._last_user_message_text(msgs) == "Second"
+    assert server.last_user_message_text(msgs) == "Second"
 
 
-def test_canonical_args_sorts_keys():  # pylint: disable=protected-access
+def test_canonical_args_sorts_keys():
     """Test canonical args sorts keys."""
     raw = '{"b":1,"a":2}'
-    canon = server._canonical_args(raw)
+    canon = server.canonical_args(raw)
     assert canon == '{"a":2,"b":1}'
 
 
-def test_inject_session_id_adds_and_expands_alias():  # pylint: disable=protected-access
+def test_inject_session_id_adds_and_expands_alias():
     """Test inject session id adds and expands alias."""
     args = '{"cid": "cat1", "f": "field1"}'
-    injected = server._inject_session_id(args, "sess1", "upsert_field")
+    injected = server.inject_session_id(args, "sess1", "upsert_field")
     data = server.json.loads(injected)
     assert data["session_id"] == "sess1"
     # alias cid -> category_id should be preserved as explicit field when not session-aware
@@ -39,22 +40,19 @@ def test_inject_session_id_adds_and_expands_alias():  # pylint: disable=protecte
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_settings")
-async def test_get_effective_state_uses_saved_when_has_category_tool(
-    monkeypatch, mock_categories_data  # pylint: disable=unused-argument
-):  # pylint: disable=protected-access
+@pytest.mark.usefixtures("mock_settings", "mock_categories_data")
+async def test_get_effective_state_uses_saved_when_has_category_tool():
     """Test that _get_effective_state uses saved state correctly."""
-    # pylint: disable-next=import-outside-toplevel
-    from backend.infra.persistence.store import get_or_create_session, save_session
     s = get_or_create_session("eff_state")
-    s.category_id = mock_categories_data
+    s.category_id = "test_cat"  # mock_categories_data creates "test_cat"
     s.state = server.SessionState.TEMPLATE_SELECTED
     save_session(s)
-    state = await server._get_effective_state("eff_state", [], has_category_tool=False)
+    get_effective_state = getattr(server, "_get_effective_state")
+    state = await get_effective_state("eff_state", [], has_category_tool=False)
     assert state == "template_selected"
 
 
-def test_prune_strips_orphan_tools():  # pylint: disable=protected-access
+def test_prune_strips_orphan_tools():
     """Test prune strips orphan tools."""
     msgs = [
         {"role": "system", "content": "sys"},
@@ -62,12 +60,12 @@ def test_prune_strips_orphan_tools():  # pylint: disable=protected-access
         {"role": "tool", "tool_call_id": "call1", "content": "ok"},
         {"role": "tool", "tool_call_id": "orphan", "content": "drop me"},
     ]
-    pruned = server._prune_messages(msgs)
+    pruned = server.prune_messages(msgs)
     roles = [m["role"] for m in pruned]
     assert roles.count("tool") == 1
 
 
-def test_format_reply_uses_tool_templates():  # pylint: disable=protected-access
+def test_format_reply_uses_tool_templates():
     """Test format reply uses tool templates."""
     msgs = [
         {"role": "system", "content": "sys"},
@@ -83,11 +81,11 @@ def test_format_reply_uses_tool_templates():  # pylint: disable=protected-access
             "content": "TEMPLATES\nlease_flat|Flat",
         },
     ]
-    text = server._format_reply_from_messages(msgs)
+    text = server.format_reply_from_messages(msgs)
     assert "Доступні шаблони" in text or "Available templates" in text
 
 
-def test_format_reply_uses_tool_entities():  # pylint: disable=protected-access
+def test_format_reply_uses_tool_entities():
     """Test format reply uses tool entities."""
     msgs = [
         {"role": "system", "content": "sys"},
@@ -103,5 +101,5 @@ def test_format_reply_uses_tool_entities():  # pylint: disable=protected-access
             "content": "ENTITIES\nfield1|Label|text|1",
         },
     ]
-    text = server._format_reply_from_messages(msgs)
+    text = server.format_reply_from_messages(msgs)
     assert "field1" in text

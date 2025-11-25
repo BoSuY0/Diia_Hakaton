@@ -1,28 +1,35 @@
+"""Tests for template registry and meta loader."""
 import json
-from pathlib import Path
 
 import pytest
 
-from backend.domain.templates.registry import TemplateRegistry
+from backend.domain.categories.index import store as category_store
 from backend.domain.templates.meta_loader import get_template_fields
+from backend.domain.templates.registry import TemplateRegistry
 from backend.shared.errors import MetaNotFoundError
 
 
-def _write_category_with_template(settings, cat_id="tmpl_cat", templ_id="t1", filename="file.docx"):
+def _write_category_with_template(
+    settings, cat_id="tmpl_cat", templ_id="t1", filename="file.docx"
+):
+    """Helper to write category with template for tests."""
     meta = {
         "category_id": cat_id,
         "templates": [{"id": templ_id, "name": "Template 1", "file": filename}],
         "roles": {"lessor": {"label": "L", "allowed_person_types": ["individual"]}},
         "party_modules": {
-            "individual": {"label": "Indiv", "fields": [{"field": "name", "label": "Name", "required": True}]}
+            "individual": {
+                "label": "Indiv",
+                "fields": [{"field": "name", "label": "Name", "required": True}],
+            }
         },
         "contract_fields": [{"field": "cf1", "label": "CF1", "required": True}],
     }
     cat_path = settings.meta_categories_root / f"{cat_id}.json"
     cat_path.write_text(json.dumps(meta), encoding="utf-8")
     idx_path = settings.meta_categories_root / "categories_index.json"
-    idx_path.write_text(json.dumps({"categories": [{"id": cat_id, "label": "Label"}]}), encoding="utf-8")
-    from backend.domain.categories.index import store as category_store
+    idx = {"categories": [{"id": cat_id, "label": "Label"}]}
+    idx_path.write_text(json.dumps(idx), encoding="utf-8")
     category_store.clear()
     category_store.load()
 
@@ -34,7 +41,10 @@ def _write_category_with_template(settings, cat_id="tmpl_cat", templ_id="t1", fi
 
 
 def test_template_registry_lists_and_loads(mock_settings):
-    templ_id = _write_category_with_template(mock_settings, cat_id="tmpl_cat", templ_id="t1", filename="f1.docx")
+    """Test template registry listing and loading."""
+    templ_id = _write_category_with_template(
+        mock_settings, cat_id="tmpl_cat", templ_id="t1", filename="f1.docx"
+    )
     reg = TemplateRegistry()
     templates = reg.list_templates()
     assert templ_id in templates
@@ -45,25 +55,33 @@ def test_template_registry_lists_and_loads(mock_settings):
 
 
 def test_template_registry_fallback_path(mock_settings):
-    # File placed in root default_documents_root, not in category subdir
+    """Test template registry fallback path for orphan files."""
     doc = mock_settings.default_documents_root / "orphan.docx"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.touch()
-    templ_id = _write_category_with_template(mock_settings, cat_id="fallback_cat", templ_id="t_fallback", filename="orphan.docx")
+    templ_id = _write_category_with_template(
+        mock_settings, cat_id="fallback_cat", templ_id="t_fallback",
+        filename="orphan.docx"
+    )
     reg = TemplateRegistry()
     meta = reg.load(templ_id)
     assert meta.file_template_path.name == "orphan.docx"
     assert meta.file_template_path.exists()
 
 
-def test_template_registry_missing_raises(mock_settings):
+@pytest.mark.usefixtures("mock_settings")
+def test_template_registry_missing_raises():
+    """Test template registry raises error for missing template."""
     reg = TemplateRegistry()
     with pytest.raises(MetaNotFoundError):
         reg.load("unknown_template")
 
 
 def test_get_template_fields_builds_defaults(mock_settings):
-    templ_id = _write_category_with_template(mock_settings, cat_id="tmpl_fields", templ_id="t_fields", filename="f.docx")
+    """Test get_template_fields builds default values."""
+    templ_id = _write_category_with_template(
+        mock_settings, cat_id="tmpl_fields", templ_id="t_fields", filename="f.docx"
+    )
     fields = get_template_fields(templ_id)
     ids = {f.id for f in fields}
     assert "cf1" in ids

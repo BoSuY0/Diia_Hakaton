@@ -37,8 +37,8 @@ class ValidatorRegistry(Registry[ValidatorFunc]):
             return normalized, None
         except ValidationError as exc:
             return value.strip(), str(exc)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            # Catch any validator exceptions to return a proper error message
+        except (ValueError, TypeError, AttributeError) as exc:
+            # Catch validator exceptions to return a proper error message
             return value.strip(), f"Validation error: {exc}"
 
 

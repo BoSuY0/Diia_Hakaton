@@ -6,20 +6,18 @@ from pathlib import Path
 import pytest
 from docx import Document
 
+from backend.domain.categories import index as cat_index
 from backend.domain.documents.builder import build_contract
-from backend.infra.persistence.store import get_or_create_session, save_session
 from backend.domain.sessions.models import FieldState
+from backend.infra.persistence.store import get_or_create_session, save_session
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.asyncio
-async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
-    """
-    Use real lease_real_estate metadata/template and ensure values are injected.
-    """
-    # Copy real metadata into temp workspace
-    repo_root = Path(__file__).resolve().parents[3]
+def _setup_lease_real_estate_metadata(mock_settings, monkeypatch):
+    """Setup lease real estate metadata in test environment."""
     meta_src = (
-        repo_root / "assets" / "meta_data" / "meta_data_categories_documents"
+        REPO_ROOT / "assets" / "meta_data" / "meta_data_categories_documents"
         / "lease_real_estate.json"
     )
     meta_dst_dir = mock_settings.meta_categories_root
@@ -27,27 +25,36 @@ async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
     meta_dst = meta_dst_dir / "lease_real_estate.json"
     meta_dst.write_text(meta_src.read_text(encoding="utf-8"), encoding="utf-8")
 
-    # Write categories_index.json for store
     index_path = meta_dst_dir / "categories_index.json"
-    index_data = {"categories": [{"id": "lease_real_estate", "label": "Оренда нерухомого майна"}]}
+    index_data = {
+        "categories": [{"id": "lease_real_estate", "label": "Оренда нерухомого майна"}]
+    }
     index_path.write_text(json.dumps(index_data), encoding="utf-8")
 
-    # Patch categories index path and reload store
-    monkeypatch.setattr("backend.domain.categories.index._CATEGORIES_PATH", index_path)
-    from backend.domain.categories import index as cat_index  # pylint: disable=import-outside-toplevel
-
+    monkeypatch.setattr(
+        "backend.domain.categories.index._CATEGORIES_PATH", index_path
+    )
     cat_index.store.clear()
     cat_index.store.load()
 
-    # Copy real DOCX template into temp workspace
+
+def _setup_lease_template(mock_settings):
+    """Copy real DOCX template into test workspace."""
     tmpl_src = (
-        repo_root / "assets" / "documents_files" / "default_documents_files"
+        REPO_ROOT / "assets" / "documents_files" / "default_documents_files"
         / "lease_real_estate.docx"
     )
     tmpl_dst_dir = mock_settings.default_documents_root / "lease_real_estate"
     tmpl_dst_dir.mkdir(parents=True, exist_ok=True)
     tmpl_dst = tmpl_dst_dir / "lease_real_estate.docx"
     shutil.copy(tmpl_src, tmpl_dst)
+
+
+@pytest.mark.asyncio
+async def test_build_real_estate_contract_full(mock_settings, monkeypatch):
+    """Use real lease_real_estate metadata/template and ensure values are injected."""
+    _setup_lease_real_estate_metadata(mock_settings, monkeypatch)
+    _setup_lease_template(mock_settings)
 
     # Prepare session with required data
     sid = "lease_real_full"

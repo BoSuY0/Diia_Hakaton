@@ -28,7 +28,7 @@ def test_dispatch_tool_passes_context(monkeypatch):
             recorded["context"] = context
             return {"ok": True, "args": args}
 
-        def format_result(self, result):  # pylint: disable=no-self-use
+        def format_result(self, result):
             """Format result."""
             return json.dumps(result, ensure_ascii=False)
 

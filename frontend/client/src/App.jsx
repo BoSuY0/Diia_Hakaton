@@ -329,8 +329,8 @@ function App() {
         updateUrl(sid, null, { replace: false });
 
         // Set category and template
-        await api.setCategory(sid, selectedCategory);
-        await api.setTemplate(sid, templateId);
+        await api.setCategory(sid, selectedCategory, userId);
+        await api.setTemplate(sid, templateId, userId);
       } catch (e) {
         console.error("Failed to create session", e);
         alert("Failed to create session");
@@ -342,12 +342,12 @@ function App() {
     } else {
       if (selectedCategory) {
         try {
-          await api.setCategory(sid, selectedCategory);
+          await api.setCategory(sid, selectedCategory, userId);
         } catch (e) {
           console.error("Failed to set category", e);
         }
       }
-      await api.setTemplate(sid, templateId);
+      await api.setTemplate(sid, templateId, userId);
     }
 
     setStep('mode');
@@ -811,7 +811,7 @@ function App() {
           <div className="success-screen">
             <h2>Договір успішно створено!</h2>
             <p>Чернетку можна переглянути зараз, а завантаження оригіналу стане доступним після підпису всіх сторін.</p>
-            <button className="btn-primary" onClick={() => window.open(`${api.API_URL}/sessions/${sessionId}/contract/preview`, '_blank')}>
+            <button className="btn-primary" onClick={() => window.open(`${api.API_URL}/sessions/${sessionId}/contract/preview?user_id=${userId}`, '_blank')}>
               👁️ Переглянути чернетку
             </button>
             <button className="btn-secondary" onClick={() => {

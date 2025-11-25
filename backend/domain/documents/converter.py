@@ -1,3 +1,4 @@
+"""DOCX to HTML conversion utilities."""
 import logging
 import sys
 from pathlib import Path
@@ -14,15 +15,13 @@ def convert_to_html(input_path: Path) -> str:
     Converts a DOCX file to HTML using Mammoth.
     This is fast and suitable for previews on all platforms (Web/Mobile).
     """
-    import mammoth
-    
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     with open(input_path, "rb") as docx_file:
         result = mammoth.convert_to_html(docx_file)
         html_content = result.value
-        
+
     # Wrap in a nice container for "A4 paper" look
     styled_html = f"""
     <!DOCTYPE html>

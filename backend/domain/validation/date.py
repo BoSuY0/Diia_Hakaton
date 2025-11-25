@@ -1,3 +1,4 @@
+"""Date validation and normalization."""
 from __future__ import annotations
 
 import datetime as dt
@@ -41,15 +42,14 @@ def normalize_date(value: str) -> str:
             raise ValidationError(
                 "Будь ласка, вкажіть рік у форматі ДД.ММ.РРРР, наприклад 01.09.2025"
             )
+        if len(year) == 2:
+            year_i = 2000 + int(year)
         else:
-            if len(year) == 2:
-                year_i = 2000 + int(year)
-            else:
-                year_i = int(year)
+            year_i = int(year)
 
     try:
         normalized = dt.date(year_i, month_i, day_i)
-    except ValueError:
-        raise ValidationError("Такої дати не існує, перевірте день та місяць")
+    except ValueError as exc:
+        raise ValidationError("Такої дати не існує, перевірте день та місяць") from exc
 
     return normalized.strftime("%d.%m.%Y")

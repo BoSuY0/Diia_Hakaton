@@ -26,7 +26,9 @@ def test_bearer_jwt_allows_access(mock_categories_data):
     """Test that Bearer JWT token allows access."""
     settings.auth_mode = "jwt"
     settings.auth_jwt_secret = "secret-key"
-    token = jwt.encode({"sub": "jwt-user"}, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+    token = jwt.encode(
+        {"sub": "jwt-user"}, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm
+    )
 
     _prepare_session("jwt-session", mock_categories_data)
     resp = client.get(

@@ -36,7 +36,7 @@ def mock_build_contract(monkeypatch):
     monkeypatch.setattr("backend.api.http.server.tool_build_contract_async", mock_build)
 
 @pytest.mark.usefixtures("mock_settings", "temp_workspace")
-def test_sync_session_full_flow(  # pylint: disable=unused-argument
+def test_sync_session_full_flow(  # pylint: disable=unused-argument,redefined-outer-name
     mock_categories_data, mock_build_contract
 ):
     """Test one-shot sync with full data."""
@@ -106,7 +106,7 @@ def test_sync_session_partial_flow(mock_categories_data):  # pylint: disable=unu
     assert "lessee" in data["missing"]["roles"]
 
 @pytest.mark.usefixtures("mock_settings", "temp_workspace")
-def test_sync_session_incremental_flow(  # pylint: disable=unused-argument
+def test_sync_session_incremental_flow(  # pylint: disable=unused-argument,redefined-outer-name
     mock_categories_data, mock_build_contract
 ):
     """Test incremental sync (add second party later)."""
@@ -153,7 +153,7 @@ def test_sync_session_incremental_flow(  # pylint: disable=unused-argument
     # pylint: disable-next=import-outside-toplevel
     from backend.domain.documents.user_document import load_user_document
     doc = load_user_document(session_id)
-    
+
     # Check Lessor Data
     assert doc["parties"]["lessor"]["person_type"] == "individual"
     assert doc["parties"]["lessor"]["data"]["name"] == "Ivanov"

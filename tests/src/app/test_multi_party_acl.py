@@ -11,7 +11,9 @@ from backend.shared.enums import FillingMode
 client = TestClient(app)
 
 
-def _bootstrap_session(session_id: str, cat_id: str, filling_mode: FillingMode = FillingMode.FULL) -> str:
+def _bootstrap_session(
+    session_id: str, cat_id: str, filling_mode: FillingMode = FillingMode.FULL
+) -> str:
     s = get_or_create_session(session_id)
     s.category_id = cat_id
     s.template_id = "t1"

@@ -1,20 +1,22 @@
+"""File system utilities for session storage and file locking."""
 from __future__ import annotations
 
 import json
 import os
-import time
 import random
 import threading
+import time
 from pathlib import Path
-from typing import Any, Optional
-from contextlib import contextmanager
+from typing import Any
+
+import aiofiles
 
 from backend.infra.config.settings import settings
 from backend.shared.async_utils import run_sync
-import aiofiles
 
 
 def ensure_directories() -> None:
+    """Create all required directories for the application."""
     # Корінь
     settings.documents_root.mkdir(parents=True, exist_ok=True)
 
@@ -34,10 +36,12 @@ def ensure_directories() -> None:
 
 
 def session_answers_path(session_id: str) -> Path:
+    """Get the path to session answers JSON file."""
     return settings.sessions_root / f"session_{session_id}.json"
 
 
 def output_document_path(template_id: str, session_id: str, ext: str = "docx") -> Path:
+    """Get the path for output document."""
     filename = f"{template_id}_{session_id}.{ext}"
     return settings.output_root / filename
 
@@ -47,7 +51,7 @@ class FileLock:
     Inter-process file lock based on .lock file existence.
     Includes reentrancy support for the same thread.
     """
-    
+
     # Class-level dictionary to track locks held by current process/threads
     # Key: lock_path, Value: (owner_thread_ident, recursion_count)
     _memory_locks = {}
@@ -59,90 +63,100 @@ class FileLock:
         self.timeout = timeout
         self._acquired = False
 
-    def acquire(self) -> None:
-        thread_id = threading.get_ident()
-
-        # Check in-memory reentrancy first
+    def _try_reentrant_acquire(self, thread_id: int) -> bool:
+        """Try to acquire lock if already held by this thread."""
         with self._memory_lock_mutex:
             if self.lock_path in self._memory_locks:
                 owner, count = self._memory_locks[self.lock_path]
                 if owner == thread_id:
                     self._memory_locks[self.lock_path] = (owner, count + 1)
                     self._acquired = True
-                    return
+                    return True
+        return False
 
-        # Try to acquire physical file lock
+    def _is_held_by_sibling(self) -> bool:
+        """Check if lock is held by another thread in this process."""
+        with self._memory_lock_mutex:
+            return self.lock_path in self._memory_locks
+
+    def _create_lock_file(self, thread_id: int) -> bool:
+        """Try to create the lock file atomically."""
+        try:
+            with open(self.lock_path, "x", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+                f.flush()
+                os.fsync(f.fileno())
+            self._acquired = True
+            with self._memory_lock_mutex:
+                self._memory_locks[self.lock_path] = (thread_id, 1)
+            return True
+        except FileExistsError:
+            return False
+
+    def _check_and_remove_stale_lock(self) -> None:
+        """Check if lock file is stale and remove it if so."""
+        try:
+            lock_pid = self._read_lock_pid()
+            if self._is_lock_stale(lock_pid):
+                try:
+                    os.remove(self.lock_path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
+    def _read_lock_pid(self) -> int | None:
+        """Read PID from lock file."""
+        try:
+            with open(self.lock_path, "r", encoding="utf-8") as f:
+                pid_str = f.read().strip()
+            return int(pid_str) if pid_str else None
+        except (ValueError, OSError):
+            return None
+
+    def _is_lock_stale(self, lock_pid: int | None) -> bool:
+        """Determine if lock is stale based on PID or file age."""
+        if lock_pid and lock_pid == os.getpid():
+            return True
+        if lock_pid:
+            try:
+                os.kill(lock_pid, 0)
+                return False
+            except OSError:
+                return True
+        stat = self.lock_path.stat()
+        return time.time() - stat.st_mtime > 30.0
+
+    def acquire(self) -> None:
+        """Acquire the file lock with timeout."""
+        thread_id = threading.get_ident()
+
+        if self._try_reentrant_acquire(thread_id):
+            return
+
         start_time = time.time()
         while True:
-            # Optimization: Check if held by another thread in THIS process first
-            # This avoids "File in use" errors on Windows when one thread tries to delete 
-            # while others are reading the PID.
-            with self._memory_lock_mutex:
-                if self.lock_path in self._memory_locks:
-                    # Held by sibling thread. Sleep and retry without touching file.
-                    if time.time() - start_time > self.timeout:
-                        raise TimeoutError(f"Could not acquire lock for {self.path} after {self.timeout}s")
-                    time.sleep(0.05)
-                    continue
-
-            try:
-                # Attempt atomic create
-                # Write PID to lock file for better stale detection
-                with open(self.lock_path, "x", encoding="utf-8") as f:
-                    f.write(str(os.getpid()))
-                    f.flush()
-                    os.fsync(f.fileno())
-                
-                self._acquired = True
-                # Mark as owned by this thread
-                with self._memory_lock_mutex:
-                    self._memory_locks[self.lock_path] = (thread_id, 1)
-                return
-            except FileExistsError:
-                # Check timeout
+            if self._is_held_by_sibling():
                 if time.time() - start_time > self.timeout:
-                    raise TimeoutError(f"Could not acquire lock for {self.path} after {self.timeout}s")
-                
-                # Check for stale lock (e.g. process crash)
-                try:
-                    # Read PID from lock file
-                    try:
-                        with open(self.lock_path, "r", encoding="utf-8") as f:
-                            pid_str = f.read().strip()
-                        lock_pid = int(pid_str) if pid_str else None
-                    except (ValueError, OSError):
-                        lock_pid = None
+                    raise TimeoutError(
+                        f"Could not acquire lock for {self.path} after {self.timeout}s"
+                    )
+                time.sleep(0.05)
+                continue
 
-                    is_stale = False
-                    if lock_pid:
-                        if lock_pid == os.getpid():
-                            # Lock file says it's us, but we don't have it in memory (checked above).
-                            # This means we failed to delete it previously. It's stale.
-                            is_stale = True
-                        else:
-                            # Check if other process exists
-                            try:
-                                os.kill(lock_pid, 0)
-                            except OSError:
-                                # Process does not exist -> Stale lock
-                                is_stale = True
-                    else:
-                        # No PID or empty file -> Fallback to time check
-                        stat = self.lock_path.stat()
-                        if time.time() - stat.st_mtime > 30.0:
-                            is_stale = True
+            if self._create_lock_file(thread_id):
+                return
 
-                    if is_stale:
-                        try:
-                            os.remove(self.lock_path)
-                        except OSError:
-                            pass # Race to delete
-                except OSError:
-                    pass # Lock file might have been removed by other process
+            if time.time() - start_time > self.timeout:
+                raise TimeoutError(
+                    f"Could not acquire lock for {self.path} after {self.timeout}s"
+                )
 
-                time.sleep(random.uniform(0.05, 0.1))
+            self._check_and_remove_stale_lock()
+            time.sleep(random.uniform(0.05, 0.1))
 
     def release(self) -> None:
+        """Release the file lock."""
         if not self._acquired:
             return
 
@@ -155,9 +169,8 @@ class FileLock:
                         self._memory_locks[self.lock_path] = (owner, count - 1)
                         self._acquired = False
                         return
-                    else:
-                        # Last release, remove physical lock
-                        del self._memory_locks[self.lock_path]
+                    # Last release, remove physical lock
+                    del self._memory_locks[self.lock_path]
 
         # Retry deletion a few times to handle Windows transient file locking (e.g. antivirus)
         for _ in range(3):
@@ -166,7 +179,7 @@ class FileLock:
                 break
             except OSError:
                 time.sleep(0.01)
-        
+
         self._acquired = False
 
     def __enter__(self):
@@ -178,6 +191,7 @@ class FileLock:
 
 
 def read_json(path: Path) -> Any:
+    """Read and parse JSON file."""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -213,12 +227,14 @@ def _write_atomic(path: Path, data: Any) -> None:
 
 # Async wrappers to avoid blocking event loop
 async def read_json_async(path: Path) -> Any:
+    """Read and parse JSON file asynchronously."""
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
         content = await f.read()
     return json.loads(content)
 
 
 async def write_json_async(path: Path, data: Any, locked_by_caller: bool = False) -> None:
+    """Write JSON to file asynchronously."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if locked_by_caller:
         await _write_atomic_async(path, data)

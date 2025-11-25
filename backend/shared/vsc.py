@@ -1,3 +1,4 @@
+"""VSC (Value-Separated Columns) formatting utilities for LLM communication."""
 from __future__ import annotations
 
 from typing import Iterable, List
@@ -13,10 +14,12 @@ def _esc(s: str) -> str:
 
 
 def row(*cols: object) -> str:
+    """Create a VSC row from column values."""
     return "|".join(_esc(str(c)) for c in cols)
 
 
 def block(header: str, rows: Iterable[Iterable[object]]) -> str:
+    """Create a VSC block with header and rows."""
     lines: List[str] = [header]
     for r in rows:
         lines.append(row(*r))

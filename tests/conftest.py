@@ -2,6 +2,7 @@
 # pylint: disable=redefined-outer-name,protected-access
 import asyncio
 import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -116,9 +117,7 @@ def mock_settings(temp_workspace):
 @pytest.fixture
 def mock_categories_data(mock_settings, monkeypatch):  # noqa: ARG001
     """Create mock category data for testing."""
-    # pylint: disable=import-outside-toplevel
-    import json
-    from backend.domain.categories.index import store
+    from backend.domain.categories.index import store  # pylint: disable=import-outside-toplevel
 
     # Create a dummy category file
     cat_id = "test_cat"
@@ -161,6 +160,74 @@ def mock_categories_data(mock_settings, monkeypatch):  # noqa: ARG001
     store.load()
 
     return cat_id
+
+
+def create_category_meta(
+    settings,
+    cat_id: str,
+    *,
+    templates=None,
+    roles=None,
+    party_modules=None,
+    contract_fields=None,
+    keywords=None,
+):
+    """Create category metadata files for testing.
+
+    This is a shared helper to reduce code duplication in tests.
+
+    Args:
+        settings: The settings object with paths.
+        cat_id: Category ID.
+        templates: List of template dicts, defaults to single template.
+        roles: Roles dict, defaults to lessor/lessee with individual type.
+        party_modules: Party modules dict, defaults to individual with name field.
+        contract_fields: Contract fields list, defaults to single cf1 field.
+        keywords: Keywords for index, defaults to [cat_id].
+    """
+    if templates is None:
+        templates = [{"id": "t1", "name": "T1", "file": "f1.docx"}]
+    if roles is None:
+        roles = {"lessor": {"label": "Lessor", "allowed_person_types": ["individual"]}}
+    if party_modules is None:
+        party_modules = {
+            "individual": {
+                "label": "Indiv",
+                "fields": [{"field": "name", "label": "Name", "required": True}],
+            }
+        }
+    if contract_fields is None:
+        contract_fields = [{"field": "cf1", "label": "CF1", "required": True}]
+    if keywords is None:
+        keywords = [cat_id]
+
+    meta = {
+        "category_id": cat_id,
+        "templates": templates,
+        "roles": roles,
+        "party_modules": party_modules,
+        "contract_fields": contract_fields,
+    }
+    meta_path = settings.meta_categories_root / f"{cat_id}.json"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    # Update or create index
+    index_path = settings.meta_categories_root / "categories_index.json"
+    if index_path.exists():
+        idx_data = json.loads(index_path.read_text(encoding="utf-8"))
+    else:
+        idx_data = {"categories": []}
+
+    # Add category if not exists
+    if all(c["id"] != cat_id for c in idx_data.get("categories", [])):
+        idx_data["categories"].append({
+            "id": cat_id,
+            "label": cat_id.replace("_", " ").title(),
+            "keywords": keywords,
+        })
+    index_path.write_text(json.dumps(idx_data), encoding="utf-8")
+
+    return meta_path, index_path
 
 
 @pytest.hookimpl(tryfirst=True)

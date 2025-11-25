@@ -3,20 +3,27 @@ import json
 import sys
 import types
 
-# Provide lightweight stubs to satisfy imports without external deps (redis, glide).
-if "redis" not in sys.modules:
-    sys.modules["redis"] = types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *args, **kwargs: None))
-if "glide" not in sys.modules:
-    glide_stub = types.SimpleNamespace(
-        GlideClusterClient=type("GlideClusterClient", (), {"create": staticmethod(lambda config: None)}),
-        GlideClusterClientConfiguration=type("GlideClusterClientConfiguration", (), {}),
-        NodeAddress=type("NodeAddress", (), {}),
-    )
-    sys.modules["glide"] = glide_stub
-
 from backend.domain.categories import index as categories_index
 from backend.domain.sessions.models import Session, FieldState
 from backend.domain.services.fields import get_required_fields, validate_session_readiness
+from backend.infra.config.settings import settings
+
+# Provide lightweight stubs to satisfy imports without external deps (redis, glide).
+if "redis" not in sys.modules:
+    sys.modules["redis"] = types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *a, **kw: None)
+    )
+if "glide" not in sys.modules:
+    _glide_stub = types.SimpleNamespace(
+        GlideClusterClient=type(
+            "GlideClusterClient", (), {"create": staticmethod(lambda cfg: None)}
+        ),
+        GlideClusterClientConfiguration=type(
+            "GlideClusterClientConfiguration", (), {}
+        ),
+        NodeAddress=type("NodeAddress", (), {}),
+    )
+    sys.modules["glide"] = _glide_stub
 
 
 def _write_custom_meta(tmp_root):
@@ -36,36 +43,38 @@ def _write_custom_meta(tmp_root):
         encoding="utf-8",
     )
 
-    (meta_dir / "custom.json").write_text(
-        json.dumps(
-            {
-                "category_id": "custom",
-                "templates": [{"id": "custom_template", "name": "Custom", "file": "custom_contract.docx"}],
-                "roles": {
-                    "party_a": {"label": "A", "allowed_person_types": ["individual"]},
-                    "party_b": {"label": "B", "allowed_person_types": ["individual"]},
-                },
-                "party_modules": {
-                    "individual": {
-                        "label": "Ind",
-                        "fields": [{"field": "name", "label": "Name", "required": True}],
-                    }
-                },
-                "contract_fields": [
-                    {"field": "contract_city", "label": "Місто", "required": False, "ai_required": True},
-                    {"field": "contract_subject", "label": "Предмет", "required": False, "ai_required": True},
-                ],
+    custom_meta = {
+        "category_id": "custom",
+        "templates": [
+            {"id": "custom_template", "name": "Custom", "file": "custom_contract.docx"}
+        ],
+        "roles": {
+            "party_a": {"label": "A", "allowed_person_types": ["individual"]},
+            "party_b": {"label": "B", "allowed_person_types": ["individual"]},
+        },
+        "party_modules": {
+            "individual": {
+                "label": "Ind",
+                "fields": [{"field": "name", "label": "Name", "required": True}],
             }
-        ),
-        encoding="utf-8",
+        },
+        "contract_fields": [
+            {"field": "contract_city", "label": "Місто",
+             "required": False, "ai_required": True},
+            {"field": "contract_subject", "label": "Предмет",
+             "required": False, "ai_required": True},
+        ],
+    }
+    (meta_dir / "custom.json").write_text(
+        json.dumps(custom_meta), encoding="utf-8"
     )
 
     return index_path
 
 
-def _reload_store(index_path):  # pylint: disable=protected-access
+def _reload_store(index_path):
     """Reload category store with new index path."""
-    categories_index._CATEGORIES_PATH = index_path
+    settings.meta_categories_root = index_path.parent
     categories_index.store.clear()
     categories_index.store.load()
 
@@ -83,7 +92,9 @@ def test_ai_required_fields_are_exposed(mock_settings, tmp_path):  # pylint: dis
     assert all(f.required is False for f in ai_fields.values())
 
 
-def test_ai_required_fields_block_readiness_until_filled(mock_settings, tmp_path):  # noqa: ARG001
+def test_ai_required_fields_block_readiness_until_filled(
+    mock_settings, tmp_path  # pylint: disable=unused-argument
+):
     """Test AI required fields block readiness until filled."""
     index_path = _write_custom_meta(tmp_path)
     _reload_store(index_path)

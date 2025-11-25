@@ -1,0 +1,9 @@
+[MAIN]
+# Pylint configuration for Diia Hakaton project
+
+[FORMAT]
+max-line-length=100
+
+[SIMILARITIES]
+# Minimum lines number of a similarity (default 4).
+min-similarity-lines=25

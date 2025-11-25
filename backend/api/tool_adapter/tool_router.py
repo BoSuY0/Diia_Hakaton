@@ -1,16 +1,23 @@
+"""Tool router for dispatching tool calls."""
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, Optional
-
-# Import tools to register them
 import asyncio
 import inspect
+import json
+import threading
+from typing import Any, Dict, Optional
 
-import backend.agent.tools.categories
-import backend.agent.tools.session
+# Import tools to register them (side effect: registers tools)
+# These imports trigger tool registration via decorators
+from backend.agent.tools import categories as _tools_categories
+from backend.agent.tools import session as _tools_session
 from backend.agent.tools.registry import tool_registry
+
+from backend.shared.errors import MetaNotFoundError, SessionNotFoundError, ValidationError
 from backend.shared.logging import get_logger
+
+# Ensure modules are loaded (prevents "unused import" warning)
+assert _tools_categories and _tools_session
 
 logger = get_logger(__name__)
 
@@ -21,6 +28,7 @@ def dispatch_tool(
     tags: Dict[str, str] | None = None,
     user_id: str | None = None,
 ) -> str:
+    """Dispatch a tool call synchronously."""
     args = json.loads(arguments_json or "{}")
     logger.info("dispatch_tool name=%s", name)
 
@@ -38,7 +46,16 @@ def dispatch_tool(
     try:
         result = tool.execute(args, context)
         return tool.format_result(result)
-    except Exception as e:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        RuntimeError,
+        OSError,
+        SessionNotFoundError,
+        MetaNotFoundError,
+        ValidationError,
+    ) as e:
         logger.exception("Error executing tool %s", name)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -49,6 +66,7 @@ async def dispatch_tool_async(
     tags: Dict[str, str] | None = None,
     user_id: str | None = None,
 ) -> str:
+    """Dispatch a tool call asynchronously."""
     args = json.loads(arguments_json or "{}")
     logger.info("dispatch_tool_async name=%s", name)
 
@@ -66,12 +84,22 @@ async def dispatch_tool_async(
     try:
         result = await tool.execute_async(args, context)
         return tool.format_result(result)
-    except Exception as e:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        RuntimeError,
+        OSError,
+        SessionNotFoundError,
+        MetaNotFoundError,
+        ValidationError,
+    ) as e:
         logger.exception("Error executing tool %s", name)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
 def tool_find_category_by_query(query: str) -> Dict[str, Any]:
+    """Find category by query string."""
     tool = tool_registry.get("find_category_by_query")
     if tool:
         return _run_tool(tool, {"query": query})
@@ -79,6 +107,7 @@ def tool_find_category_by_query(query: str) -> Dict[str, Any]:
 
 
 def tool_get_templates_for_category(category_id: str) -> Dict[str, Any]:
+    """Get templates for a category."""
     tool = tool_registry.get("get_templates_for_category")
     if tool:
         return _run_tool(tool, {"category_id": category_id})
@@ -86,6 +115,7 @@ def tool_get_templates_for_category(category_id: str) -> Dict[str, Any]:
 
 
 def tool_get_category_entities(category_id: str) -> Dict[str, Any]:
+    """Get entities for a category."""
     tool = tool_registry.get("get_category_entities")
     if tool:
         return _run_tool(tool, {"category_id": category_id})
@@ -93,6 +123,7 @@ def tool_get_category_entities(category_id: str) -> Dict[str, Any]:
 
 
 def tool_get_category_parties(category_id: str) -> Dict[str, Any]:
+    """Get party schema for a category."""
     tool = tool_registry.get("get_category_parties")
     if tool:
         return _run_tool(tool, {"category_id": category_id})
@@ -100,6 +131,7 @@ def tool_get_category_parties(category_id: str) -> Dict[str, Any]:
 
 
 def tool_get_party_fields_for_session(session_id: str) -> Dict[str, Any]:
+    """Get party fields for a session."""
     tool = tool_registry.get("get_party_fields_for_session")
     if tool:
         return _run_tool(tool, {"session_id": session_id})
@@ -107,6 +139,7 @@ def tool_get_party_fields_for_session(session_id: str) -> Dict[str, Any]:
 
 
 def tool_set_category(session_id: str, category_id: str) -> Dict[str, Any]:
+    """Set category for a session."""
     tool = tool_registry.get("set_category")
     if tool:
         return _run_tool(tool, {"session_id": session_id, "category_id": category_id})
@@ -114,6 +147,7 @@ def tool_set_category(session_id: str, category_id: str) -> Dict[str, Any]:
 
 
 def tool_set_template(session_id: str, template_id: str) -> Dict[str, Any]:
+    """Set template for a session."""
     tool = tool_registry.get("set_template")
     if tool:
         return _run_tool(tool, {"session_id": session_id, "template_id": template_id})
@@ -128,6 +162,7 @@ def tool_upsert_field(
     role: Optional[str] = None,
     _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    """Upsert a field value in a session."""
     tool = tool_registry.get("upsert_field")
     if tool:
         context = {"tags": tags, "pii_tags": tags or {}}
@@ -141,6 +176,7 @@ def tool_upsert_field(
 
 
 def tool_get_session_summary(session_id: str) -> Dict[str, Any]:
+    """Get session summary."""
     tool = tool_registry.get("get_session_summary")
     if tool:
         return tool.execute({"session_id": session_id}, {})
@@ -148,6 +184,7 @@ def tool_get_session_summary(session_id: str) -> Dict[str, Any]:
 
 
 def tool_build_contract(session_id: str, template_id: str) -> Dict[str, Any]:
+    """Build contract document."""
     tool = tool_registry.get("build_contract")
     if tool:
         return tool.execute({"session_id": session_id, "template_id": template_id}, {})
@@ -161,6 +198,7 @@ def tool_set_party_context(
     filling_mode: str | None = None,
     _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    """Set party context for a session."""
     tool = tool_registry.get("set_party_context")
     if not tool:
         logger.error("tool_set_party_context: Tool 'set_party_context' not found in registry!")
@@ -175,6 +213,7 @@ def tool_set_party_context(
 
 
 def tool_sign_contract(session_id: str, role: Optional[str] = None) -> Dict[str, Any]:
+    """Sign a contract."""
     tool = tool_registry.get("sign_contract")
     if tool:
         return tool.execute({"session_id": session_id, "role": role}, {})
@@ -182,6 +221,7 @@ def tool_sign_contract(session_id: str, role: Optional[str] = None) -> Dict[str,
 
 
 async def tool_find_category_by_query_async(query: str) -> Dict[str, Any]:
+    """Find category by query (async)."""
     tool = tool_registry.get("find_category_by_query")
     if tool:
         return await tool.execute_async({"query": query}, {})
@@ -189,6 +229,7 @@ async def tool_find_category_by_query_async(query: str) -> Dict[str, Any]:
 
 
 async def tool_get_templates_for_category_async(category_id: str) -> Dict[str, Any]:
+    """Get templates for category (async)."""
     tool = tool_registry.get("get_templates_for_category")
     if tool:
         return await tool.execute_async({"category_id": category_id}, {})
@@ -196,6 +237,7 @@ async def tool_get_templates_for_category_async(category_id: str) -> Dict[str, A
 
 
 async def tool_get_category_entities_async(category_id: str) -> Dict[str, Any]:
+    """Get category entities (async)."""
     tool = tool_registry.get("get_category_entities")
     if tool:
         return await tool.execute_async({"category_id": category_id}, {})
@@ -203,6 +245,7 @@ async def tool_get_category_entities_async(category_id: str) -> Dict[str, Any]:
 
 
 async def tool_get_category_parties_async(category_id: str) -> Dict[str, Any]:
+    """Get category parties (async)."""
     tool = tool_registry.get("get_category_parties")
     if tool:
         return await tool.execute_async({"category_id": category_id}, {})
@@ -210,6 +253,7 @@ async def tool_get_category_parties_async(category_id: str) -> Dict[str, Any]:
 
 
 async def tool_get_party_fields_for_session_async(session_id: str) -> Dict[str, Any]:
+    """Get party fields for session (async)."""
     tool = tool_registry.get("get_party_fields_for_session")
     if tool:
         return await tool.execute_async({"session_id": session_id}, {})
@@ -217,6 +261,7 @@ async def tool_get_party_fields_for_session_async(session_id: str) -> Dict[str, 
 
 
 async def tool_set_category_async(session_id: str, category_id: str) -> Dict[str, Any]:
+    """Set category (async)."""
     tool = tool_registry.get("set_category")
     if tool:
         return await tool.execute_async({"session_id": session_id, "category_id": category_id}, {})
@@ -224,6 +269,7 @@ async def tool_set_category_async(session_id: str, category_id: str) -> Dict[str
 
 
 async def tool_set_template_async(session_id: str, template_id: str) -> Dict[str, Any]:
+    """Set template (async)."""
     tool = tool_registry.get("set_template")
     if tool:
         return await tool.execute_async({"session_id": session_id, "template_id": template_id}, {})
@@ -238,6 +284,7 @@ async def tool_upsert_field_async(
     role: Optional[str] = None,
     _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    """Upsert field value (async)."""
     tool = tool_registry.get("upsert_field")
     if tool:
         context = {"tags": tags, "pii_tags": tags or {}}
@@ -251,6 +298,7 @@ async def tool_upsert_field_async(
 
 
 async def tool_get_session_summary_async(session_id: str) -> Dict[str, Any]:
+    """Get session summary (async)."""
     tool = tool_registry.get("get_session_summary")
     if tool:
         return await tool.execute_async({"session_id": session_id}, {})
@@ -258,6 +306,7 @@ async def tool_get_session_summary_async(session_id: str) -> Dict[str, Any]:
 
 
 async def tool_build_contract_async(session_id: str, template_id: str) -> Dict[str, Any]:
+    """Build contract (async)."""
     tool = tool_registry.get("build_contract")
     if tool:
         return await tool.execute_async({"session_id": session_id, "template_id": template_id}, {})
@@ -271,9 +320,12 @@ async def tool_set_party_context_async(
     filling_mode: str | None = None,
     _context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    """Set party context (async)."""
     tool = tool_registry.get("set_party_context")
     if not tool:
-        logger.error("tool_set_party_context_async: Tool 'set_party_context' not found in registry!")
+        logger.error(
+            "tool_set_party_context_async: Tool 'set_party_context' not found!"
+        )
         return {"ok": False, "error": "Tool set_party_context not found"}
 
     logger.info("tool_set_party_context_async: Executing for session_id=%s", session_id)
@@ -285,7 +337,10 @@ async def tool_set_party_context_async(
         payload,
         _context or {},
     )
+
+
 def _run_tool(tool, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a tool, handling async coroutines."""
     result = tool.execute(args, {})
     if inspect.iscoroutine(result):
         try:
@@ -294,8 +349,6 @@ def _run_tool(tool, args: Dict[str, Any]) -> Dict[str, Any]:
             running_loop = None
 
         if running_loop and running_loop.is_running():
-            import threading
-
             output: Dict[str, Any] = {}
 
             def _run_in_thread():
@@ -317,4 +370,3 @@ def _run_tool(tool, args: Dict[str, Any]) -> Dict[str, Any]:
         finally:
             loop.close()
     return result
-

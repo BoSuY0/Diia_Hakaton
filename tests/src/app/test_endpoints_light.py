@@ -27,7 +27,11 @@ def test_create_and_get_session(mock_categories_data):
     session_id = resp.json()["session_id"]
 
     # Set category
-    resp2 = client.post(f"/sessions/{session_id}/category", json={"category_id": mock_categories_data}, headers=AUTH_HEADERS)
+    resp2 = client.post(
+        f"/sessions/{session_id}/category",
+        json={"category_id": mock_categories_data},
+        headers=AUTH_HEADERS,
+    )
     assert resp2.status_code == 200
 
     # Get summary
@@ -65,26 +69,48 @@ def test_categories_endpoints(mock_categories_data):
 @pytest.mark.usefixtures("mock_settings")
 def test_chat_endpoint_with_mock_llm(monkeypatch):
     """Test chat endpoint with mocked LLM."""
-    called = {}
 
-    class Msg:  # pylint: disable=too-few-public-methods
+    class Msg:
         """Mock message."""
 
         role = "assistant"
         content = "Mock reply"
         tool_calls = None
 
-    class Choice:  # pylint: disable=too-few-public-methods
+        def __repr__(self):
+            return f"Msg(role={self.role})"
+
+        def to_dict(self):
+            """Convert to dict."""
+            return {"role": self.role, "content": self.content}
+
+    class Choice:
         """Mock choice."""
 
         message = Msg()
 
-    class Resp:  # pylint: disable=too-few-public-methods
+        def __repr__(self):
+            return "Choice()"
+
+        def to_dict(self):
+            """Convert to dict."""
+            return {"message": self.message.to_dict()}
+
+    class Resp:
         """Mock response."""
 
         choices = [Choice()]
 
-    monkeypatch.setattr("backend.api.http.server.chat_with_tools", lambda *a, **k: Resp())
+        def __repr__(self):
+            return "Resp()"
+
+        def to_dict(self):
+            """Convert to dict."""
+            return {"choices": [c.to_dict() for c in self.choices]}
+
+    monkeypatch.setattr(
+        "backend.api.http.server.chat_with_tools", lambda *_a, **_k: Resp()
+    )
 
     # Need session
     sid = "chat_sess"
@@ -99,7 +125,11 @@ def test_session_schema_endpoint(mock_categories_data):
     """Test session schema endpoint."""
     resp = client.post("/sessions", json={}, headers=AUTH_HEADERS)
     sid = resp.json()["session_id"]
-    client.post(f"/sessions/{sid}/category", json={"category_id": mock_categories_data}, headers=AUTH_HEADERS)
+    client.post(
+        f"/sessions/{sid}/category",
+        json={"category_id": mock_categories_data},
+        headers=AUTH_HEADERS,
+    )
     # Set party context to avoid missing person_type in schema fields/value mode
     client.post(
         f"/sessions/{sid}/party-context",
@@ -118,7 +148,11 @@ def test_set_template_endpoint(mock_categories_data):
     """Test setting template for a session."""
     resp = client.post("/sessions", json={}, headers=AUTH_HEADERS)
     sid = resp.json()["session_id"]
-    client.post(f"/sessions/{sid}/category", json={"category_id": mock_categories_data}, headers=AUTH_HEADERS)
+    client.post(
+        f"/sessions/{sid}/category",
+        json={"category_id": mock_categories_data},
+        headers=AUTH_HEADERS,
+    )
     r = client.post(f"/sessions/{sid}/template", json={"template_id": "t1"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     s = load_session(sid)

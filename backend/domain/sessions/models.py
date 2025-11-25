@@ -1,3 +1,4 @@
+"""Session models for contract filling workflow."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -5,7 +6,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
+
 class SessionState(str, Enum):
+    """Possible states of a contract session."""
     IDLE = "idle"
     CATEGORY_SELECTED = "category_selected"
     TEMPLATE_SELECTED = "template_selected"
@@ -18,18 +21,23 @@ class SessionState(str, Enum):
 
 @dataclass
 class FieldState:
-    # Статус окремого поля у сесії (без значення PII).
-    # Значення поля зберігаються в агрегаторі all_data.
+    """Status of an individual field in session (without PII value)."""
     status: str = "empty"  # empty | ok | error
     error: Optional[str] = None
 
 
 @dataclass
 class Session:
+    """
+    Contract session containing all data and state for document filling.
+
+    This dataclass holds all session-related information including user context,
+    selected category/template, field states, signatures, and history.
+    """
     session_id: str
     creator_user_id: Optional[str] = None
     role_owners: Dict[str, str] = field(default_factory=dict)
-    
+
     # Час останнього оновлення (для очищення старих чернеток)
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -44,8 +52,8 @@ class Session:
     # role/person_type — це поточний контекст користувача (хто зараз редагує).
     role: Optional[str] = None
     person_type: Optional[str] = None
-    
-    # Типи осіб для кожної ролі: Role -> PersonType (напр. {"lessor": "company", "lessee": "individual"})
+
+    # Типи осіб для кожної ролі: Role -> PersonType
     party_types: Dict[str, str] = field(default_factory=dict)
 
     state: SessionState = SessionState.IDLE
@@ -65,6 +73,7 @@ class Session:
 
     @property
     def is_fully_signed(self) -> bool:
+        """Check if all parties have signed the document."""
         # Перевіряємо, чи всі сторони, визначені в party_types, підписали
         if not self.party_types:
             return False

@@ -5,6 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from backend.agent.tools.base import BaseTool
 from backend.agent.tools.registry import register_tool
+from backend.agent.tools.schema_helpers import (
+    string_enum_or_minlength,
+    session_id_property,
+)
 from backend.domain.categories.index import (
     Category,
     Entity,
@@ -16,25 +20,26 @@ from backend.domain.categories.index import (
     store as category_store,
 )
 from backend.shared.logging import get_logger
-from backend.domain.sessions.models import SessionState
 from backend.infra.persistence.store import (
     aget_or_create_session,
     atransactional_session,
-    aload_session,
 )
 
 logger = get_logger(__name__)
 
 
 def _category_ids() -> List[str]:
+    """Get sorted list of category IDs."""
     try:
         return sorted(category_store.categories.keys())
-    except Exception:
+    except (AttributeError, TypeError):
         return []
 
 
 @register_tool
 class FindCategoryByQueryTool(BaseTool):
+    """Tool to find category by user query."""
+
     @property
     def name(self) -> str:
         return "find_category_by_query"
@@ -84,6 +89,8 @@ class FindCategoryByQueryTool(BaseTool):
 
 @register_tool
 class GetTemplatesForCategoryTool(BaseTool):
+    """Tool to get templates for a category."""
+
     @property
     def name(self) -> str:
         return "get_templates_for_category"
@@ -96,21 +103,10 @@ class GetTemplatesForCategoryTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _category_ids()
         return {
             "type": "object",
             "properties": {
-                "category_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
+                "category_id": string_enum_or_minlength(_category_ids()),
             },
             "required": ["category_id"],
             "additionalProperties": False,
@@ -140,12 +136,15 @@ class GetTemplatesForCategoryTool(BaseTool):
         }
 
     def format_result(self, result: Any) -> str:
-        from backend.shared.vsc import vsc_templates
+        """Format result for display."""
+        from backend.shared.vsc import vsc_templates  # pylint: disable=import-outside-toplevel
         return vsc_templates(result)
 
 
 @register_tool
 class GetCategoryEntitiesTool(BaseTool):
+    """Tool to get category entities (fields)."""
+
     @property
     def name(self) -> str:
         return "get_category_entities"
@@ -156,21 +155,10 @@ class GetCategoryEntitiesTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _category_ids()
         return {
             "type": "object",
             "properties": {
-                "category_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
+                "category_id": string_enum_or_minlength(_category_ids()),
             },
             "required": ["category_id"],
             "additionalProperties": False,
@@ -216,12 +204,15 @@ class GetCategoryEntitiesTool(BaseTool):
         }
 
     def format_result(self, result: Any) -> str:
-        from backend.shared.vsc import vsc_entities
+        """Format result for display."""
+        from backend.shared.vsc import vsc_entities  # pylint: disable=import-outside-toplevel
         return vsc_entities(result)
 
 
 @register_tool
 class GetCategoryPartiesTool(BaseTool):
+    """Tool to get category parties (roles)."""
+
     @property
     def name(self) -> str:
         return "get_category_parties"
@@ -232,21 +223,10 @@ class GetCategoryPartiesTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _category_ids()
         return {
             "type": "object",
             "properties": {
-                "category_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
+                "category_id": string_enum_or_minlength(_category_ids()),
             },
             "required": ["category_id"],
             "additionalProperties": False,
@@ -259,6 +239,8 @@ class GetCategoryPartiesTool(BaseTool):
 
 @register_tool
 class SetCategoryTool(BaseTool):
+    """Tool to set category for a session."""
+
     @property
     def name(self) -> str:
         return "set_category"
@@ -269,25 +251,11 @@ class SetCategoryTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _category_ids()
         return {
             "type": "object",
             "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                },
-                "category_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
+                "session_id": session_id_property(),
+                "category_id": string_enum_or_minlength(_category_ids()),
             },
             "required": ["session_id", "category_id"],
             "additionalProperties": False,
@@ -299,6 +267,7 @@ class SetCategoryTool(BaseTool):
 
         logger.info("tool=set_category session_id=%s category_id=%s", session_id, category_id)
 
+        # pylint: disable=import-outside-toplevel
         from backend.domain.sessions.actions import set_session_category
 
         # Гарантуємо, що файл сесії існує, щоб transactional_session не впав із 404

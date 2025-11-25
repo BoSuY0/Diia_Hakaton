@@ -42,7 +42,9 @@ async def test_build_contract_wrong_template(mock_categories_data):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_settings")
-async def test_build_contract_partial_mode_allows_missing(mock_categories_data, monkeypatch, tmp_path):
+async def test_build_contract_partial_mode_allows_missing(
+    mock_categories_data, monkeypatch, tmp_path
+):
     """Test that partial mode allows building with missing fields."""
     s = _base_session("partial_build", mock_categories_data, "t1")
     # Remove a required field

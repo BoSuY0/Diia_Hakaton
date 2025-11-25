@@ -9,9 +9,9 @@ from backend.infra.config.settings import settings
 from backend.shared.logging import get_logger
 
 try:
-    import jwt as jwt_lib  # noqa: N811
+    import jwt as _jwt_module
 except ImportError:  # pragma: no cover - dependency is optional for header-only mode
-    jwt_lib = None
+    _jwt_module = None
 
 
 logger = get_logger(__name__)
@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 def _decode_bearer_token(token: str) -> tuple[str, dict]:
     """Decode a JWT bearer token and return (user_id, payload)."""
-    if not jwt_lib or not settings.auth_jwt_secret:
+    if not _jwt_module or not settings.auth_jwt_secret:
         raise HTTPException(
             status_code=401,
             detail="Auth token provided but JWT decoding is not configured",
@@ -27,7 +27,7 @@ def _decode_bearer_token(token: str) -> tuple[str, dict]:
 
     options = {"verify_aud": bool(settings.auth_jwt_audience)}
     try:
-        payload = jwt_lib.decode(
+        payload = _jwt_module.decode(
             token,
             settings.auth_jwt_secret,
             algorithms=[settings.auth_jwt_algorithm],
@@ -35,7 +35,7 @@ def _decode_bearer_token(token: str) -> tuple[str, dict]:
             issuer=settings.auth_jwt_issuer,
             options=options,
         )
-    except jwt_lib.PyJWTError as exc:
+    except _jwt_module.PyJWTError as exc:
         logger.warning("Failed to decode auth token: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid auth token") from exc
 
@@ -106,10 +106,10 @@ def diia_profile_from_token(token: str) -> dict:
     Витягує базовий профіль користувача з JWT.
     Поля залежать від того, що віддає Дія; мапимо кілька варіантів.
     """
-    if not jwt_lib or not token:
+    if not _jwt_module or not token:
         return {}
     try:
-        payload = jwt_lib.decode(
+        payload = _jwt_module.decode(
             token,
             settings.auth_jwt_secret,
             algorithms=[settings.auth_jwt_algorithm],
@@ -117,7 +117,7 @@ def diia_profile_from_token(token: str) -> dict:
             issuer=settings.auth_jwt_issuer,
             options={"verify_aud": bool(settings.auth_jwt_audience)},
         )
-    except jwt_lib.PyJWTError:
+    except _jwt_module.PyJWTError:
         return {}
 
     def pick(*keys):

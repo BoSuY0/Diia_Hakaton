@@ -7,22 +7,22 @@ from backend.agent import llm_client
 from backend.infra.config.settings import settings
 
 
-def test_ensure_api_key_sets_openai(monkeypatch):  # pylint: disable=protected-access
+def test_ensure_api_key_sets_openai(monkeypatch):
     """Test ensure API key sets OpenAI."""
     monkeypatch.setattr(settings, "llm_api_key", "test_key")
     monkeypatch.setattr(settings, "llm_model", "gpt-4")
     # Clear env first
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    llm_client._ensure_api_key()
+    llm_client.ensure_api_key()
     assert os.getenv("OPENAI_API_KEY") == "test_key"
 
 
-def test_ensure_api_key_sets_anthropic(monkeypatch):  # pylint: disable=protected-access
+def test_ensure_api_key_sets_anthropic(monkeypatch):
     """Test ensure API key sets Anthropic."""
     monkeypatch.setattr(settings, "llm_api_key", "anthro_key")
     monkeypatch.setattr(settings, "llm_model", "claude-3")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    llm_client._ensure_api_key()
+    llm_client.ensure_api_key()
     assert os.getenv("ANTHROPIC_API_KEY") == "anthro_key"
 
 

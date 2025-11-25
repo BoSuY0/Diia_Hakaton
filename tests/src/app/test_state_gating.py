@@ -43,7 +43,7 @@ async def test_filter_tools_respects_state_allowed(monkeypatch, mock_categories_
         "backend.api.http.server.tool_registry.get_by_alias", fake_get_by_alias
     )
 
-    filtered = await server._filter_tools_for_session("state_gate", [], has_category_tool=True)
+    filtered = await server.filter_tools_for_session("state_gate", [], has_category_tool=True)
     names = [t["function"]["name"] for t in filtered]
     assert "fc" in names
     assert "other" not in names

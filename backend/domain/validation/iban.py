@@ -1,3 +1,4 @@
+"""IBAN validation and normalization for Ukrainian IBANs."""
 from __future__ import annotations
 
 import re
@@ -25,7 +26,13 @@ def _mod97(iban: str) -> bool:
 
 
 def normalize_iban_ua(value: str) -> str:
+    """Normalize and validate Ukrainian IBAN (29 characters starting with UA).
+    
+    Returns empty string if value is empty (for optional fields).
+    """
     cleaned = re.sub(r"\s+", "", value).upper()
+    if not cleaned:
+        return ""  # Allow empty for optional fields
     if not cleaned.startswith("UA"):
         raise ValidationError("IBAN має починатися з 'UA'")
     if len(cleaned) != 29:

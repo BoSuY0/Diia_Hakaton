@@ -15,6 +15,12 @@ from backend.domain.sessions.models import Session
 from backend.infra.persistence.store_utils import _from_dict, session_to_dict
 from backend.shared.async_utils import run_sync
 
+# Lazy import to avoid circular dependency
+try:
+    from backend.domain.sessions.ttl import ttl_hours_for_session as _ttl_hours_for_session
+except ImportError:
+    _ttl_hours_for_session = None
+
 _sessions: dict[str, str] = {}
 _expires_at: dict[str, datetime] = {}
 _session_users: dict[str, set[str]] = {}
@@ -27,10 +33,12 @@ _async_global_lock = asyncio.Lock()
 
 def _session_ttl_seconds(session) -> int:
     """Calculate session TTL in seconds."""
-    try:
-        from backend.domain.sessions.ttl import ttl_hours_for_session  # pylint: disable=import-outside-toplevel
-        ttl_hours = ttl_hours_for_session(session)
-    except (ImportError, AttributeError):
+    if _ttl_hours_for_session is not None:
+        try:
+            ttl_hours = _ttl_hours_for_session(session)
+        except (TypeError, AttributeError):
+            ttl_hours = int(getattr(settings, "session_ttl_hours", 24))
+    else:
         try:
             ttl_hours = int(getattr(settings, "session_ttl_hours", 24))
         except (TypeError, ValueError):

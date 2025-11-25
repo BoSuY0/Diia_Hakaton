@@ -29,12 +29,22 @@ export const api = {
     return response.data;
   },
 
-  async setCategory(sessionId, categoryId) {
-    return axios.post(`${API_URL}/sessions/${sessionId}/category`, { category_id: categoryId });
+  async setCategory(sessionId, categoryId, userId = null) {
+    const config = {};
+    const headers = buildAuthHeaders(userId);
+    if (headers) {
+      config.headers = headers;
+    }
+    return axios.post(`${API_URL}/sessions/${sessionId}/category`, { category_id: categoryId }, config);
   },
 
-  async setTemplate(sessionId, templateId) {
-    return axios.post(`${API_URL}/sessions/${sessionId}/template`, { template_id: templateId });
+  async setTemplate(sessionId, templateId, userId = null) {
+    const config = {};
+    const headers = buildAuthHeaders(userId);
+    if (headers) {
+      config.headers = headers;
+    }
+    return axios.post(`${API_URL}/sessions/${sessionId}/template`, { template_id: templateId }, config);
   },
 
   async buildContract(sessionId, templateId, userId) {

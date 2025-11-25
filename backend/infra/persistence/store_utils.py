@@ -29,17 +29,16 @@ def _parse_field_status(raw_status, error: str | None) -> str:
     return "empty"
 
 
-def generate_readable_id(prefix: str = "session") -> str:  # noqa: ARG001
+def generate_readable_id(_prefix: str = "session") -> str:
     """
     Generate a unique session ID (UUID).
 
     Args:
-        prefix: Ignored, kept for backward compatibility.
+        _prefix: Ignored, kept for backward compatibility.
 
     Returns:
         A UUID string.
     """
-    del prefix  # unused, kept for API compatibility
     return str(uuid.uuid4())
 
 

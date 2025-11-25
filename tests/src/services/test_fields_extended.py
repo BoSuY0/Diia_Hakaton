@@ -1,11 +1,12 @@
 """Extended tests for fields service."""
 import json
 
+from backend.domain.categories import index as category_index
 from backend.domain.services.fields import get_required_fields
 from backend.infra.persistence.store import get_or_create_session, save_session
 
 
-def _setup_category(settings, roles=True):  # pylint: disable=protected-access
+def _setup_category(settings, roles=True):
     """Setup test category metadata."""
     meta = {
         "category_id": "fields_cat",
@@ -25,13 +26,15 @@ def _setup_category(settings, roles=True):  # pylint: disable=protected-access
     path = settings.meta_categories_root / "fields_cat.json"
     path.write_text(json.dumps(meta), encoding="utf-8")
     idx = settings.meta_categories_root / "categories_index.json"
-    idx.write_text(
-        json.dumps({"categories": [{"id": "fields_cat", "label": "Fields", "meta_filename": "fields_cat.json"}]}),
-        encoding="utf-8",
-    )
-    from backend.domain.categories import index as category_index
+    idx_data = {
+        "categories": [
+            {"id": "fields_cat", "label": "Fields", "meta_filename": "fields_cat.json"}
+        ]
+    }
+    idx.write_text(json.dumps(idx_data), encoding="utf-8")
 
-    category_index._CATEGORIES_PATH = idx
+    # Reset category index to use test data
+    setattr(category_index, "_CATEGORIES_PATH", idx)
     category_index.store.clear()
     category_index.store.load()
 

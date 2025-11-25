@@ -10,7 +10,34 @@ from backend.domain.sessions.models import Session
 from backend.infra.config.settings import settings
 from backend.shared.logging import get_logger
 
+# Lazy import to avoid hard dependency on MySQL
+try:
+    from backend.infra.persistence.contracts_mysql import MySQLContractsRepository
+except ImportError:
+    MySQLContractsRepository = None  # type: ignore[misc,assignment]
+
 logger = get_logger(__name__)
+
+
+class _RepoState:
+    """
+    Module-level repository state container.
+
+    Holds the singleton repository instance.
+    """
+
+    instance: Optional["ContractsRepository"] = None
+
+    def reset(self) -> None:
+        """Reset state for testing."""
+        self.instance = None
+
+    def is_initialized(self) -> bool:
+        """Check if repository is initialized."""
+        return self.instance is not None
+
+
+_repo_state = _RepoState()
 
 
 class ContractsRepository:
@@ -132,21 +159,22 @@ class SQLiteContractsRepository(ContractsRepository):
         return result
 
 
-_contracts_repo: ContractsRepository | None = None
-
-
 def get_contracts_repo() -> ContractsRepository:
     """Get or create the singleton contracts repository instance."""
-    global _contracts_repo  # pylint: disable=global-statement
-    if _contracts_repo is None:
-        if settings.contracts_db_url and settings.contracts_db_url.startswith("mysql"):
+    if _repo_state.instance is None:
+        if (
+            settings.contracts_db_url
+            and settings.contracts_db_url.startswith("mysql")
+            and MySQLContractsRepository is not None
+        ):
             try:
-                # pylint: disable-next=import-outside-toplevel
-                from backend.infra.persistence.contracts_mysql import MySQLContractsRepository
-                _contracts_repo = MySQLContractsRepository(settings.contracts_db_url)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.error("Failed to init MySQLContractsRepository, fallback to SQLite: %s", exc)
-                _contracts_repo = SQLiteContractsRepository()
+                _repo_state.instance = MySQLContractsRepository(settings.contracts_db_url)
+            except (OSError, ValueError, RuntimeError, ConnectionError) as exc:
+                logger.error(
+                    "Failed to init MySQLContractsRepository, fallback to SQLite: %s",
+                    exc,
+                )
+                _repo_state.instance = SQLiteContractsRepository()
         else:
-            _contracts_repo = SQLiteContractsRepository()
-    return _contracts_repo
+            _repo_state.instance = SQLiteContractsRepository()
+    return _repo_state.instance

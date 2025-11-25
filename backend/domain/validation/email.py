@@ -23,12 +23,13 @@ def normalize_email(value: str) -> str:
         
     Returns:
         Normalized (lowercased, trimmed) email address.
+        Empty string if value is empty (for optional fields).
         
     Raises:
         ValidationError: If the email format is invalid.
     """
     if not value or not value.strip():
-        raise ValidationError("Email не може бути порожнім.")
+        return ""  # Allow empty for optional fields
 
     email = value.strip().lower()
 

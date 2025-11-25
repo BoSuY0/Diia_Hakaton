@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 
 from backend.agent.tools.base import BaseTool
 from backend.agent.tools.registry import register_tool
+from backend.agent.tools.schema_helpers import (
+    string_enum_or_minlength,
+    base_session_parameters,
+)
 from backend.domain.categories.index import (
     PartyField,
     list_entities,
@@ -78,29 +82,10 @@ class SetTemplateTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _template_ids()
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                },
-                "template_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
-            },
-            "required": ["session_id", "template_id"],
-            "additionalProperties": False,
-        }
+        return base_session_parameters(
+            extra_properties={"template_id": string_enum_or_minlength(_template_ids())},
+            extra_required=["template_id"],
+        )
 
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
@@ -293,17 +278,7 @@ class GetPartyFieldsForSessionTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                }
-            },
-            "required": ["session_id"],
-            "additionalProperties": False,
-        }
+        return base_session_parameters()
 
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
@@ -510,17 +485,7 @@ class GetSessionSummaryTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                }
-            },
-            "required": ["session_id"],
-            "additionalProperties": False,
-        }
+        return base_session_parameters()
 
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
@@ -636,29 +601,10 @@ class BuildContractTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        ids = _template_ids()
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                },
-                "template_id": (
-                    {
-                        "type": "string",
-                        "enum": ids,
-                    }
-                    if ids
-                    else {
-                        "type": "string",
-                        "minLength": 1,
-                    }
-                )
-            },
-            "required": ["session_id", "template_id"],
-            "additionalProperties": False,
-        }
+        return base_session_parameters(
+            extra_properties={"template_id": string_enum_or_minlength(_template_ids())},
+            extra_required=["template_id"],
+        )
 
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]
@@ -691,22 +637,15 @@ class SignContractTool(BaseTool):
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "minLength": 1,
-                },
+        return base_session_parameters(
+            extra_properties={
                 "role": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Role to sign as."
+                    "description": "Role to sign as.",
                 }
             },
-            "required": ["session_id"],
-            "additionalProperties": False,
-        }
+        )
 
     async def execute(self, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         session_id = args["session_id"]

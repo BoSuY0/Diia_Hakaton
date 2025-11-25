@@ -32,12 +32,9 @@ from backend.api.tool_adapter.tool_router import (
     tool_set_template_async,
     tool_upsert_field_async,
     tool_set_party_context_async,
+    tool_registry as adapter_tool_registry,
 )
 
-# Backwards-compatible alias for sync monkeypatches in tests
-tool_build_contract = tool_build_contract_async
-
-# pylint: disable=wrong-import-position
 from backend.shared.errors import SessionNotFoundError
 from backend.shared.logging import get_logger, setup_logging
 from backend.infra.config.settings import settings
@@ -49,8 +46,10 @@ from backend.infra.persistence.store import (
     atransactional_session,
     alist_user_sessions,
     ainit_store,
+    generate_readable_id,
 )
 from backend.domain.sessions.models import Session, SessionState
+from backend.domain.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
 from backend.domain.services.fields import collect_missing_fields
 from backend.domain.categories.index import (
     list_party_fields, list_entities, store as cat_store, load_meta, list_templates,
@@ -60,7 +59,10 @@ from backend.domain.validation.pii_tagger import sanitize_typed
 from backend.shared.async_utils import run_sync, ensure_awaitable
 from backend.shared.auth import resolve_user_id, diia_profile_from_token
 from backend.shared import metrics
-# pylint: enable=wrong-import-position
+from backend.agent.tools.registry import tool_registry
+
+# Backwards-compatible alias for sync monkeypatches in tests
+tool_build_contract = tool_build_contract_async
 
 
 setup_logging()
@@ -73,9 +75,6 @@ async def lifespan(_app: FastAPI):  # noqa: ARG001
     """Application lifespan context manager."""
     ensure_directories()
     await ainit_store()
-
-    # pylint: disable=import-outside-toplevel
-    from backend.domain.sessions.cleaner import clean_stale_sessions, clean_abandoned_sessions
 
     stop_event = asyncio.Event()
 
@@ -480,7 +479,7 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
 
 
 
-def _inject_session_id(args_json: str, conv_session_id: str, tool_name: str) -> str:
+def inject_session_id(args_json: str, conv_session_id: str, tool_name: str) -> str:
     """
     Гарантує, що всі session-aware тулли працюють з поточною сесією,
     незалежно від того, який session_id повернула модель.
@@ -502,7 +501,7 @@ def _inject_session_id(args_json: str, conv_session_id: str, tool_name: str) -> 
     return json.dumps(args, ensure_ascii=False)
 
 
-def _canonical_args(args_json: str) -> str:
+def canonical_args(args_json: str) -> str:
     """
     Канонікалізація JSON-аргументів тулла для дедуплікації викликів.
     """
@@ -532,7 +531,7 @@ def _build_initial_messages(
     return messages
 
 
-def _last_user_message_text(messages: List[Dict[str, Any]]) -> str:
+def last_user_message_text(messages: List[Dict[str, Any]]) -> str:
     """
     Повертає текст останнього user-повідомлення з непорожнім контентом.
     """
@@ -554,7 +553,7 @@ def _last_user_message_text(messages: List[Dict[str, Any]]) -> str:
     return ""
 
 
-def _detect_lang(text: str) -> str:
+def detect_lang(text: str) -> str:
     """
     Дуже проста евристика: якщо є кириличні символи — вважаємо, що це українська.
     Інакше — англійська.
@@ -658,7 +657,7 @@ async def _get_effective_state(
     return session.state.value
 
 
-async def _filter_tools_for_session(
+async def filter_tools_for_session(
     session_id: str,
     messages: List[Dict[str, Any]],
     *,
@@ -676,7 +675,6 @@ async def _filter_tools_for_session(
     allowed = set(ALLOWED_TOOLS_BY_STATE.get(state, []))
 
     # Get all definitions from registry (minified by default)
-    from backend.agent.tools.registry import tool_registry  # pylint: disable=import-outside-toplevel
     all_tools = tool_registry.get_definitions(minified=True)
 
     if not allowed:
@@ -706,7 +704,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
     last_tool_signature: Optional[str] = None
 
     for _ in range(max_iterations):
-        tools = await _filter_tools_for_session(
+        tools = await filter_tools_for_session(
             conv.session_id,
             messages,
             has_category_tool=conv.has_category_tool,
@@ -752,7 +750,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
         if message.tool_calls:
             for tc in message.tool_calls:
                 canon_name = TOOL_CANON_BY_ALIAS.get(tc.function.name, tc.function.name)
-                key = f"{canon_name}:{_canonical_args(tc.function.arguments)}"
+                key = f"{canon_name}:{canonical_args(tc.function.arguments)}"
                 if key not in dedup_calls:
                     dedup_calls[key] = tc
         tool_calls = list(dedup_calls.values()) if dedup_calls else []
@@ -795,7 +793,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                 tool_name = TOOL_CANON_BY_ALIAS.get(tool_name_alias, tool_name_alias)
                 raw_args = tool_call.function.arguments or "{}"
 
-                tool_args = _inject_session_id(
+                tool_args = inject_session_id(
                     raw_args,
                     conv.session_id,
                     tool_name,
@@ -830,7 +828,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                 # Жодних AUTO-BUILD / PREFETCH — бекенд виконує лише явні виклики тулів.
 
             # Обрізаємо історію перед наступною ітерацією tool-loop
-            pruned = _prune_messages(messages)
+            pruned = prune_messages(messages)
             messages = pruned
             conv.messages = pruned
             continue
@@ -840,7 +838,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
     return messages
 
 
-def _prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def prune_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Обрізає історію діалогу для LLM, залишаючи лише необхідний контекст.
     Важливо: зберігаємо лише узгоджені пари assistant tool_calls ↔ tool responses,
@@ -878,8 +876,8 @@ def _strip_orphan_tools(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return filtered
 
 
-def _format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
-    # Повертаємо останнє непорожнє текстове повідомлення асистента.
+def format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
+    """Return the last non-empty assistant text message from the conversation."""
     for m in reversed(messages):
         if m.get("role") != "assistant":
             continue
@@ -932,8 +930,8 @@ def _format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
                 if field:
                     entities.append((field, label, required))
 
-    last_user = _last_user_message_text(messages)
-    lang = _detect_lang(last_user) if last_user else "uk"
+    last_user = last_user_message_text(messages)
+    lang = detect_lang(last_user) if last_user else "uk"
 
     if templates or entities:
         lines: List[str] = []
@@ -1119,8 +1117,6 @@ async def create_session(
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> CreateSessionResponse:
     """Create a new contract session."""
-    from backend.infra.persistence.store import generate_readable_id  # pylint: disable=import-outside-toplevel
-
     # Якщо ID не передано, генеруємо читабельний.
     # За замовчуванням префікс "new", але якщо клієнт знає шаблон,
     # він може передати його як частину логіки (поки що просто new).
@@ -1194,7 +1190,7 @@ def check_session_access(
     expected_roles_count = len(roles) if roles else fallback_count
 
     occupied_roles = len(session.role_owners)
-    is_full = expected_roles_count > 0 and occupied_roles >= expected_roles_count
+    is_full = 0 < expected_roles_count <= occupied_roles
 
     # Enforce participant-only access when explicitly required or when session is already full
     if require_participant or is_full:
@@ -1295,8 +1291,7 @@ async def set_session_filling_mode(
 ) -> Dict[str, Any]:
     """Set filling mode for a session."""
     user_id = _require_user_id(x_user_id, authorization)
-    from backend.api.tool_adapter.tool_router import tool_registry  # pylint: disable=import-outside-toplevel
-    tool = tool_registry.get("set_filling_mode")
+    tool = adapter_tool_registry.get("set_filling_mode")
     if not tool:
         raise HTTPException(status_code=500, detail="Tool not found")
 
@@ -1709,7 +1704,7 @@ async def chat(
 
     # Зберігаємо останню мову користувача для i18n серверних відповідей
     try:
-        conv.last_lang = _detect_lang(req.message)
+        conv.last_lang = detect_lang(req.message)
     except (AttributeError, TypeError):
         conv.last_lang = "uk"
 
@@ -1735,7 +1730,7 @@ async def chat(
 
     # Fallback: якщо користувач просить сформувати договір і всі обов'язкові поля готові,
     # просто повідомляємо, не генеруючи файл (LLM не викликає build_contract).
-    last_user = _last_user_message_text(final_messages)
+    last_user = last_user_message_text(final_messages)
     try:
         session = await aload_session(req.session_id)
     except SessionNotFoundError:
@@ -1762,9 +1757,9 @@ async def chat(
                 )
             return ChatResponse(session_id=req.session_id, reply=reply)
 
-    pruned_messages = _prune_messages(final_messages)
+    pruned_messages = prune_messages(final_messages)
     conv.messages = pruned_messages
-    reply_text = _format_reply_from_messages(pruned_messages)
+    reply_text = format_reply_from_messages(pruned_messages)
 
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
@@ -1864,6 +1859,19 @@ async def get_contract_info(
 
     client_roles = [role for role, uid in session.role_owners.items() if uid == user_id]
 
+    # Отримуємо мітки ролей з метаданих категорії
+    role_labels: Dict[str, str] = {}
+    if session.category_id:
+        category_def = cat_store.get(session.category_id)
+        if category_def:
+            try:
+                meta = load_meta(category_def)
+                role_labels = {
+                    k: v.get("label", k) for k, v in (meta.get("roles") or {}).items()
+                }
+            except (FileNotFoundError, KeyError):
+                pass
+
     return {
         "session_id": session.session_id,
         "category_id": session.category_id,
@@ -1876,6 +1884,7 @@ async def get_contract_info(
         "document_ready": document_ready,
         "document_url": document_url,
         "preview_url": preview_url,
+        "role_labels": role_labels,
     }
 
 

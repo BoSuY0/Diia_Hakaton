@@ -1,3 +1,4 @@
+"""Tests for session TTL-based cleanup."""
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -6,6 +7,7 @@ from backend.domain.sessions.models import SessionState
 
 
 def _write_session(settings, session_id: str, state: SessionState, hours_ago: int):
+    """Helper to write test session file."""
     payload = {
         "session_id": session_id,
         "state": state.value,
@@ -17,18 +19,23 @@ def _write_session(settings, session_id: str, state: SessionState, hours_ago: in
 
 
 def test_clean_stale_sessions_respects_ttl(mock_settings):
-    # Switch cleaner to filesystem backend for the test
+    """Test clean_stale_sessions respects TTL settings."""
     mock_settings.session_backend = "fs"
 
-    # Draft older than draft_ttl_hours -> should be deleted
-    draft_path = _write_session(mock_settings, "stale_draft", SessionState.IDLE, hours_ago=mock_settings.draft_ttl_hours + 1)
+    draft_hours = mock_settings.draft_ttl_hours + 1
+    draft_path = _write_session(
+        mock_settings, "stale_draft", SessionState.IDLE, hours_ago=draft_hours
+    )
 
-    # Completed older than signed_ttl_days -> should be deleted
     completed_hours = (mock_settings.signed_ttl_days * 24) + 10
-    completed_path = _write_session(mock_settings, "stale_completed", SessionState.COMPLETED, hours_ago=completed_hours)
+    completed_path = _write_session(
+        mock_settings, "stale_completed", SessionState.COMPLETED,
+        hours_ago=completed_hours
+    )
 
-    # Recent filled session should stay
-    fresh_path = _write_session(mock_settings, "fresh_filled", SessionState.READY_TO_SIGN, hours_ago=1)
+    fresh_path = _write_session(
+        mock_settings, "fresh_filled", SessionState.READY_TO_SIGN, hours_ago=1
+    )
 
     clean_stale_sessions()
 

@@ -2,7 +2,7 @@
 from backend.agent.tools.registry import ToolRegistry
 
 
-class DummyTool:  # pylint: disable=too-few-public-methods
+class DummyTool:
     """Dummy tool for testing."""
 
     name = "dummy"
@@ -10,13 +10,17 @@ class DummyTool:  # pylint: disable=too-few-public-methods
     description = "desc"
     parameters = {"type": "object", "properties": {}}
 
-    def execute(self, args, context):  # pylint: disable=unused-argument
+    def execute(self, _args, _context):
         """Execute dummy tool."""
         return {}
 
-    def format_result(self, result):  # pylint: disable=unused-argument,no-self-use
+    def format_result(self, _result):
         """Format result."""
         return "{}"
+
+    def get_name(self):
+        """Get tool name."""
+        return self.name
 
 
 def test_tool_registry_definitions_minified():

@@ -10,7 +10,10 @@ from backend.domain.categories.index import (
     load_meta,
     store as category_store,
 )
-from backend.domain.services.fields import get_required_fields, validate_session_readiness
+from backend.domain.services.fields import (
+    get_required_fields,
+    validate_session_readiness,
+)
 from backend.domain.sessions.models import FieldState, Session, SessionState
 from backend.domain.validation.core import infer_value_type, validate_value
 from backend.shared.enums import FillingMode
@@ -70,7 +73,7 @@ def get_effective_person_type(
                     allowed = role_meta.get("allowed_person_types") or []
                     if allowed:
                         fallback_type = allowed[0]
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (KeyError, TypeError, ValueError, AttributeError):
             pass
 
     # Ultimate fallback: first available party_module or "individual"
@@ -82,7 +85,7 @@ def get_effective_person_type(
                 party_modules = meta.get("party_modules") or {}
                 if party_modules:
                     fallback_type = next(iter(party_modules.keys()))
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (KeyError, TypeError, ValueError, AttributeError):
             pass
 
     return fallback_type or "individual"
@@ -200,7 +203,11 @@ def update_session_field(
         # Use centralized heuristic for inferring type from field name
         value_type = infer_value_type(field)
 
-    normalized, error = validate_value(value_type, value)
+    # Для опційних полів з пустим значенням пропускаємо валідацію
+    if not is_required and not raw_value.strip():
+        normalized, error = "", None
+    else:
+        normalized, error = validate_value(value_type, value)
     if error_override:
         error = error_override
         normalized = raw_value
@@ -419,7 +426,7 @@ def claim_session_role(session: Session, role: str, user_id: str) -> None:
     Rules:
     1. Role must exist in the category metadata.
     2. Role must not be occupied by another user.
-    3. A user can own only one role within a session.
+    3. A user can own only one role within a session (unless filling_mode == "full").
     """
     if not role:
         raise ValueError("Role must be specified.")
@@ -442,11 +449,14 @@ def claim_session_role(session: Session, role: str, user_id: str) -> None:
     if role not in roles_meta:
         raise ValueError(f"Role '{role}' does not exist in category '{session.category_id}'.")
 
+    # У режимі "full" один користувач може володіти кількома ролями
+    is_full_mode = getattr(session, "filling_mode", "partial") == "full"
+
     for existing_role, uid in (session.role_owners or {}).items():
         if uid == user_id and existing_role == role:
             # Already owns this role; nothing to change.
             return
-        if uid == user_id and existing_role != role:
+        if uid == user_id and existing_role != role and not is_full_mode:
             logger.warning(
                 "User %s already owns role %s in session %s",
                 user_id, existing_role, session.session_id,

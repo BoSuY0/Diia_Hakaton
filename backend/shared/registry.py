@@ -1,6 +1,8 @@
-from __future__ import annotations
+"""Generic registry for storing and retrieving components by name."""
 
-from typing import Any, Callable, Dict, Generic, Optional, TypeVar
+from __future__ import annotations
+import copy
+from typing import Dict, Generic, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -32,7 +34,6 @@ class Registry(Generic[T]):
         """
         Return all registered components.
         """
-        import copy
         return copy.deepcopy(self._registry)
 
     def clear(self) -> None:
