@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 // Trigger rebuild
 import './App.css';
 import { api, getAuthToken } from './api';
@@ -517,11 +517,16 @@ function App() {
     }
   };
 
-  const debouncedUpsert = useCallback(
-    debounce(async (sid, field, value, role, fieldKey) => {
+  const debouncedUpsertRef = useRef();
+  useMemo(() => {
+    debouncedUpsertRef.current = debounce(async (sid, field, value, role, fieldKey) => {
       await saveFieldValue(sid, field, value, role, fieldKey, { silent: true });
-    }, 1000),
-    [saveFieldValue]
+    }, 1000);
+  }, [saveFieldValue]);
+
+  const debouncedUpsert = useCallback(
+    (...args) => debouncedUpsertRef.current?.(...args),
+    []
   );
 
   const handleChange = (key, fieldName, value, role = null) => {

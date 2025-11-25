@@ -1,7 +1,9 @@
 """Tests for server endpoints."""
+from unittest.mock import patch, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+
 from backend.api.http.server import app
 
 client = TestClient(app)
@@ -83,7 +85,8 @@ def test_chat_with_tool_call(mock_llm_response, mock_system_prompt, mock_categor
     # We can also check if chat_with_tools was called twice
     assert mock_llm_response.call_count == 2
 
-def test_list_categories(mock_categories_data):
+def test_list_categories(mock_categories_data):  # pylint: disable=unused-argument
+    """Test listing categories endpoint."""
     response = client.get("/categories")
     assert response.status_code == 200
     cats = response.json()

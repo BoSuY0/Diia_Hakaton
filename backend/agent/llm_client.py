@@ -1,7 +1,10 @@
+"""LLM client for chat completions with tool support via LiteLLM."""
 from __future__ import annotations
 
 import asyncio
+import atexit
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -19,7 +22,7 @@ try:
     litellm.telemetry = False  # type: ignore[attr-defined]
     litellm.turn_off_message_logging = True  # type: ignore[attr-defined]
     litellm.disable_streaming_logging = True  # type: ignore[attr-defined]
-except Exception:
+except Exception:  # pylint: disable=broad-exception-caught
     pass
 
 
@@ -31,10 +34,15 @@ def _disable_litellm_logging_workers() -> None:
     Additionally, we patch async logging helpers to no-op to bypass
     background logging entirely.
     """
+    # pylint: disable=import-outside-toplevel,broad-exception-caught
     try:
         class _NoopWorker:
-            def ensure_initialized_and_enqueue(self, *args, **kwargs):
-                return None
+            """No-op stub for LiteLLM logging workers."""
+
+            def ensure_initialized_and_enqueue(
+                self, *_args: Any, **_kwargs: Any
+            ) -> None:
+                """No-op method."""
 
         _noop = _NoopWorker()
 
@@ -71,9 +79,10 @@ def _disable_litellm_logging_workers() -> None:
         try:
             import litellm.utils as _u  # type: ignore
 
-            async def _no_async_log(*args, **kwargs):
-                return None
+            async def _no_async_log(*_args: Any, **_kwargs: Any) -> None:
+                """No-op async logging helper."""
 
+            # pylint: disable-next=protected-access
             _u._client_async_logging_helper = _no_async_log  # type: ignore
         except Exception:
             pass
@@ -86,16 +95,14 @@ _disable_litellm_logging_workers()
 # Ensure async HTTP clients are closed on exit to avoid
 # "coroutine ... close_litellm_async_clients was never awaited" warnings.
 try:
-    import atexit
     from litellm import close_litellm_async_clients  # type: ignore
 
     def _close_litellm_clients() -> None:
-        import asyncio
-
+        """Cleanup LiteLLM async clients on exit."""
+        # pylint: disable=broad-exception-caught
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # Run from existing loop and wait briefly
                 fut = asyncio.run_coroutine_threadsafe(
                     close_litellm_async_clients(), loop
                 )
@@ -106,19 +113,19 @@ try:
             else:
                 loop.run_until_complete(close_litellm_async_clients())
         except Exception:
-            # Fallback: new loop for cleanup
             try:
                 asyncio.run(close_litellm_async_clients())
             except Exception:
                 pass
 
     atexit.register(_close_litellm_clients)
-except Exception:
+except Exception:  # pylint: disable=broad-exception-caught
     pass
 
 
 def load_system_prompt() -> str:
-    global _SYSTEM_PROMPT_CACHE
+    """Load and cache the system prompt from file."""
+    global _SYSTEM_PROMPT_CACHE  # pylint: disable=global-statement
     if _SYSTEM_PROMPT_CACHE is None:
         path = Path(__file__).with_name("system_prompt.txt")
         _SYSTEM_PROMPT_CACHE = path.read_text(encoding="utf-8")
@@ -176,7 +183,7 @@ def _filter_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if t_id and t_id in tool_call_ids:
                 valid_messages.append(msg)
             else:
-                logger.warning(f"Dropping orphaned tool response: {t_id}")
+                logger.warning("Dropping orphaned tool response: %s", t_id)
         else:
             valid_messages.append(msg)
     return valid_messages
@@ -189,12 +196,7 @@ async def chat_with_tools_async(
     require_tools: bool = False,
     max_completion_tokens: int = 256,
 ) -> Any:
-    """
-    Asynchronous wrapper over LiteLLM chat with tools.
-    API remains OpenAI-compatible.
-    """
-    import time
-
+    """Asynchronous wrapper over LiteLLM chat with tools."""
     _ensure_api_key()
 
     kwargs: Dict[str, Any] = {}
@@ -202,9 +204,9 @@ async def chat_with_tools_async(
         kwargs["base_url"] = settings.llm_base_url
 
     logger.info(
-        "Calling LLM via LiteLLM with %d messages model=%s tools=%d require_tools=%s max_completion_tokens=%s",
-        len(messages),
+        "Calling LLM model=%s messages=%d tools=%d require=%s max_tokens=%s",
         settings.llm_model,
+        len(messages),
         len(tools),
         require_tools,
         max_completion_tokens,
@@ -245,11 +247,11 @@ async def chat_with_tools_async(
                 prompt_tokens = getattr(usage, "prompt_tokens", None)
                 completion_tokens = getattr(usage, "completion_tokens", None)
                 total_tokens = getattr(usage, "total_tokens", None)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     logger.info(
-        "LLM call done model=%s duration_ms=%.1f prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+        "LLM done model=%s ms=%.1f in=%s out=%s total=%s",
         settings.llm_model,
         duration_ms,
         prompt_tokens,

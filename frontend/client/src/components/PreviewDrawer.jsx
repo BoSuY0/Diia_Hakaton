@@ -35,10 +35,6 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId, userId }) {
         }
     };
 
-    const handleDownload = () => {
-        window.open(api.getDownloadUrl(sessionId, userId), '_blank');
-    };
-
     if (!isOpen) return null;
 
     return (

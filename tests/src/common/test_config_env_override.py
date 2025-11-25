@@ -1,10 +1,9 @@
-import os
-from pathlib import Path
-
+"""Tests for environment variable overrides in settings."""
 from backend.infra.config.settings import Settings
 
 
-def test_env_overrides_base_dir(monkeypatch, tmp_path):
+def test_env_overrides_base_dir(monkeypatch, tmp_path):  # pylint: disable=unused-argument
+    """Test environment overrides base dir."""
     monkeypatch.setenv("LLM_MODEL", "env-model")
     monkeypatch.setenv("LLM_API_KEY", "env-key")
     # Ensure OPENAI_API_KEY absent so we pick LLM_API_KEY
@@ -16,12 +15,14 @@ def test_env_overrides_base_dir(monkeypatch, tmp_path):
 
 
 def test_llm_model_sanitization(monkeypatch):
+    """Test LLM model sanitization."""
     monkeypatch.setenv("LLM_MODEL", "gpt-5-mini-2025-08-7")
     s = Settings()
     assert s.llm_model == "gpt-5-mini-2025-08-07"
 
 
 def test_cors_origins_default(monkeypatch):
+    """Test CORS origins default."""
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     s = Settings()
     assert "*" in s.cors_origins

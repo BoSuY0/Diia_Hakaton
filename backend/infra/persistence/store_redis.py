@@ -1,3 +1,4 @@
+"""Redis-based session persistence with distributed locking."""
 from __future__ import annotations
 
 import json
@@ -5,15 +6,16 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Generator, Any
-
-from backend.infra.config.settings import settings
+from typing import AsyncIterator
 from backend.domain.sessions.ttl import ttl_hours_for_session
 from backend.shared.errors import SessionNotFoundError
 from backend.domain.documents.user_document import save_user_document_async
 from backend.domain.sessions.models import Session
 from backend.infra.persistence.store_utils import _from_dict, session_to_dict
 from backend.infra.storage.redis_client import get_redis
+from backend.shared.logging import get_logger
+
+logger = get_logger(__name__)
 
 SESSION_KEY_PREFIX = "session:"
 USER_INDEX_PREFIX = "user_sessions:"
@@ -35,6 +37,7 @@ def _lock_key(session_id: str) -> str:
 
 
 async def save_session(session: Session) -> None:
+    """Save session to Redis with TTL and update user indexes."""
     redis = await get_redis()
     session.updated_at = datetime.now(timezone.utc)
 
@@ -55,11 +58,12 @@ async def save_session(session: Session) -> None:
 
     try:
         await save_user_document_async(session)
-    except Exception:
-        pass
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to save user document for session %s: %s", session.session_id, exc)
 
 
 async def load_session(session_id: str) -> Session:
+    """Load session from Redis by ID."""
     redis = await get_redis()
     raw = await redis.get(_session_key(session_id))
     if raw is None:
@@ -69,6 +73,7 @@ async def load_session(session_id: str) -> Session:
 
 
 async def get_or_create_session(session_id: str, user_id: str | None = None) -> Session:
+    """Get existing session or create a new one."""
     try:
         return await load_session(session_id)
     except SessionNotFoundError:
@@ -82,13 +87,15 @@ async def transactional_session(
     session_id: str,
     lock_ttl: int = DEFAULT_LOCK_TTL,
     wait_timeout: int = DEFAULT_LOCK_WAIT_TIMEOUT,
-):
+) -> AsyncIterator[Session]:
+    """Async context manager for transactional session access with locking."""
     redis = await get_redis()
     token = str(uuid.uuid4())
-    deadline = asyncio.get_event_loop().time() + wait_timeout
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_timeout
     lock_key = _lock_key(session_id)
 
-    while asyncio.get_event_loop().time() < deadline:
+    while loop.time() < deadline:
         acquired = await redis.set(lock_key, token, nx=True, ex=lock_ttl)
         if acquired:
             break
@@ -105,11 +112,12 @@ async def transactional_session(
             val = await redis.get(lock_key)
             if val == token:
                 await redis.delete(lock_key)
-        except Exception:
-            pass
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass  # Lock cleanup is best-effort
 
 
 async def list_user_sessions(user_id: str) -> list[Session]:
+    """List all sessions for a user, cleaning up stale entries."""
     if not user_id:
         return []
 
@@ -126,7 +134,8 @@ async def list_user_sessions(user_id: str) -> list[Session]:
             stale_ids.append(session_id)
             continue
 
-        if user_id not in (session.role_owners or {}).values() and user_id != session.creator_user_id:
+        role_owners = (session.role_owners or {}).values()
+        if user_id not in role_owners and user_id != session.creator_user_id:
             stale_ids.append(session_id)
             continue
 

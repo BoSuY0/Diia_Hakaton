@@ -1,9 +1,15 @@
+"""Tests for list user sessions."""
 import time
 
-from backend.infra.persistence.store import list_user_sessions, get_or_create_session, save_session
+from backend.infra.persistence.store import (
+    list_user_sessions,
+    get_or_create_session,
+    save_session,
+)
 
 
-def test_list_user_sessions_returns_sorted(mock_settings):
+def test_list_user_sessions_returns_sorted(mock_settings):  # pylint: disable=unused-argument
+    """Test list user sessions returns sorted."""
     s1 = get_or_create_session("s1")
     s1.role_owners = {"lessor": "user1"}
     save_session(s1)
@@ -22,7 +28,8 @@ def test_list_user_sessions_returns_sorted(mock_settings):
     assert ids == ["s2", "s1"]
 
 
-def test_list_user_sessions_includes_creator(mock_settings):
+def test_list_user_sessions_includes_creator(mock_settings):  # pylint: disable=unused-argument
+    """Test list user sessions includes creator."""
     session = get_or_create_session("creator_session")
     session.creator_user_id = "creator"
     session.role_owners = {}

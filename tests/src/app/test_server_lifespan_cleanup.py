@@ -1,14 +1,19 @@
+"""Tests for server lifespan cleanup."""
 import asyncio
 
 import pytest
+
 from backend.api.http.server import lifespan
 
 
 @pytest.mark.asyncio
 async def test_lifespan_skips_cleanup_for_non_fs(monkeypatch, mock_settings):
+    """Test lifespan skips cleanup for non-filesystem backend."""
     called = {"clean_abandoned": False, "clean_stale": False, "shutdown": False}
 
-    async def fake_clean_abandoned(active_ids, grace_period_minutes=5):
+    async def fake_clean_abandoned(
+        active_ids, grace_period_minutes=5  # pylint: disable=unused-argument
+    ):
         called["clean_abandoned"] = True
 
     def fake_clean_stale():

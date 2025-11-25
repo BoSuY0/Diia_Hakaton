@@ -1,11 +1,12 @@
+"""MySQL-based contracts repository implementation."""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import pymysql
-from urllib.parse import urlparse
 
 from backend.domain.sessions.models import Session
 from backend.shared.logging import get_logger
@@ -14,6 +15,8 @@ logger = get_logger(__name__)
 
 
 class MySQLContractsRepository:
+    """MySQL-based contracts repository using PyMySQL."""
+
     def __init__(self, dsn: str) -> None:
         self.params = self._parse_dsn(dsn)
         self._ensure_table()
@@ -60,13 +63,16 @@ class MySQLContractsRepository:
             raise
 
     def create_or_update(self, session: Session, payload: Dict[str, Any]) -> None:
+        """Create or update a contract record in MySQL."""
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO contracts (session_id, owner_user_id, category_id, template_id, state, json_body, created_at, updated_at)
+                    INSERT INTO contracts
+                    (session_id, owner_user_id, category_id, template_id,
+                     state, json_body, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         owner_user_id=VALUES(owner_user_id),
@@ -91,6 +97,7 @@ class MySQLContractsRepository:
             conn.close()
 
     def get_by_session_id(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a contract by session ID from MySQL."""
         conn = self._conn()
         try:
             with conn.cursor() as cur:
@@ -106,11 +113,13 @@ class MySQLContractsRepository:
             conn.close()
 
     def list_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """List all contracts for a user from MySQL."""
         conn = self._conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT session_id, category_id, template_id, state, json_body, updated_at FROM contracts WHERE owner_user_id=%s ORDER BY updated_at DESC",
+                    "SELECT session_id, category_id, template_id, state, json_body, updated_at "
+                    "FROM contracts WHERE owner_user_id=%s ORDER BY updated_at DESC",
                     (user_id,),
                 )
                 rows = cur.fetchall()
@@ -118,7 +127,7 @@ class MySQLContractsRepository:
                 for session_id, category_id, template_id, state, body, updated_at in rows:
                     try:
                         payload_json = json.loads(body)
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError):
                         payload_json = {}
                     result.append(
                         {

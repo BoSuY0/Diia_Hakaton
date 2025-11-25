@@ -1,6 +1,7 @@
 """Hardening tests for contract builder."""
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from backend.domain.documents.builder import build_contract
 from backend.infra.persistence.store import get_or_create_session, save_session
@@ -50,10 +51,16 @@ async def test_build_contract_partial_mode_allows_missing(mock_categories_data, 
     save_session(s)
 
     # Patch VALUES: create dummy template file
-    template_path = tmp_path / "assets" / "documents" / "default_documents_files" / mock_categories_data / "f1.docx"
+    cat_path = mock_categories_data
+    template_path = (
+        tmp_path / "assets" / "documents" / "default_documents_files" / cat_path / "f1.docx"
+    )
     template_path.parent.mkdir(parents=True, exist_ok=True)
     template_path.touch()
-    monkeypatch.setattr("backend.domain.documents.builder.settings.default_documents_root", template_path.parent.parent)
+    monkeypatch.setattr(
+        "backend.domain.documents.builder.settings.default_documents_root",
+        template_path.parent.parent
+    )
 
     # Patch fill_docx_template to avoid docx processing
     with patch("backend.domain.documents.builder.fill_docx_template") as filler:

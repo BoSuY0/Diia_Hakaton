@@ -1,13 +1,16 @@
+"""Tests for validation core fallback."""
 from backend.domain.validation.core import validate_value, validator_registry
 
 
 def test_validator_registry_fallback_trims_value():
+    """Test validator registry fallback trims value."""
     normalized, err = validate_value("unknown_type", "  some value  ")
     assert normalized == "some value"
     assert err is None
 
 
 def test_validator_registry_handles_exception():
+    """Test validator registry handles exception."""
     def bad_validator(val: str) -> str:
         raise ValueError("boom")
 

@@ -1,17 +1,20 @@
+"""Extended tests for session store."""
 import time
 
 from backend.infra.persistence.store import get_or_create_session, save_session, load_session
 from backend.domain.sessions.models import FieldState
 
 
-def test_get_or_create_returns_session(mock_settings):
+def test_get_or_create_returns_session(mock_settings):  # pylint: disable=unused-argument
+    """Test get or create returns session."""
     sid = "store_create"
     s = get_or_create_session(sid)
     loaded = load_session(sid)
     assert loaded.session_id == s.session_id
 
 
-def test_save_session_preserves_field_status(mock_settings):
+def test_save_session_preserves_field_status(mock_settings):  # pylint: disable=unused-argument
+    """Test save session preserves field status."""
     sid = "store_fields"
     s = get_or_create_session(sid)
     s.category_id = "cat"
@@ -22,7 +25,8 @@ def test_save_session_preserves_field_status(mock_settings):
     assert loaded.party_fields["lessor"]["name"].status == "ok"
 
 
-def test_save_session_updates_timestamp(mock_settings):
+def test_save_session_updates_timestamp(mock_settings):  # pylint: disable=unused-argument
+    """Test save session updates timestamp."""
     sid = "store_timestamp"
     s = get_or_create_session(sid)
     first = load_session(sid).updated_at

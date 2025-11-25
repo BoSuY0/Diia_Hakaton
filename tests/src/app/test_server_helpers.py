@@ -4,12 +4,14 @@ import pytest
 from backend.api.http import server
 
 
-def test_detect_lang_uk_en():
+def test_detect_lang_uk_en():  # pylint: disable=protected-access
+    """Test detect language for Ukrainian and English."""
     assert server._detect_lang("Привіт") == "uk"
     assert server._detect_lang("Hello") == "en"
 
 
-def test_last_user_message_text_handles_structured():
+def test_last_user_message_text_handles_structured():  # pylint: disable=protected-access
+    """Test last user message text handles structured content."""
     msgs = [
         {"role": "user", "content": [{"text": "First"}, {"text": ""}]},
         {"role": "assistant", "content": "Reply"},
@@ -18,13 +20,15 @@ def test_last_user_message_text_handles_structured():
     assert server._last_user_message_text(msgs) == "Second"
 
 
-def test_canonical_args_sorts_keys():
+def test_canonical_args_sorts_keys():  # pylint: disable=protected-access
+    """Test canonical args sorts keys."""
     raw = '{"b":1,"a":2}'
     canon = server._canonical_args(raw)
     assert canon == '{"a":2,"b":1}'
 
 
-def test_inject_session_id_adds_and_expands_alias():
+def test_inject_session_id_adds_and_expands_alias():  # pylint: disable=protected-access
+    """Test inject session id adds and expands alias."""
     args = '{"cid": "cat1", "f": "field1"}'
     injected = server._inject_session_id(args, "sess1", "upsert_field")
     data = server.json.loads(injected)
@@ -36,8 +40,11 @@ def test_inject_session_id_adds_and_expands_alias():
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_settings")
-async def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch, mock_categories_data):
+async def test_get_effective_state_uses_saved_when_has_category_tool(
+    monkeypatch, mock_categories_data  # pylint: disable=unused-argument
+):  # pylint: disable=protected-access
     """Test that _get_effective_state uses saved state correctly."""
+    # pylint: disable-next=import-outside-toplevel
     from backend.infra.persistence.store import get_or_create_session, save_session
     s = get_or_create_session("eff_state")
     s.category_id = mock_categories_data
@@ -47,7 +54,8 @@ async def test_get_effective_state_uses_saved_when_has_category_tool(monkeypatch
     assert state == "template_selected"
 
 
-def test_prune_strips_orphan_tools():
+def test_prune_strips_orphan_tools():  # pylint: disable=protected-access
+    """Test prune strips orphan tools."""
     msgs = [
         {"role": "system", "content": "sys"},
         {"role": "assistant", "tool_calls": [{"id": "call1"}]},
@@ -59,7 +67,8 @@ def test_prune_strips_orphan_tools():
     assert roles.count("tool") == 1
 
 
-def test_format_reply_uses_tool_templates():
+def test_format_reply_uses_tool_templates():  # pylint: disable=protected-access
+    """Test format reply uses tool templates."""
     msgs = [
         {"role": "system", "content": "sys"},
         {
@@ -78,7 +87,8 @@ def test_format_reply_uses_tool_templates():
     assert "Доступні шаблони" in text or "Available templates" in text
 
 
-def test_format_reply_uses_tool_entities():
+def test_format_reply_uses_tool_entities():  # pylint: disable=protected-access
+    """Test format reply uses tool entities."""
     msgs = [
         {"role": "system", "content": "sys"},
         {

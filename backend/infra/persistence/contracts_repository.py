@@ -1,3 +1,4 @@
+"""Contracts repository abstraction with SQLite and MySQL backends."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,17 +14,24 @@ logger = get_logger(__name__)
 
 
 class ContractsRepository:
+    """Abstract base class for contracts persistence."""
+
     def create_or_update(self, session: Session, payload: Dict[str, Any]) -> None:
+        """Create or update a contract record."""
         raise NotImplementedError
 
     def get_by_session_id(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a contract by session ID."""
         raise NotImplementedError
 
     def list_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """List all contracts for a user."""
         raise NotImplementedError
 
 
 class SQLiteContractsRepository(ContractsRepository):
+    """SQLite-based contracts repository implementation."""
+
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or (settings.meta_users_documents_root / "contracts.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,7 +72,9 @@ class SQLiteContractsRepository(ContractsRepository):
         )
         conn.execute(
             """
-            INSERT INTO contracts (id, session_id, category_id, template_id, state, owner_user_id, json_payload, created_at, updated_at)
+            INSERT INTO contracts
+            (id, session_id, category_id, template_id, state,
+             owner_user_id, json_payload, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 category_id=excluded.category_id,
@@ -91,13 +101,14 @@ class SQLiteContractsRepository(ContractsRepository):
             return None
         try:
             return json.loads(row[0])
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return None
 
     def list_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         conn = self._conn()
         cur = conn.execute(
-            "SELECT session_id, category_id, template_id, state, json_payload, updated_at FROM contracts WHERE owner_user_id = ?",
+            "SELECT session_id, category_id, template_id, state, json_payload, updated_at "
+            "FROM contracts WHERE owner_user_id = ?",
             (user_id,),
         )
         rows = cur.fetchall()
@@ -106,7 +117,7 @@ class SQLiteContractsRepository(ContractsRepository):
         for session_id, category_id, template_id, state, payload, updated_at in rows:
             try:
                 payload_json = json.loads(payload)
-            except Exception:
+            except (json.JSONDecodeError, TypeError):
                 payload_json = {}
             result.append(
                 {
@@ -125,13 +136,15 @@ _contracts_repo: ContractsRepository | None = None
 
 
 def get_contracts_repo() -> ContractsRepository:
-    global _contracts_repo
+    """Get or create the singleton contracts repository instance."""
+    global _contracts_repo  # pylint: disable=global-statement
     if _contracts_repo is None:
         if settings.contracts_db_url and settings.contracts_db_url.startswith("mysql"):
             try:
+                # pylint: disable-next=import-outside-toplevel
                 from backend.infra.persistence.contracts_mysql import MySQLContractsRepository
                 _contracts_repo = MySQLContractsRepository(settings.contracts_db_url)
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error("Failed to init MySQLContractsRepository, fallback to SQLite: %s", exc)
                 _contracts_repo = SQLiteContractsRepository()
         else:

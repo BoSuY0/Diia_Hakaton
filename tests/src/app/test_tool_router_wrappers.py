@@ -1,7 +1,6 @@
+"""Tests for tool router wrapper functions."""
 import json
-import pytest
 
-import asyncio
 import pytest
 
 from backend.api.tool_adapter import tool_router
@@ -9,29 +8,38 @@ from backend.api.tool_adapter import tool_router
 
 @pytest.mark.asyncio
 async def test_wrapper_tool_find_category():
+    """Test find category wrapper."""
     res = await tool_router.tool_find_category_by_query_async("q")
     assert isinstance(res, dict)
 
 
 @pytest.mark.asyncio
 async def test_wrapper_tool_find_category_async():
+    """Test async find category wrapper."""
     res = await tool_router.tool_find_category_by_query_async("q")
     assert isinstance(res, dict)
 
 
 def test_tool_upsert_field_context_tags():
+    """Test upsert field context tags."""
     called = {}
 
-    class Dummy:
-        def execute(self, args, ctx):
+    class Dummy:  # pylint: disable=too-few-public-methods
+        """Dummy tool for testing."""
+
+        def execute(self, args, ctx):  # pylint: disable=unused-argument
+            """Execute dummy tool."""
             called["ctx"] = ctx
             return {"ok": True}
 
-        def format_result(self, r):
+        def format_result(self, r):  # pylint: disable=no-self-use
+            """Format result."""
             return json.dumps(r)
 
     tool_router.tool_registry.register("upsert_field", Dummy())
-    res = tool_router.tool_upsert_field("s1", "f", "v", tags={"[T]": "val"}, role=None, _context={"user_id": "u"})
+    res = tool_router.tool_upsert_field(
+        "s1", "f", "v", tags={"[T]": "val"}, role=None, _context={"user_id": "u"}
+    )
     assert res["ok"] is True
     ctx = called["ctx"]
     assert ctx["tags"] == {"[T]": "val"}

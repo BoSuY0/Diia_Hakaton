@@ -1,10 +1,16 @@
+"""Tests for transactional session store."""
 import pytest
 
-from backend.infra.persistence.store import atransactional_session, aget_or_create_session, aload_session
+from backend.infra.persistence.store import (
+    atransactional_session,
+    aget_or_create_session,
+    aload_session,
+)
 
 
 @pytest.mark.asyncio
-async def test_transactional_session_saves_changes(mock_settings):
+async def test_transactional_session_saves_changes(mock_settings):  # noqa: ARG001
+    """Test transactional session saves changes."""
     sid = "txn_session"
     await aget_or_create_session(sid)
     async with atransactional_session(sid) as sess:
@@ -14,7 +20,9 @@ async def test_transactional_session_saves_changes(mock_settings):
 
 
 @pytest.mark.asyncio
-async def test_transactional_session_raises_on_missing(mock_settings):
+async def test_transactional_session_raises_on_missing(mock_settings):  # noqa: ARG001
+    """Test transactional session raises on missing."""
+    # pylint: disable-next=import-outside-toplevel
     from backend.shared.errors import SessionNotFoundError
 
     with pytest.raises(SessionNotFoundError):

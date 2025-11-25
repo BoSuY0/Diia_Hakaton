@@ -19,12 +19,14 @@ async def test_filter_tools_respects_state_allowed(monkeypatch, mock_categories_
     # Dummy tool definitions/registry
     tool_defs = [{"function": {"name": "fc"}}, {"function": {"name": "other"}}]
 
-    class DummyTool:
+    class DummyTool:  # pylint: disable=too-few-public-methods
+        """Dummy tool for testing."""
+
         def __init__(self, name, alias):
             self.name = name
             self.alias = alias
 
-    def fake_get_definitions(minified=True):
+    def fake_get_definitions(minified=True):  # pylint: disable=unused-argument
         return tool_defs
 
     def fake_get_by_alias(alias):
@@ -34,8 +36,12 @@ async def test_filter_tools_respects_state_allowed(monkeypatch, mock_categories_
             return DummyTool("unknown", "other")
         return None
 
-    monkeypatch.setattr("backend.api.http.server.tool_registry.get_definitions", fake_get_definitions)
-    monkeypatch.setattr("backend.api.http.server.tool_registry.get_by_alias", fake_get_by_alias)
+    monkeypatch.setattr(
+        "backend.api.http.server.tool_registry.get_definitions", fake_get_definitions
+    )
+    monkeypatch.setattr(
+        "backend.api.http.server.tool_registry.get_by_alias", fake_get_by_alias
+    )
 
     filtered = await server._filter_tools_for_session("state_gate", [], has_category_tool=True)
     names = [t["function"]["name"] for t in filtered]

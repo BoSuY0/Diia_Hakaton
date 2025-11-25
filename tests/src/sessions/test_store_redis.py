@@ -1,3 +1,4 @@
+"""Tests for Redis session store."""
 import json
 import time
 
@@ -5,7 +6,6 @@ import fakeredis
 import pytest
 import pytest_asyncio
 
-from backend.infra.config.settings import settings
 from backend.shared.errors import SessionNotFoundError
 from backend.domain.sessions.models import FieldState
 from backend.infra.persistence.store import (
@@ -20,19 +20,22 @@ from backend.infra.storage import redis_client as redis_client_module
 
 @pytest_asyncio.fixture
 async def redis_backend(mock_settings, monkeypatch):
+    """Create fake Redis backend for testing."""
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_client_module, "_redis", fake)
     monkeypatch.setattr(mock_settings, "session_backend", "redis")
     monkeypatch.setattr(mock_settings, "session_ttl_hours", 24)
     monkeypatch.setattr(mock_settings, "redis_url", "redis://localhost:6379/0")
+    # pylint: disable-next=import-outside-toplevel
     from backend.infra.persistence import store as store_module
-    store_module._redis_disabled = False
+    store_module._redis_disabled = False  # pylint: disable=protected-access
     yield fake
     await fake.flushall()
 
 
 @pytest.mark.asyncio
-async def test_save_and_load_roundtrip(redis_backend):
+async def test_save_and_load_roundtrip(redis_backend):  # pylint: disable=redefined-outer-name
+    """Test save and load roundtrip."""
     session = await aget_or_create_session("redis_roundtrip")
     session.role_owners = {"lessor": "user1"}
     session.party_fields["lessor"] = {"name": FieldState(status="ok")}
@@ -42,17 +45,19 @@ async def test_save_and_load_roundtrip(redis_backend):
     assert loaded.role_owners == {"lessor": "user1"}
     assert loaded.party_fields["lessor"]["name"].status == "ok"
 
+    # pylint: disable-next=import-outside-toplevel
     from backend.domain.sessions.ttl import ttl_hours_for_state
     ttl = await redis_backend.ttl(f"session:{session.session_id}")
     expected_ttl = ttl_hours_for_state(session.state) * 3600
-    assert ttl is not None and ttl > 0 and ttl <= expected_ttl
+    assert ttl is not None and 0 < ttl <= expected_ttl
 
     raw = json.loads(await redis_backend.get(f"session:{session.session_id}"))
     assert raw["party_fields"]["lessor"]["name"]["status"] is True
 
 
 @pytest.mark.asyncio
-async def test_transactional_session_saves_changes(redis_backend):
+async def test_transactional_session_saves_changes(redis_backend):  # noqa: ARG001
+    """Test transactional session saves changes."""
     session = await aget_or_create_session("redis_tx")
 
     async with atransactional_session(session.session_id) as s:
@@ -66,7 +71,8 @@ async def test_transactional_session_saves_changes(redis_backend):
 
 
 @pytest.mark.asyncio
-async def test_list_user_sessions_returns_sorted(redis_backend):
+async def test_list_user_sessions_returns_sorted(redis_backend):  # noqa: ARG001
+    """Test list user sessions returns sorted."""
     s1 = await aget_or_create_session("redis_ls1")
     s1.role_owners = {"lessor": "user-list"}
     await asave_session(s1)
@@ -98,6 +104,7 @@ async def test_list_user_sessions_returns_sorted(redis_backend):
 
 
 @pytest.mark.asyncio
-async def test_load_missing_raises(redis_backend):
+async def test_load_missing_raises(redis_backend):  # pylint: disable=unused-argument
+    """Test load missing raises error."""
     with pytest.raises(SessionNotFoundError):
         await aload_session("does-not-exist")

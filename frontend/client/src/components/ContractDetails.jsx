@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../api';
 
 export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
@@ -10,32 +10,32 @@ export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyError, setHistoryError] = useState(null);
 
-    const load = async () => {
+    const load = useCallback(async () => {
         try {
             setIsLoading(true);
             const res = await api.getContract(sessionId, userId);
             setInfo(res.data);
-        } catch (e) {
-            console.error("Failed to load contract info", e);
+        } catch (err) {
+            console.error("Failed to load contract info", err);
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [sessionId, userId]);
 
-    const loadHistory = async () => {
+    const loadHistory = useCallback(async () => {
         try {
             setHistoryLoading(true);
             setHistoryError(null);
             const data = await api.getHistory(sessionId, userId);
             setHistory(data);
-        } catch (e) {
-            const detail = e?.response?.data?.detail;
-            const msg = typeof detail === 'string' ? detail : detail?.message || e.message || 'Не вдалося отримати історію';
+        } catch (err) {
+            const detail = err?.response?.data?.detail;
+            const msg = typeof detail === 'string' ? detail : detail?.message || err.message || 'Не вдалося отримати історію';
             setHistoryError(msg);
         } finally {
             setHistoryLoading(false);
         }
-    };
+    }, [sessionId, userId]);
 
     useEffect(() => {
         setHistory(null);
@@ -44,18 +44,18 @@ export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
         load();
         const interval = setInterval(load, 5000);
         return () => clearInterval(interval);
-    }, [sessionId]);
+    }, [sessionId, load]);
 
     useEffect(() => {
         if (activeTab === 'history' && !history && !historyLoading) {
             loadHistory();
         }
-    }, [activeTab, history, historyLoading]);
+    }, [activeTab, history, historyLoading, loadHistory]);
 
     const formatTimestamp = (ts) => {
         try {
             return new Date(ts).toLocaleString('uk-UA');
-        } catch (e) {
+        } catch {
             return ts;
         }
     };
@@ -83,6 +83,12 @@ export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
         } finally {
             setIsSigning(false);
         }
+    };
+
+    // Helper function for role label - defined before renderHistory to avoid hoisting issues
+    const labelForRole = (role) => {
+        if (!role) return role;
+        return (info?.role_labels && info.role_labels[role]) || role;
     };
 
     const renderHistory = () => {
@@ -142,11 +148,6 @@ export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
     if (isLoading && !info) return <div>Loading...</div>;
     if (!info) return <div>Failed to load info</div>;
 
-    const labelForRole = (role) => {
-        if (!role) return role;
-        return (info.role_labels && info.role_labels[role]) || role;
-    };
-
     // Determine my role based on server-side mapping (does not expose other users)
     const myRole = info.client_roles && info.client_roles.length > 0 ? info.client_roles[0] : null;
 
@@ -184,7 +185,7 @@ export const ContractDetails = ({ sessionId, userId, onBack, onEdit }) => {
                         <div className="detail-row">
                             <span className="detail-label">Статус</span>
                             <span className={`status-badge ${info.status}`}>
-                                {info.is_signed ? "Підписано" : info.status.replace('_', ' ')}
+                                {info.is_signed ? "Підписано" : (info.status || 'draft').replace('_', ' ')}
                             </span>
                         </div>
 

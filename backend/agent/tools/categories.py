@@ -1,3 +1,4 @@
+"""Category-related tools for the agent."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -41,8 +42,8 @@ class FindCategoryByQueryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "ОБОВ'ЯЗКОВО використовуйте цей інструмент ПЕРШИМ кроком для пошуку категорії договору. "
-            "Він підбирає категорію за запитом користувача."
+            "ОБОВ'ЯЗКОВО використовуйте цей інструмент ПЕРШИМ кроком "
+            "для пошуку категорії договору. Він підбирає категорію за запитом користувача."
         )
 
     @property
@@ -304,7 +305,7 @@ class SetCategoryTool(BaseTool):
         await aget_or_create_session(session_id)
 
         async with atransactional_session(session_id) as session:
-             ok = set_session_category(session, category_id)
+            ok = set_session_category(session, category_id)
 
         if not ok:
             return {

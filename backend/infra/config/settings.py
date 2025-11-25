@@ -1,3 +1,4 @@
+"""Application settings loaded from environment variables."""
 from __future__ import annotations
 
 import os
@@ -14,6 +15,8 @@ load_dotenv(BASE_DIR / ".env")
 
 
 class Settings:
+    """Application configuration container with environment-based settings."""
+
     def __init__(self) -> None:
         self.env: str = os.getenv("ENV", "dev").lower()
         self.is_prod: bool = self.env in {"prod", "production"}
@@ -102,8 +105,11 @@ class Settings:
 
         # Контракти (БД)
         self.contracts_db_url: str | None = os.getenv("CONTRACTS_DB_URL")
-        # Опційний файловий fallback для контрактів (для міграції/бекупів). За замовчуванням вимкнено.
-        self.contracts_fs_fallback: bool = os.getenv("CONTRACTS_FS_FALLBACK", "false").lower() == "true"
+        # Опційний файловий fallback для контрактів (для міграції/бекупів).
+        # За замовчуванням вимкнено.
+        self.contracts_fs_fallback: bool = (
+            os.getenv("CONTRACTS_FS_FALLBACK", "false").lower() == "true"
+        )
 
         # Auth
         self.auth_mode: str = os.getenv("AUTH_MODE", "auto").lower()

@@ -1,7 +1,9 @@
+"""Extended tests for session models."""
 from backend.domain.sessions.models import Session, SessionState
 
 
 def test_is_fully_signed_requires_party_types():
+    """Test is_fully_signed requires party types."""
     s = Session(session_id="s1")
     s.party_types = {"lessor": "individual", "lessee": "individual"}
     s.signatures = {"lessor": True}
@@ -11,6 +13,7 @@ def test_is_fully_signed_requires_party_types():
 
 
 def test_filling_mode_default_and_state_change():
+    """Test filling mode default and state change."""
     s = Session(session_id="s2")
     assert s.filling_mode == "partial"
     s.state = SessionState.READY_TO_BUILD

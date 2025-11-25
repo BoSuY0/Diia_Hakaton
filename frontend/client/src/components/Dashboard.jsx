@@ -35,10 +35,10 @@ export const Dashboard = ({ userId, onSelectSession, onBack }) => {
                             <div className="session-header">
                                 <div>
                                     <div className="session-title">{s.title || "Без назви"}</div>
-                                    <div className="session-id">ID: {s.session_id.substring(0, 8)}</div>
+                                    <div className="session-id">ID: {s.session_id?.substring(0, 8) || 'N/A'}</div>
                                 </div>
                                 <div className={`status-badge ${s.state}`}>
-                                    {s.is_signed ? "Підписано" : s.state.replace('_', ' ')}
+                                    {s.is_signed ? "Підписано" : (s.state || 'draft').replace('_', ' ')}
                                 </div>
                             </div>
                             <div className="session-meta">

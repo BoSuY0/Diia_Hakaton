@@ -44,8 +44,8 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
             </div>
 
             <div className="chat-messages">
-                {messages.map((m, i) => (
-                    <div key={i} className={`chat-message ${m.role}`}>
+                {messages.map((m, idx) => (
+                    <div key={`${m.role}-${idx}-${m.content.slice(0,10)}`} className={`chat-message ${m.role}`}>
                         <div className="message-bubble">
                             {m.content}
                         </div>
@@ -67,7 +67,7 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
                     className="chat-input"
                     value={input}
                     onChange={e => setInput(e.target.value)}
-                    onKeyPress={e => e.key === 'Enter' && handleSend()}
+                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
                     placeholder="Напишіть повідомлення..."
                     disabled={isSending}
                 />
