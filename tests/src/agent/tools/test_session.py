@@ -1,32 +1,35 @@
+"""Tests for session tools."""
 import pytest
+
 from backend.agent.tools.session import (
     SetPartyContextTool,
     UpsertFieldTool,
     GetPartyFieldsForSessionTool,
     GetSessionSummaryTool
 )
-from backend.infra.persistence.store import get_or_create_session, load_session
-from backend.domain.sessions.models import SessionState
+from backend.infra.persistence.store import get_or_create_session, load_session, save_session
+
 
 @pytest.fixture
-def session_with_category(mock_settings, mock_categories_data):
+def session_with_category(mock_settings, mock_categories_data):  # pylint: disable=unused-argument
+    """Create session with category fixture."""
     # mock_categories_data creates "test_cat" with "individual" party module
     session_id = "tool_test_session"
     s = get_or_create_session(session_id)
     s.category_id = "test_cat"
-    from backend.infra.persistence.store import save_session
     save_session(s)
     return session_id
 
 @pytest.mark.asyncio
-async def test_set_party_context(session_with_category):
+async def test_set_party_context(session_with_category):  # pylint: disable=redefined-outer-name
+    """Test set party context."""
     tool = SetPartyContextTool()
     res = await tool.execute({
         "session_id": session_with_category,
         "role": "lessor",
         "person_type": "individual"
     }, {"user_id": "tool_user"})
-    
+
     assert res["ok"] is True
     assert res["role"] == "lessor"
     
@@ -36,7 +39,8 @@ async def test_set_party_context(session_with_category):
     assert s.party_types["lessor"] == "individual"
 
 @pytest.mark.asyncio
-async def test_upsert_field_party(session_with_category):
+async def test_upsert_field_party(session_with_category):  # pylint: disable=redefined-outer-name
+    """Test upsert field party."""
     # First set context
     await SetPartyContextTool().execute({
         "session_id": session_with_category,
@@ -50,16 +54,17 @@ async def test_upsert_field_party(session_with_category):
         "field": "name",
         "value": "John Doe"
     }, {"user_id": "tool_user"})
-    
+
     assert res["ok"] is True
     assert res["status"] == "ok"
-    
+
     s = load_session(session_with_category)
     assert s.party_fields["lessor"]["name"].status == "ok"
     assert s.all_data["lessor.name"]["current"] == "John Doe"
 
 @pytest.mark.asyncio
-async def test_upsert_field_contract(session_with_category):
+async def test_upsert_field_contract(session_with_category):  # noqa: ARG001
+    """Test upsert field contract."""
     # "cf1" is a contract field in mock_categories_data
     await SetPartyContextTool().execute(
         {
@@ -75,15 +80,16 @@ async def test_upsert_field_contract(session_with_category):
         "field": "cf1",
         "value": "Contract Value"
     }, {"user_id": "tool_user"})
-    
+
     assert res["ok"] is True
-    
+
     s = load_session(session_with_category)
     assert s.contract_fields["cf1"].status == "ok"
     assert s.all_data["cf1"]["current"] == "Contract Value"
 
 @pytest.mark.asyncio
-async def test_get_party_fields(session_with_category):
+async def test_get_party_fields(session_with_category):  # pylint: disable=redefined-outer-name
+    """Test get party fields."""
     await SetPartyContextTool().execute({
         "session_id": session_with_category,
         "role": "lessor",
@@ -92,16 +98,17 @@ async def test_get_party_fields(session_with_category):
 
     tool = GetPartyFieldsForSessionTool()
     res = await tool.execute({"session_id": session_with_category}, {})
-    
+
     assert res["ok"] is True
     assert len(res["fields"]) == 1
     assert res["fields"][0]["field"] == "name"
 
 @pytest.mark.asyncio
-async def test_get_session_summary(session_with_category):
+async def test_get_session_summary(session_with_category):  # pylint: disable=redefined-outer-name
+    """Test get session summary."""
     tool = GetSessionSummaryTool()
     res = await tool.execute({"session_id": session_with_category}, {})
-    
+
     assert res["session_id"] == session_with_category
     assert "party_fields" in res
     assert "contract_fields" in res

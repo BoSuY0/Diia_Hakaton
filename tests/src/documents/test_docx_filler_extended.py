@@ -1,11 +1,11 @@
-from pathlib import Path
-
+"""Extended tests for DOCX filler."""
 from docx import Document
 
 from backend.domain.documents.docx_filler import fill_docx_template
 
 
 def test_fill_docx_replaces_placeholders_and_aliases(tmp_path):
+    """Test fill DOCX replaces placeholders and aliases."""
     template = tmp_path / "template.docx"
     doc = Document()
     doc.add_paragraph("Name: {{lessor.name}}")
@@ -35,6 +35,7 @@ def test_fill_docx_replaces_placeholders_and_aliases(tmp_path):
 
 
 def test_fill_docx_keeps_placeholders_in_preview(tmp_path):
+    """Test fill DOCX keeps placeholders in preview."""
     template = tmp_path / "template_preview.docx"
     doc = Document()
     doc.add_paragraph("Empty: {{lessor.rnokpp}}")

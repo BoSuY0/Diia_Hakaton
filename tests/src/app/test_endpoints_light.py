@@ -11,6 +11,7 @@ AUTH_HEADERS = {"X-User-ID": "u1"}
 
 
 def test_healthz_endpoint():
+    """Test healthz endpoint."""
     resp = client.get("/healthz")
     assert resp.status_code == 200
     data = resp.json()
@@ -66,15 +67,21 @@ def test_chat_endpoint_with_mock_llm(monkeypatch):
     """Test chat endpoint with mocked LLM."""
     called = {}
 
-    class Msg:
+    class Msg:  # pylint: disable=too-few-public-methods
+        """Mock message."""
+
         role = "assistant"
         content = "Mock reply"
         tool_calls = None
 
-    class Choice:
+    class Choice:  # pylint: disable=too-few-public-methods
+        """Mock choice."""
+
         message = Msg()
 
-    class Resp:
+    class Resp:  # pylint: disable=too-few-public-methods
+        """Mock response."""
+
         choices = [Choice()]
 
     monkeypatch.setattr("backend.api.http.server.chat_with_tools", lambda *a, **k: Resp())

@@ -183,3 +183,5 @@ export const api = {
     return res.data;
   },
 };
+
+export { getAuthToken };

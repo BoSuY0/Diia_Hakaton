@@ -1,14 +1,16 @@
+"""Extended tests for content manager."""
 import json
-import shutil
 
 from backend.domain.content.manager import ContentManager
 
 
-def test_add_category_creates_index_and_meta(mock_settings, tmp_path):
+def test_add_category_creates_index_and_meta(mock_settings, tmp_path):  # pylint: disable=unused-argument
+    """Test add category creates index and meta."""
     mgr = ContentManager()
     mgr.add_category("cat_new", "Label")
 
-    index = (mock_settings.meta_categories_root / "categories_index.json").read_text(encoding="utf-8")
+    index_path = mock_settings.meta_categories_root / "categories_index.json"
+    index = index_path.read_text(encoding="utf-8")
     data = json.loads(index)
     assert any(c["id"] == "cat_new" for c in data["categories"])
 
@@ -20,17 +22,20 @@ def test_add_category_creates_index_and_meta(mock_settings, tmp_path):
 
 
 def test_add_template_appends_once(mock_settings):
+    """Test add template appends once."""
     mgr = ContentManager()
     mgr.add_category("cat_templ", "Label")
     mgr.add_template("cat_templ", "t1", "Template 1")
     mgr.add_template("cat_templ", "t1", "Template 1 duplicate")  # should not duplicate
 
-    meta = json.loads((mock_settings.meta_categories_root / "cat_templ.json").read_text(encoding="utf-8"))
+    meta_path = mock_settings.meta_categories_root / "cat_templ.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     templates = [t["id"] for t in meta["templates"]]
     assert templates.count("t1") == 1
 
 
 def test_add_field_appends_once_and_backup(mock_settings):
+    """Test add field appends once and backup."""
     mgr = ContentManager()
     mgr.add_category("cat_field", "Label")
     meta_path = mock_settings.meta_categories_root / "cat_field.json"
