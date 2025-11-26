@@ -239,6 +239,12 @@ class SetPartyContextTool(BaseTool):
                 is_full_mode = session.filling_mode == "full"
                 is_creator = session.creator_user_id == user_id
                 
+                # Перевіряємо чи користувач вже володіє іншою роллю
+                user_existing_role = next(
+                    (r for r, uid in (session.role_owners or {}).items() if uid == user_id),
+                    None
+                )
+                
                 if current_owner == user_id:
                     # User already owns this role - just update person_type
                     pass
@@ -249,12 +255,22 @@ class SetPartyContextTool(BaseTool):
                         "error": f"Роль '{role}' вже зайнята іншим користувачем.",
                         "status_code": 403,
                     }
-                elif is_full_mode and is_creator:
-                    # Full mode: creator can set person_type for unclaimed roles without claiming
-                    # This allows filling data for both sides without owning both roles
-                    pass
+                elif user_existing_role and user_existing_role != role:
+                    # В режимі full - творець може редагувати дані інших ролей БЕЗ їх закріплення
+                    # Він вже володіє своєю роллю, а дані для інших - тільки заповнює
+                    if is_full_mode and is_creator:
+                        # Дозволяємо встановити person_type для іншої ролі без закріплення
+                        # Ця роль буде доступна для приєднання іншого користувача
+                        pass
+                    else:
+                        # В режимі partial - користувач не може редагувати інші ролі
+                        return {
+                            "ok": False,
+                            "error": f"Ви вже обрали роль '{user_existing_role}'. В режимі 'partial' можна редагувати лише свою роль.",
+                            "status_code": 403,
+                        }
                 else:
-                    # Need to claim the role
+                    # Need to claim the role - це перша роль користувача
                     try:
                         claim_session_role(session, role, user_id)
                     except PermissionError as exc:

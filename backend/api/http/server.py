@@ -2406,22 +2406,17 @@ async def sign_contract(
 
             signed_roles: List[str] = []
 
-            # В режимі "full" творець заповнює і підписує за всіх
-            # Підписуємо всі ролі, які ще не підписані
-            # Використовуємо required_roles як джерело істини
-            roles_to_sign = session.required_roles if session.required_roles else list(session.party_types.keys())
-            if session.filling_mode == "full" and session.creator_user_id == user_id:
-                for role in roles_to_sign:
-                    if not session.signatures.get(role, False):
-                        session.signatures[role] = True
-                        signed_roles.append(role)
-                logger.info("Full mode: creator %s signed all roles: %s", user_id, signed_roles)
-            elif user_roles:
+            # В обох режимах (full і partial) кожна сторона підписує тільки свою роль.
+            # Режим "full" означає лише те, що творець може ЗАПОВНЮВАТИ дані за всіх,
+            # але ПІДПИСУВАТИ кожна сторона повинна самостійно.
+            if user_roles:
                 for user_role in user_roles:
-                    session.signatures[user_role] = True
-                    signed_roles.append(user_role)
+                    if not session.signatures.get(user_role, False):
+                        session.signatures[user_role] = True
+                        signed_roles.append(user_role)
+                logger.info("User %s signed their roles: %s", user_id, signed_roles)
             else:
-                # Multiple roles або власники інші — вимагаємо прив'язки ролі перед підписом.
+                # Користувач не володіє жодною роллю — вимагаємо прив'язки ролі перед підписом.
                 logger.error(
                     "Cannot determine signer: user_id=%s, party_types=%s, role_owners=%s",
                     user_id,
@@ -2430,7 +2425,7 @@ async def sign_contract(
                 )
                 raise HTTPException(
                     status_code=400,
-                    detail="Set party context (role) before signing."
+                    detail="Ви ще не обрали свою роль у договорі. Приєднайтесь до договору та оберіть роль."
                 )
 
             # Check if fully signed
