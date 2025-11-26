@@ -257,50 +257,100 @@ function App() {
     }
   };
 
-  // SSE for real-time updates
+  // SSE for real-time updates with auto-reconnect
   useEffect(() => {
     if (!sessionId) return;
 
-    const token = getAuthToken();
-    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${userId}${tokenParam}`);
+    let eventSource = null;
+    let reconnectAttempts = 0;
+    let reconnectTimeout = null;
+    let isMounted = true;
+    const maxReconnectAttempts = 10;
+    const baseReconnectDelay = 1000; // 1 second
 
-    eventSource.onopen = () => {
-      setIsOnline(true);
-    };
+    const connect = () => {
+      if (!isMounted) return;
+      
+      const token = getAuthToken();
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      eventSource = new EventSource(`${api.API_URL}/sessions/${sessionId}/stream?user_id=${userId}${tokenParam}`);
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("SSE Event:", data);
+      eventSource.onopen = () => {
+        console.log("SSE connected");
+        setIsOnline(true);
+        reconnectAttempts = 0; // Reset on successful connection
+      };
 
-        if (data.type === 'field_update') {
-          const incomingKey = data.field_key || (data.role ? `${data.role}.${data.field}` : data.field);
-          if (!incomingKey) return;
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("SSE Event:", data);
 
-          // Update form value
-          setFormValues(prev => ({
-            ...prev,
-            [incomingKey]: data.value
-          }));
-        } else if (data.type === 'schema_update') {
-          fetchSchema(sessionId);
+          if (data.type === 'heartbeat') {
+            // Heartbeat - just keep connection alive
+            return;
+          }
+
+          if (data.type === 'connected') {
+            // Initial sync from server - refresh schema to get latest state
+            console.log("SSE initial sync:", data);
+            fetchSchema(sessionId);
+            return;
+          }
+
+          if (data.type === 'field_update') {
+            const incomingKey = data.field_key || (data.role ? `${data.role}.${data.field}` : data.field);
+            if (!incomingKey) return;
+
+            // Update form value
+            setFormValues(prev => ({
+              ...prev,
+              [incomingKey]: data.value
+            }));
+          } else if (data.type === 'schema_update') {
+            fetchSchema(sessionId);
+          } else if (data.type === 'contract_update') {
+            // Contract status changed (signed, ready, etc.)
+            console.log("Contract update:", data);
+            fetchSchema(sessionId); // Refresh to get latest state
+          }
+        } catch (e) {
+          console.error("SSE parse error", e);
         }
-      } catch (e) {
-        console.error("SSE parse error", e);
-      }
+      };
+
+      eventSource.onerror = (e) => {
+        console.error("SSE error", e);
+        setIsOnline(false);
+        
+        // Close current connection
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+
+        // Auto-reconnect with exponential backoff
+        if (isMounted && reconnectAttempts < maxReconnectAttempts) {
+          const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 30000);
+          console.log(`SSE reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+          reconnectAttempts++;
+          reconnectTimeout = setTimeout(connect, delay);
+        } else if (reconnectAttempts >= maxReconnectAttempts) {
+          console.error("SSE max reconnect attempts reached");
+        }
+      };
     };
 
-    eventSource.onerror = (e) => {
-      console.error("SSE error", e);
-      if (eventSource.readyState === EventSource.CLOSED || eventSource.readyState === EventSource.CONNECTING) {
-        if (!navigator.onLine) setIsOnline(false);
-      }
-      eventSource.close();
-    };
+    connect();
 
     return () => {
-      eventSource.close();
+      isMounted = false;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, [sessionId, userId]);
 

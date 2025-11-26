@@ -1555,14 +1555,34 @@ async def stream_session_events(
     queue = await stream_manager.connect(session_id, user_id)
 
     async def event_generator():
+        heartbeat_interval = 30  # seconds
+        heartbeat_msg = 'data: {"type": "heartbeat"}\n\n'
+        
+        # Send initial sync message on connect
+        try:
+            initial_msg = json.dumps({
+                "type": "connected",
+                "session_id": session_id,
+                "user_id": user_id,
+                "state": session.state.value if session else None,
+                "signatures": session.signatures if session else {},
+            })
+            yield f"data: {initial_msg}\n\n"
+        except Exception as e:
+            logger.warning("Failed to send initial sync: %s", e)
+        
         try:
             while True:
-                # Wait for new messages
-                msg = await queue.get()
-                if msg is None:
-                    # Server shutdown signal
-                    break
-                yield msg
+                try:
+                    # Wait for new messages with timeout for heartbeat
+                    msg = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+                    if msg is None:
+                        # Server shutdown signal
+                        break
+                    yield msg
+                except asyncio.TimeoutError:
+                    # No message received - send heartbeat to keep connection alive
+                    yield heartbeat_msg
         except asyncio.CancelledError:
             # Client disconnected or server shutting down
             # We just exit silently
