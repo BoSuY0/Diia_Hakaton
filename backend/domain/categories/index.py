@@ -21,6 +21,7 @@ class Category:
     label: str
     meta_path: Path
     keywords: List[str] = None
+    ai_only: bool = False  # Якщо True - категорія доступна лише через AI, не показується в UI
 
 
 @dataclass
@@ -88,7 +89,8 @@ class CategoryStore:
                 id=raw["id"],
                 label=raw["label"],
                 meta_path=meta_path,
-                keywords=raw.get("keywords", [])
+                keywords=raw.get("keywords", []),
+                ai_only=raw.get("ai_only", False)
             )
 
     @property

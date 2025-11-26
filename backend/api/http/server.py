@@ -1240,10 +1240,13 @@ async def healthz_detailed(
 
 @app.get("/categories")
 async def list_categories() -> List[Dict[str, str]]:
-    """List all available contract categories."""
+    """List all available contract categories (excludes AI-only categories)."""
     categories = []
     for category in cat_store.categories.values():
         if category.id == "custom":
+            continue
+        # Приховуємо категорії, доступні лише через AI
+        if category.ai_only:
             continue
         categories.append({"id": category.id, "label": category.label})
     return categories
