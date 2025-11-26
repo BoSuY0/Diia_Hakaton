@@ -50,14 +50,16 @@ def build_user_document(session: Session) -> Dict[str, Any]:
     # Поля сторін (parties)
     parties: Dict[str, Any] = {}
 
-    # Determine roles dynamically from session or category metadata
-    target_roles = set(session.party_types.keys()) if session.party_types else set()
-    if not target_roles and category_id:
-        # Get roles from category metadata
+    # Determine roles from category metadata and union with roles present in session
+    roles_from_meta: set[str] = set()
+    if category_id:
         category = category_store.get(category_id)
         if category:
             meta = load_meta(category)
-            target_roles = set((meta.get("roles") or {}).keys())
+            roles_from_meta = set((meta.get("roles") or {}).keys())
+
+    session_roles = set((session.party_types or {}).keys())
+    target_roles = roles_from_meta.union(session_roles)
 
     for role_key in target_roles:
         # Logic: If we have data for this role in session.all_data, use it.
