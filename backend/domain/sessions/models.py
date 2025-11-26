@@ -68,16 +68,21 @@ class Session:
     # Підписи сторін: Role -> Signed (True/False)
     signatures: Dict[str, bool] = field(default_factory=dict)
 
+    # Всі ролі, які потребують підпису (встановлюється при виборі категорії)
+    required_roles: List[str] = field(default_factory=list)
+
     # Глобальна історія подій (оновлення полів, підписи)
     history: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_fully_signed(self) -> bool:
         """Check if all parties have signed the document."""
-        # Перевіряємо, чи всі сторони, визначені в party_types, підписали
-        if not self.party_types:
+        # Перевіряємо, чи всі обов'язкові ролі підписали
+        # required_roles - джерело істини, встановлюється при виборі категорії
+        roles_to_check = self.required_roles if self.required_roles else list(self.party_types.keys())
+        if not roles_to_check:
             return False
-        return all(self.signatures.get(role, False) for role in self.party_types)
+        return all(self.signatures.get(role, False) for role in roles_to_check)
 
     # Прогрес заповнення (агреговані лічильники/флаги)
     progress: Dict[str, Any] = field(default_factory=dict)

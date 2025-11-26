@@ -96,6 +96,7 @@ def _from_dict(data: dict) -> Session:
         signatures=data.get("signatures") or {},
         party_types=data.get("party_types") or {},
         filling_mode=data.get("filling_mode", "partial"),
+        required_roles=data.get("required_roles") or [],
     )
     routing = data.get("routing")
     if isinstance(routing, dict):
@@ -147,6 +148,7 @@ def session_to_dict(session: Session) -> dict:
     data["party_types"] = session.party_types
     data["filling_mode"] = session.filling_mode
     data["signatures"] = session.signatures
+    data["required_roles"] = session.required_roles
     data["history"] = session.history
     data["updated_at"] = session.updated_at.isoformat()
     data["state"] = session.state.value

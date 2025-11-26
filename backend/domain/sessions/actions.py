@@ -6,6 +6,7 @@ from typing import Optional
 from backend.shared.logging import get_logger
 from backend.domain.sessions.models import Session, SessionState
 from backend.domain.categories.index import store as category_store, Category
+from backend.domain.categories.meta_utils import load_meta
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,20 @@ def set_session_category(session: Session, category_id: str) -> bool:
     session.signatures.clear()
     session.progress = {}
     session.all_data.clear()  # Clear all_data to avoid stale data from previous category
+
+    # Встановлюємо required_roles з метаданих категорії
+    # Це критично для коректної перевірки is_fully_signed
+    try:
+        meta = load_meta(category)
+        roles = meta.get("roles") or {}
+        session.required_roles = list(roles.keys())
+        logger.info(
+            "set_session_category: required_roles=%s",
+            session.required_roles,
+        )
+    except (FileNotFoundError, KeyError) as e:
+        logger.warning("Failed to load category metadata: %s", e)
+        session.required_roles = []
 
     # session is yielded by context manager, so changes will be saved on exit.
     logger.info(

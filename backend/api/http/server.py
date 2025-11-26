@@ -1302,7 +1302,8 @@ async def join_session(
         ) from exc
 
     # Get available roles (not yet claimed)
-    required_roles = list(session.party_types.keys()) if session.party_types else []
+    # Prefer session.required_roles (set from category metadata)
+    required_roles = session.required_roles if session.required_roles else list(session.party_types.keys())
     available_roles = [
         role for role in required_roles
         if session.role_owners.get(role) is None
@@ -2116,8 +2117,9 @@ def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
         # Compute canonical status
         status_effective = _compute_status_effective(s)
         
-        # Get required roles from party_types (actual roles in this contract)
-        required_roles = list(s.party_types.keys()) if s.party_types else []
+        # Get required roles - prefer session.required_roles (set from category metadata)
+        # Fallback to party_types for backward compatibility
+        required_roles = s.required_roles if s.required_roles else list(s.party_types.keys())
 
         results.append({
             "session_id": s.session_id,
@@ -2220,7 +2222,8 @@ async def get_contract_info(
 
     # Compute canonical status and required roles
     status_effective = _compute_status_effective(session)
-    required_roles = list(session.party_types.keys()) if session.party_types else []
+    # Prefer session.required_roles (set from category metadata)
+    required_roles = session.required_roles if session.required_roles else list(session.party_types.keys())
 
     return {
         "session_id": session.session_id,
@@ -2405,8 +2408,10 @@ async def sign_contract(
 
             # В режимі "full" творець заповнює і підписує за всіх
             # Підписуємо всі ролі, які ще не підписані
+            # Використовуємо required_roles як джерело істини
+            roles_to_sign = session.required_roles if session.required_roles else list(session.party_types.keys())
             if session.filling_mode == "full" and session.creator_user_id == user_id:
-                for role in session.party_types.keys():
+                for role in roles_to_sign:
                     if not session.signatures.get(role, False):
                         session.signatures[role] = True
                         signed_roles.append(role)
