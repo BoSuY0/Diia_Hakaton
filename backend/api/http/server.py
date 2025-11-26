@@ -403,7 +403,7 @@ class SetTemplateRequest(BaseModel):
 class BuildContractRequest(BaseModel):
     """Request model for building a contract."""
 
-    template_id: str
+    template_id: Optional[str] = None
 
 
 class SetPartyContextRequest(BaseModel):
@@ -1761,11 +1761,20 @@ async def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str
     _validate_session_id(session_id)
     # ensure session exists
     try:
-        await aload_session(session_id)
+        session = await aload_session(session_id)
     except SessionNotFoundError as exc_inner:
         raise HTTPException(status_code=404, detail=str(exc_inner)) from exc_inner
+    
+    # Use provided template_id or fall back to session's template_id
+    template_id = req.template_id or session.template_id
+    if not template_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Template ID is required. Please set template_id in request or session."
+        )
+    
     try:
-        return await tool_build_contract_async(session_id=session_id, template_id=req.template_id)
+        return await tool_build_contract_async(session_id=session_id, template_id=template_id)
     except MetaNotFoundError as exc_inner:
         raise HTTPException(status_code=404, detail=str(exc_inner)) from exc_inner
     except ValueError as exc_inner:
@@ -1869,18 +1878,32 @@ async def sync_session(
             # Update party type mapping
             session.party_types[role_id] = party_data.person_type
 
-            # Upsert fields using SERVICE
+            # Upsert fields using SERVICE and collect validation errors
+            field_errors: Dict[str, Dict[str, str]] = {}
             for field_name, value in party_data.fields.items():
-                update_session_field(
+                ok, error, fs = update_session_field(
                     session=session,
                     field=field_name,
                     value=value,
                     role=role_id,
                     context={"user_id": user_id, "source": "api"},
                 )
+                if not ok and error:
+                    if role_id not in field_errors:
+                        field_errors[role_id] = {}
+                    field_errors[role_id][field_name] = error
 
         # 4. Check Readiness using shared schema helper
         from backend.domain.services.fields import get_required_fields  # pylint: disable=import-outside-toplevel
+        
+        # Get labels for better UX
+        role_labels = {r: info.get("label", r) for r, info in defined_roles.items()}
+        party_field_labels: Dict[str, Dict[str, str]] = {}
+        for role_id_check in defined_roles:
+            p_type = session.party_types.get(role_id_check, "individual")
+            p_fields = list_party_fields(session.category_id, p_type)
+            party_field_labels[role_id_check] = {pf.field: pf.label for pf in p_fields}
+        
         required_fields = get_required_fields(session)
         for f in required_fields:
             if f.role:
@@ -1888,8 +1911,18 @@ async def sync_session(
                 fs = role_fields.get(f.field_name)
                 if not fs or fs.status != "ok":
                     is_ready = False
-                    entry = missing_roles.get(f.role) or {"missing_fields": []}
-                    entry["missing_fields"].append(f.field_name)
+                    entry = missing_roles.get(f.role) or {
+                        "missing_fields": [],
+                        "role_label": role_labels.get(f.role, f.role),
+                        "errors": {}
+                    }
+                    # Add field with label
+                    field_label = party_field_labels.get(f.role, {}).get(f.field_name, f.field_name)
+                    entry["missing_fields"].append({
+                        "key": f.field_name,
+                        "label": field_label,
+                        "error": fs.error if fs else None
+                    })
                     missing_roles[f.role] = entry
             else:
                 fs = session.contract_fields.get(f.field_name)
@@ -2277,18 +2310,15 @@ async def download_contract(
         session, user_id, require_participant=True, allow_owner=True
     )
 
-    # Enforce security: strictly forbid downloading if not signed.
-    # The test verify_contract_api expects 403 if not signed.
-    if not session.is_fully_signed and session.state != SessionState.COMPLETED:
-        raise HTTPException(status_code=403, detail="Contract must be signed to download.")
-
+    # For final documents, require full signature and proper state
+    # For draft documents (final=False), allow download without signature for preview/review
     if final:
-        # Ensure session is actually in a final state
+        if not session.is_fully_signed and session.state != SessionState.COMPLETED:
+            raise HTTPException(status_code=403, detail="Contract must be signed to download final version.")
         if session.state not in [SessionState.READY_TO_SIGN, SessionState.COMPLETED]:
             raise HTTPException(
                 status_code=409, detail="Document has been modified. Please order again."
             )
-
         filename = f"contract_{session_id}.docx"
         path = settings.filled_documents_root / filename
         if not path.exists():
