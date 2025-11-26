@@ -5,8 +5,7 @@ from typing import Optional
 
 from backend.shared.logging import get_logger
 from backend.domain.sessions.models import Session, SessionState
-from backend.domain.categories.index import store as category_store, Category
-from backend.domain.categories.meta_utils import load_meta
+from backend.domain.categories.index import store as category_store, Category, load_meta
 
 logger = get_logger(__name__)
 
