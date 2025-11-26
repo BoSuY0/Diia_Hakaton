@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from typing import TYPE_CHECKING
 
@@ -85,10 +85,21 @@ class FieldSchema:
     ai_required: bool = False
     type: str = "text"
 
-def get_required_fields(session: Session) -> List[FieldSchema]:
+def get_required_fields(
+    session: Session,
+    scope: Literal["self", "all"] = "self"
+) -> List[FieldSchema]:
     """
     Returns a list of all required fields for the current session state,
     considering category, roles, and person types.
+    
+    Args:
+        session: The session object.
+        scope: "self" - only current user's role fields (respects filling_mode).
+               "all" - all roles' fields (ignores filling_mode, for order validation).
+    
+    Returns:
+        List of required FieldSchema objects.
     """
     if not session.category_id:
         return []
@@ -123,13 +134,13 @@ def get_required_fields(session: Session) -> List[FieldSchema]:
         roles = {}
         modules = {}
 
-    # Filter roles if filling_mode is partial
+    # Determine target roles based on scope
     target_roles = list(roles.keys())
-    if session.filling_mode == "partial" and session.role:
-        # In partial mode, we only require fields for the CURRENT role.
-        # Unless the role is not in the category (which shouldn't happen if validated).
+    if scope == "self" and session.filling_mode == "partial" and session.role:
+        # In partial mode with scope="self", only require fields for the CURRENT role.
         if session.role in roles:
             target_roles = [session.role]
+    # For scope="all", always include ALL roles regardless of filling_mode
 
     for role_key in target_roles:
         party_fields_list = get_party_fields_for_role(session, role_key, roles, modules)
@@ -173,10 +184,13 @@ def validate_session_readiness(session: Session) -> bool:
     return True
 
 
-def collect_missing_fields(session: Session) -> Dict[str, Any]:
+def _check_fields_ready(
+    session: Session,
+    required_fields: List[FieldSchema]
+) -> tuple[bool, List[Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, str]]:
     """
-    Returns a structured list of missing required fields grouped by contract/roles.
-    Used for surfacing precise validation errors to the UI.
+    Helper to check which required fields are missing.
+    Returns (is_ready, missing_contract, missing_roles, role_labels).
     """
     missing_contract: List[Dict[str, Any]] = []
     missing_roles: Dict[str, Dict[str, Any]] = {}
@@ -190,8 +204,7 @@ def collect_missing_fields(session: Session) -> Dict[str, Any]:
                 k: v.get("label", k) for k, v in (meta.get("roles") or {}).items()
             }
 
-    required = get_required_fields(session)
-    for r in required:
+    for r in required_fields:
         needs = r.required or r.ai_required
         if not needs:
             continue
@@ -224,8 +237,49 @@ def collect_missing_fields(session: Session) -> Dict[str, Any]:
         v["missing_fields"] for v in missing_roles.values()
     )
 
+    return is_ready, missing_contract, missing_roles, role_labels
+
+
+def collect_missing_fields(
+    session: Session,
+    scope: Literal["self", "all"] = "self"
+) -> Dict[str, Any]:
+    """
+    Returns a structured list of missing required fields grouped by contract/roles.
+    Used for surfacing precise validation errors to the UI.
+    
+    Args:
+        session: The session object.
+        scope: "self" - check only current user's role (for UI display).
+               "all" - check all roles (for order validation).
+    
+    Returns:
+        Dict with is_ready, is_ready_self, is_ready_all, contract, roles.
+    """
+    # Get missing fields for the requested scope
+    required = get_required_fields(session, scope=scope)
+    is_ready, missing_contract, missing_roles, _ = _check_fields_ready(
+        session, required
+    )
+
+    # Always compute both is_ready_self and is_ready_all for client convenience
+    required_self = get_required_fields(session, scope="self")
+    is_ready_self, _, _, _ = _check_fields_ready(session, required_self)
+
+    required_all = get_required_fields(session, scope="all")
+    is_ready_all, missing_contract_all, missing_roles_all, _ = _check_fields_ready(
+        session, required_all
+    )
+
     return {
-        "is_ready": is_ready,
+        "is_ready": is_ready,  # Backward compatible - based on requested scope
+        "is_ready_self": is_ready_self,  # Current user's fields ready
+        "is_ready_all": is_ready_all,  # All parties' fields ready
         "contract": missing_contract,
         "roles": missing_roles,
+        # Include all missing for order validation context
+        "missing_all": {
+            "contract": missing_contract_all,
+            "roles": missing_roles_all,
+        } if scope == "all" else None,
     }

@@ -110,13 +110,45 @@ class CategoryStore:
 store = CategoryStore()
 
 
-def load_meta(category: Category) -> dict:
+# In-memory cache for category metadata (keyed by category_id)
+_meta_cache: Dict[str, dict] = {}
+
+
+def load_meta(category: Category, use_cache: bool = True) -> dict:
     """
     Публічний хелпер для читання meta JSON категорії.
     Використовуйте його замість приватного _load_meta.
+    
+    Args:
+        category: Category object.
+        use_cache: If True (default), use in-memory cache. Set to False to force reload.
+    
+    Returns:
+        Parsed JSON metadata dictionary.
     """
+    if use_cache and category.id in _meta_cache:
+        return _meta_cache[category.id]
+    
     with category.meta_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    
+    if use_cache:
+        _meta_cache[category.id] = data
+    
+    return data
+
+
+def clear_meta_cache(category_id: Optional[str] = None) -> None:
+    """Clear metadata cache.
+    
+    Args:
+        category_id: If provided, clears only that category's cache.
+                    If None, clears entire cache.
+    """
+    if category_id:
+        _meta_cache.pop(category_id, None)
+    else:
+        _meta_cache.clear()
 
 # Зворотна сумісність (не рекомендується використовувати напряму)
 _load_meta = load_meta

@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, validator
+from pydantic import BaseModel
 
 from backend.agent.llm_client import chat_with_tools_async, load_system_prompt
 from backend.api.http.state import Conversation, conversation_store
@@ -277,7 +277,10 @@ def _validate_session_id(session_id: str) -> None:
     if not session_id or not _SESSION_ID_PATTERN.match(session_id):
         raise HTTPException(
             status_code=400,
-            detail="Invalid session_id format. Must be 3-64 alphanumeric characters, hyphens, or underscores."
+            detail=(
+                "Invalid session_id format. Must be 3-64 alphanumeric characters, "
+                "hyphens, or underscores."
+            ),
         )
 
 
@@ -286,11 +289,7 @@ class ChatRequest(BaseModel):
 
     session_id: str
     message: str
-
-    @validator("session_id")
-    def validate_session_id(cls, value: str) -> str:  # noqa: D417
-        _validate_session_id(value)
-        return value
+    reset: bool = False  # If True, clears conversation history before processing
 
 
 class ChatResponse(BaseModel):
@@ -324,11 +323,27 @@ class CreateSessionRequest(BaseModel):
     role: Optional[str] = None
     person_type: Optional[str] = None
 
-    @validator("session_id")
-    def validate_session_id(cls, value: Optional[str]) -> Optional[str]:  # noqa: D417
-        if value:
-            _validate_session_id(value)
-        return value
+
+class JoinSessionRequest(BaseModel):
+    """Request model for joining an existing session via deep-link."""
+
+    session_id: str
+    role: Optional[str] = None  # Optional role to claim
+    person_type: Optional[str] = None  # Person type for the role
+
+
+class JoinSessionResponse(BaseModel):
+    """Response model for join session endpoint."""
+
+    session_id: str
+    category_id: Optional[str] = None
+    template_id: Optional[str] = None
+    state: str
+    status_effective: str
+    is_signed: bool
+    role_claimed: Optional[str] = None
+    required_roles: List[str] = []
+    available_roles: List[str] = []  # Roles not yet claimed
 
 
 @app.get("/metrics")
@@ -376,6 +391,7 @@ class UpsertFieldRequest(BaseModel):
     field: str
     value: Any
     role: Optional[str] = None
+    lightweight: bool = False  # If True, skip full readiness validation for faster response
 
 
 class SetTemplateRequest(BaseModel):
@@ -1249,6 +1265,92 @@ async def create_session(
     return CreateSessionResponse(session_id=session.session_id)
 
 
+@app.post("/sessions/join", response_model=JoinSessionResponse)
+async def join_session(
+    req: JoinSessionRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> JoinSessionResponse:
+    """Join an existing session via deep-link.
+
+    Unlike POST /sessions which can create new sessions, this endpoint:
+    - Only works with existing sessions (returns 404 if not found)
+    - Does NOT modify creator_user_id, category_id, template_id
+    - Optionally claims a role for the joining user
+    - Returns current session state for UI display
+
+    Used for deep-link scenarios where user joins via shared link.
+    """
+    _validate_session_id(req.session_id)
+
+    user_id = resolve_user_id(x_user_id, authorization, allow_anonymous=False)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required to join session")
+    
+    # Session MUST exist - this is join, not create
+    try:
+        session = await aload_session(req.session_id)
+    except SessionNotFoundError as exc:
+        logger.warning(
+            "join_session: session not found session_id=%s user_id=%s",
+            req.session_id,
+            user_id,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail="Договір не знайдено. Можливо, посилання застаріле або недійсне.",
+        ) from exc
+
+    # Get available roles (not yet claimed)
+    required_roles = list(session.party_types.keys()) if session.party_types else []
+    available_roles = [
+        role for role in required_roles
+        if session.role_owners.get(role) is None
+    ]
+
+    role_claimed = None
+
+    # If user wants to claim a role
+    if req.role and req.person_type:
+        # Check if role is available
+        if req.role in session.role_owners and session.role_owners[req.role] != user_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Роль '{req.role}' вже зайнята іншим користувачем."
+            )
+
+        # Claim the role
+        result = await tool_set_party_context_async(
+            session_id=session.session_id,
+            role=req.role,
+            person_type=req.person_type,
+            _context={"user_id": user_id},
+        )
+        if result.get("ok", False):
+            role_claimed = req.role
+            # Refresh session after update
+            session = await aload_session(req.session_id)
+            available_roles = [
+                role for role in required_roles
+                if session.role_owners.get(role) is None
+            ]
+
+    # Compute canonical status
+    status_effective = _compute_status_effective(session)
+
+    return JoinSessionResponse(
+        session_id=session.session_id,
+        category_id=session.category_id,
+        template_id=session.template_id,
+        state=session.state.value,
+        status_effective=status_effective,
+        is_signed=session.is_fully_signed,
+        role_claimed=role_claimed,
+        required_roles=required_roles,
+        available_roles=available_roles,
+    )
+
+
 def check_session_access(
     session: Session,
     user_id: Optional[str],
@@ -1488,8 +1590,9 @@ class StreamManager:
                     continue
                 # Use put_nowait to avoid blocking if queue is full
                 queue.put_nowait(msg)
-            except Exception:  # pylint: disable=broad-exception-caught
-                if queue:
+            except (asyncio.QueueFull, RuntimeError) as exc:
+                logger.warning("Stream broadcast error for %s: %s", session_id, exc)
+                if queue is not None:
                     to_remove.append(queue)
 
         for queue in to_remove:
@@ -1568,8 +1671,8 @@ async def stream_session_events(
                 "signatures": session.signatures if session else {},
             })
             yield f"data: {initial_msg}\n\n"
-        except Exception as e:
-            logger.warning("Failed to send initial sync: %s", e)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to send initial sync: %s", exc)
         
         try:
             while True:
@@ -1617,7 +1720,7 @@ async def upsert_session_field(
         value=req.value,
         tags=None,
         role=req.role,
-        _context={"user_id": user_id}
+        _context={"user_id": user_id, "lightweight": req.lightweight}
     )
 
     if result.get("ok", False):
@@ -1852,6 +1955,12 @@ async def chat(
     PII-санітайзер: реальні значення (IBAN, картки, коди тощо) замінюються
     на типізовані теги [TYPE#N]. LLM працює лише з тегами, а не з PII.
     """
+    _validate_session_id(req.session_id)
+    # Handle reset request - clear conversation history before processing
+    if req.reset:
+        conversation_store.reset(req.session_id)
+        logger.info("Chat reset requested for session_id=%s", req.session_id)
+    
     conv = conversation_store.get(req.session_id)
     user_id = resolve_user_id(x_user_id, authorization, allow_anonymous=True)
     if user_id:
@@ -1926,6 +2035,17 @@ async def chat(
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
 
+def _compute_status_effective(session: Session) -> str:
+    """Compute canonical status for client consumption.
+    
+    This provides a single source of truth for contract status,
+    so clients don't need to derive it from multiple fields.
+    """
+    if session.is_fully_signed:
+        return "completed"
+    return session.state.value
+
+
 def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
     """Format session list for API response (DRY helper)."""
     results = []
@@ -1941,13 +2061,22 @@ def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
             except (KeyError, ValueError, AttributeError):
                 pass
 
+        # Compute canonical status
+        status_effective = _compute_status_effective(s)
+        
+        # Get required roles from party_types (actual roles in this contract)
+        required_roles = list(s.party_types.keys()) if s.party_types else []
+
         results.append({
             "session_id": s.session_id,
             "template_id": s.template_id,
             "title": title,
             "updated_at": s.updated_at,
             "state": s.state.value,
-            "is_signed": s.is_fully_signed
+            "status_effective": status_effective,  # Canonical status for UI
+            "is_signed": s.is_fully_signed,
+            "required_roles": required_roles,  # Roles actually in this contract
+            "signatures": s.signatures,  # Per-role signature status
         })
     return results
 
@@ -2037,13 +2166,19 @@ async def get_contract_info(
             except (FileNotFoundError, KeyError):
                 pass
 
+    # Compute canonical status and required roles
+    status_effective = _compute_status_effective(session)
+    required_roles = list(session.party_types.keys()) if session.party_types else []
+
     return {
         "session_id": session.session_id,
         "category_id": session.category_id,
         "template_id": session.template_id,
         "status": session.state.value,
+        "status_effective": status_effective,  # Canonical status for UI
         "is_signed": session.is_fully_signed,
         "signatures": session.signatures,
+        "required_roles": required_roles,  # Roles actually in this contract
         "client_roles": client_roles,
         "can_build_contract": session.can_build_contract,
         "document_ready": document_ready,
@@ -2476,6 +2611,8 @@ async def get_session_requirements(
         "session_id": session.session_id,
         "state": session.state.value,
         "can_build_contract": session.can_build_contract,
+        "is_ready_self": missing.get("is_ready_self", False),
+        "is_ready_all": missing.get("is_ready_all", False),
         "missing": missing,
     }
 
@@ -2530,13 +2667,21 @@ async def order_contract(
     if not session.template_id:
         raise HTTPException(status_code=400, detail="Template not selected")
 
-    missing = collect_missing_fields(session)
-    if not missing.get("is_ready", False):
+    # Use scope="all" to check ALL parties' fields, not just current user's
+    missing = collect_missing_fields(session, scope="all")
+    if not missing.get("is_ready_all", False):
+        # Provide clear message about which parties haven't filled their data
+        if missing.get("is_ready_self", False):
+            message = "Ваша частина заповнена, але інші сторони ще не заповнили свої дані."
+        else:
+            message = "Не всі обов'язкові поля заповнені."
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Не всі обов'язкові поля заповнені.",
+                "message": message,
                 "missing": missing,
+                "is_ready_self": missing.get("is_ready_self", False),
+                "is_ready_all": missing.get("is_ready_all", False),
             },
         )
 

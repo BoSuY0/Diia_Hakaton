@@ -98,6 +98,7 @@ def update_session_field(
     role: Optional[str] = None,
     tags: Optional[Dict[str, str]] = None,
     context: Optional[Dict[str, Any]] = None,
+    lightweight: bool = False,
 ) -> Tuple[bool, Optional[str], FieldState]:
     """Update a field in the session with validation and state recalculation.
 
@@ -108,11 +109,16 @@ def update_session_field(
         role: Optional role override. If None, uses session.role.
         tags: Optional PII tags for history tracking.
         context: Optional context (user_id, source, etc.) for audit logging.
+        lightweight: If True, skip full readiness validation and progress update
+                    for faster response. Use for interactive editing.
 
     Returns:
         Tuple[success, error_message, field_state]
     """
     ctx = context or {}
+    # Extract lightweight from context if not passed directly
+    if not lightweight:
+        lightweight = ctx.get("lightweight", False)
     raw_value = "" if value is None else str(value)
 
     # Block any edits once the contract is fully signed (immutability after completion)
@@ -278,16 +284,17 @@ def update_session_field(
     # So 'key' variable above is correct.
     session.all_data = all_data
 
-    # 5. Recalculate Session State
-    is_ready = validate_session_readiness(session)
-    session.can_build_contract = is_ready
-    if is_ready:
-        session.state = SessionState.READY_TO_BUILD
-    else:
-        session.state = SessionState.COLLECTING_FIELDS
+    # 5. Recalculate Session State (skip in lightweight mode for faster response)
+    if not lightweight:
+        is_ready = validate_session_readiness(session)
+        session.can_build_contract = is_ready
+        if is_ready:
+            session.state = SessionState.READY_TO_BUILD
+        else:
+            session.state = SessionState.COLLECTING_FIELDS
 
-    # 6. Update Progress
-    _update_progress(session)
+        # 6. Update Progress
+        _update_progress(session)
 
     # 7. Invalidate Signatures of OTHER parties
     if ok:

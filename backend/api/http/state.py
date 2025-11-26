@@ -42,5 +42,13 @@ class ConversationStore:
         """Remove a conversation from the store."""
         self._store.pop(session_id, None)
 
+    def reset(self, session_id: str) -> None:
+        """Reset conversation history for the given session ID.
+        
+        Creates a new empty Conversation, effectively starting a fresh chat
+        while keeping the same session_id binding.
+        """
+        self._store[session_id] = Conversation(session_id=session_id)
+
 
 conversation_store = ConversationStore()
