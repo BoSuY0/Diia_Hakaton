@@ -1023,6 +1023,161 @@ def format_reply_from_messages(messages: List[Dict[str, Any]]) -> str:
     return _t("fallback_next_step", lang)
 
 
+@app.get("/contract/{session_id}")
+async def contract_deeplink_redirect(session_id: str, request: Request) -> HTMLResponse:
+    """
+    Deep-link redirect page for contract sharing.
+    When opened in browser, shows a page that redirects to the mobile app.
+    """
+    # Android package name for hackathon build
+    android_package = "ua.gov.diia.opensource.hackathon"
+    # iOS app store URL (placeholder)
+    ios_app_store = "https://apps.apple.com/app/diia"
+    # Play Store URL
+    play_store = f"https://play.google.com/store/apps/details?id={android_package}"
+    
+    # Intent URL for Android (bypasses browser, opens app directly)
+    intent_url = f"intent://contract/{session_id}#Intent;scheme=diia-contracts;package={android_package};end"
+    
+    # Custom scheme fallback
+    custom_scheme_url = f"diia-contracts://contract/{session_id}"
+    
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Відкрити договір у Дії</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .container {{
+            background: white;
+            border-radius: 24px;
+            padding: 40px 32px;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }}
+        .logo {{
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4a 100%);
+            border-radius: 20px;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }}
+        h1 {{
+            color: #1a1a2e;
+            font-size: 24px;
+            margin-bottom: 12px;
+        }}
+        p {{
+            color: #666;
+            font-size: 16px;
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }}
+        .btn {{
+            display: block;
+            width: 100%;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            margin-bottom: 12px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        .btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }}
+        .btn-primary {{
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4a 100%);
+            color: #1a1a2e;
+        }}
+        .btn-secondary {{
+            background: #f5f5f5;
+            color: #1a1a2e;
+        }}
+        .session-id {{
+            font-size: 12px;
+            color: #999;
+            margin-top: 24px;
+            word-break: break-all;
+        }}
+        .loading {{
+            display: none;
+            margin-top: 20px;
+        }}
+        .spinner {{
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f5f5f5;
+            border-top-color: #ffd700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📄</div>
+        <h1>Договір в Дії</h1>
+        <p>Вас запросили переглянути або підписати договір. Відкрийте його в додатку Дія.</p>
+        
+        <a href="{intent_url}" class="btn btn-primary" id="openApp" onclick="showLoading()">
+            Відкрити в додатку
+        </a>
+        
+        <a href="{play_store}" class="btn btn-secondary">
+            Завантажити з Play Store
+        </a>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="color: #666; font-size: 14px;">Відкриваємо додаток...</p>
+        </div>
+        
+        <div class="session-id">ID: {session_id}</div>
+    </div>
+    
+    <script>
+        function showLoading() {{
+            document.getElementById('loading').style.display = 'block';
+            // Fallback: якщо додаток не відкрився через 2 секунди, показуємо кнопки знову
+            setTimeout(function() {{
+                document.getElementById('loading').style.display = 'none';
+            }}, 2000);
+        }}
+        
+        // Автоматична спроба відкрити додаток
+        setTimeout(function() {{
+            window.location.href = "{custom_scheme_url}";
+        }}, 500);
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html_content, status_code=200)
+
+
 @app.get("/healthz")
 async def healthz() -> Dict[str, str]:
     """
