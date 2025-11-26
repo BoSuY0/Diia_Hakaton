@@ -1772,7 +1772,21 @@ async def build_contract(session_id: str, req: BuildContractRequest) -> Dict[str
             status_code=400,
             detail="Template ID is required. Please set template_id in request or session."
         )
-    
+
+    # Якщо в запиті передали template_id, але в сесії його немає/інший — зафіксуємо його,
+    # щоб подальші кроки (status/preview/sign) мали правильний шаблон.
+    if session.template_id != template_id:
+        if not session.category_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Category must be set before selecting template."
+            )
+        result = await tool_set_template_async(session_id=session_id, template_id=template_id)
+        if not result.get("ok", False):
+            raise HTTPException(status_code=400, detail=result.get("error", "Failed to set template"))
+        # оновимо сесію в пам'яті, щоб builder бачив актуальний template_id
+        session = await aload_session(session_id)
+
     try:
         return await tool_build_contract_async(session_id=session_id, template_id=template_id)
     except MetaNotFoundError as exc_inner:

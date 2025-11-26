@@ -165,6 +165,10 @@ def validate_session_readiness(session: Session) -> bool:
     """
     Checks if all required fields in the session are filled and valid.
     """
+    # Template is a hard prerequisite: без нього договір не може вважатися готовим
+    if not session.template_id:
+        return False
+
     required = get_required_fields(session)
     for r in required:
         needs = r.required or r.ai_required
@@ -270,6 +274,22 @@ def collect_missing_fields(
     is_ready_all, missing_contract_all, missing_roles_all, _ = _check_fields_ready(
         session, required_all
     )
+
+    # Якщо немає template_id — вважаємо, що нічого не готово, і додаємо в missing
+    template_missing_entry = None
+    if not session.template_id:
+        template_missing_entry = {
+            "field": "template_id",
+            "key": "template_id",
+            "label": "Шаблон договору",
+        }
+
+    if template_missing_entry:
+        missing_contract = [template_missing_entry] + missing_contract
+        missing_contract_all = [template_missing_entry] + missing_contract_all
+        is_ready = False
+        is_ready_self = False
+        is_ready_all = False
 
     # Detailed per-role structure (role -> {role, role_label, missing_fields:[...]})
     roles_detailed = missing_roles
