@@ -164,12 +164,17 @@ def get_required_fields(
 def validate_session_readiness(session: Session) -> bool:
     """
     Checks if all required fields in the session are filled and valid.
+    
+    Uses scope="all" to ensure ALL roles have their required fields filled,
+    regardless of filling_mode. This is critical for contract completeness.
     """
     # Template is a hard prerequisite: без нього договір не може вважатися готовим
     if not session.template_id:
         return False
 
-    required = get_required_fields(session)
+    # ВАЖЛИВО: використовуємо scope="all" для перевірки ВСІХ ролей,
+    # бо документ може бути зібраний лише коли ВСІ сторони заповнили дані
+    required = get_required_fields(session, scope="all")
     for r in required:
         needs = r.required or r.ai_required
         if not needs:

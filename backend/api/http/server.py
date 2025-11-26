@@ -2005,10 +2005,10 @@ async def chat(
     _validate_session_id(req.session_id)
     # Handle reset request - clear conversation history before processing
     if req.reset:
-        conversation_store.reset(req.session_id)
+        await conversation_store.areset(req.session_id)
         logger.info("Chat reset requested for session_id=%s", req.session_id)
     
-    conv = conversation_store.get(req.session_id)
+    conv = await conversation_store.aget(req.session_id)
     user_id = resolve_user_id(x_user_id, authorization, allow_anonymous=True)
     if user_id:
         conv.user_id = user_id
@@ -2073,11 +2073,16 @@ async def chat(
                     "Договір сформовано.\n"
                     "Перейдіть на сторінку \"Усі договори\", щоб переглянути або продовжити."
                 )
+            # Persist conversation before early return
+            await conversation_store.asave(conv)
             return ChatResponse(session_id=req.session_id, reply=reply)
 
     pruned_messages = prune_messages(final_messages)
     conv.messages = pruned_messages
     reply_text = format_reply_from_messages(pruned_messages)
+
+    # Persist conversation to Redis (if available)
+    await conversation_store.asave(conv)
 
     return ChatResponse(session_id=req.session_id, reply=reply_text)
 
@@ -2394,16 +2399,24 @@ async def sign_contract(
 
             # Identify role
             user_roles = [r for r, uid in (session.role_owners or {}).items() if uid == user_id]
-            logger.info("Roles for signer %s: %s", user_id, user_roles)
+            logger.info("Roles for signer %s: %s, filling_mode=%s", user_id, user_roles, session.filling_mode)
 
             signed_roles: List[str] = []
 
-            if user_roles:
+            # В режимі "full" творець заповнює і підписує за всіх
+            # Підписуємо всі ролі, які ще не підписані
+            if session.filling_mode == "full" and session.creator_user_id == user_id:
+                for role in session.party_types.keys():
+                    if not session.signatures.get(role, False):
+                        session.signatures[role] = True
+                        signed_roles.append(role)
+                logger.info("Full mode: creator %s signed all roles: %s", user_id, signed_roles)
+            elif user_roles:
                 for user_role in user_roles:
                     session.signatures[user_role] = True
                     signed_roles.append(user_role)
             else:
-                # Multiple roles або власники інші — вимагаємо прив’язки ролі перед підписом.
+                # Multiple roles або власники інші — вимагаємо прив'язки ролі перед підписом.
                 logger.error(
                     "Cannot determine signer: user_id=%s, party_types=%s, role_owners=%s",
                     user_id,

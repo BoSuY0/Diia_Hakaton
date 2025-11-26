@@ -63,6 +63,8 @@ class Settings:
         self.draft_ttl_hours: int = self._get_int_env("DRAFT_TTL_HOURS", 24)
         self.filled_ttl_hours: int = self._get_int_env("FILLED_TTL_HOURS", 24 * 7)
         self.signed_ttl_days: int = self._get_int_env("SIGNED_TTL_DAYS", 365)
+        # LLM conversation history TTL (default: 2 hours for chat memory)
+        self.conversation_ttl_hours: int = self._get_int_env("CONVERSATION_TTL_HOURS", 2)
         self.valkey_use_glide: bool = False
         self.valkey_addresses: list[tuple[str, int]] = []
         self.valkey_use_tls: bool = False
