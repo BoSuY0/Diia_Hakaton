@@ -548,10 +548,28 @@ class GetSessionSummaryTool(BaseTool):
                 }
             )
 
+        # Отримуємо назву шаблону
+        title = None
+        if session.category_id and session.template_id:
+            try:
+                from backend.domain.categories.index import list_templates as cat_list_templates
+                templates = cat_list_templates(session.category_id)
+                for t in templates:
+                    if t.id == session.template_id:
+                        title = t.name
+                        break
+            except Exception:
+                pass
+        
+        # Fallback для title
+        if not title:
+            title = session.template_id or "Договір"
+
         return {
             "session_id": session_id,
             "category_id": session.category_id,
             "template_id": session.template_id,
+            "title": title,
             "state": session.state.value,
             "can_build_contract": session.can_build_contract,
             "role_owners": session.role_owners,

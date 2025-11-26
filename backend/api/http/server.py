@@ -2258,8 +2258,9 @@ def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
     """Format session list for API response (DRY helper)."""
     results = []
     for s in sessions:
-        title = s.template_id
-        if s.category_id:
+        title = None
+        # Спробуємо отримати назву шаблону з метаданих
+        if s.category_id and s.template_id:
             try:
                 templates = list_templates(s.category_id)
                 for t in templates:
@@ -2268,6 +2269,23 @@ def _format_session_list(sessions: List[Session]) -> List[Dict[str, Any]]:
                         break
             except (KeyError, ValueError, AttributeError):
                 pass
+        
+        # Fallback: якщо назва не знайдена
+        if not title:
+            # Спробуємо отримати назву категорії
+            if s.category_id:
+                try:
+                    category_def = cat_store.get(s.category_id)
+                    if category_def and hasattr(category_def, 'label'):
+                        title = f"Договір: {category_def.label}"
+                    elif category_def and hasattr(category_def, 'name'):
+                        title = f"Договір: {category_def.name}"
+                except Exception:
+                    pass
+            
+            # Останній fallback
+            if not title:
+                title = s.template_id or "Договір"
 
         # Compute canonical status
         status_effective = _compute_status_effective(s)
@@ -2380,10 +2398,25 @@ async def get_contract_info(
     # Prefer session.required_roles (set from category metadata)
     required_roles = session.required_roles if session.required_roles else list(session.party_types.keys())
 
+    # Отримуємо назву шаблону
+    title = None
+    if session.category_id and session.template_id:
+        try:
+            templates = list_templates(session.category_id)
+            for t in templates:
+                if t.id == session.template_id:
+                    title = t.name
+                    break
+        except Exception:
+            pass
+    if not title:
+        title = session.template_id or "Договір"
+
     return {
         "session_id": session.session_id,
         "category_id": session.category_id,
         "template_id": session.template_id,
+        "title": title,
         "status": session.state.value,
         "status_effective": status_effective,  # Canonical status for UI
         "is_signed": session.is_fully_signed,
