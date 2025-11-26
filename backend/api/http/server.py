@@ -2602,10 +2602,17 @@ async def get_session_requirements(
         current_role = next((r for r, uid in session.role_owners.items() if uid == user_id), None)
         if current_role:
             roles_missing = missing.get("roles", {})
+            roles_detailed = missing.get("roles_detailed", {})
+
             if current_role in roles_missing:
                 missing["roles"] = {current_role: roles_missing[current_role]}
             else:
                 missing["roles"] = {}
+
+            if current_role in roles_detailed:
+                missing["roles_detailed"] = {current_role: roles_detailed[current_role]}
+            else:
+                missing["roles_detailed"] = {}
 
     return {
         "session_id": session.session_id,

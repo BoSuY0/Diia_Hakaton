@@ -271,15 +271,33 @@ def collect_missing_fields(
         session, required_all
     )
 
+    # Detailed per-role structure (role -> {role, role_label, missing_fields:[...]})
+    roles_detailed = missing_roles
+    roles_all_detailed = missing_roles_all
+
+    # Backward-compatible simple structure: role -> [missing_fields]
+    roles_simple = {
+        role: entry.get("missing_fields", [])
+        for role, entry in roles_detailed.items()
+    }
+    roles_all_simple = {
+        role: entry.get("missing_fields", [])
+        for role, entry in roles_all_detailed.items()
+    }
+
     return {
         "is_ready": is_ready,  # Backward compatible - based on requested scope
         "is_ready_self": is_ready_self,  # Current user's fields ready
         "is_ready_all": is_ready_all,  # All parties' fields ready
         "contract": missing_contract,
-        "roles": missing_roles,
+        # Simple format used by legacy clients: roles[role] -> [fields]
+        "roles": roles_simple,
+        # New detailed format for richer UI: roles_detailed[role] -> {role, role_label, missing_fields}
+        "roles_detailed": roles_detailed,
         # Include all missing for order validation context
         "missing_all": {
             "contract": missing_contract_all,
-            "roles": missing_roles_all,
+            "roles": roles_all_simple,
+            "roles_detailed": roles_all_detailed,
         } if scope == "all" else None,
     }

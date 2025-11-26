@@ -797,15 +797,31 @@ function App() {
             <div className="validation-title">Заповніть обов'язкові поля перед замовленням</div>
             <ul className="validation-list">
               {missingRequirements.contract?.map(item => (
-                <li key={`contract-${item.key}`}>Умова договору: {item.label || item.field}</li>
+                <li key={`contract-${item.key || item.field}`}>
+                  Умова договору: {item.label || item.field}
+                </li>
               ))}
-              {Object.values(missingRequirements.roles || {}).map(role => (
-                role.missing_fields?.map(f => (
-                  <li key={`${role.role}-${f.key}`}>
-                    {role.role_label || role.role}: {f.label || f.field}
-                  </li>
-                ))
-              ))}
+
+              {/* Детальний формат: roles_detailed[role] -> { role, role_label, missing_fields: [...] } */}
+              {missingRequirements.roles_detailed
+                ? Object.values(missingRequirements.roles_detailed || {}).flatMap(role => (
+                    (role.missing_fields || []).map(f => (
+                      <li key={`${role.role}-${f.key || f.field}`}>
+                        {role.role_label || role.role}: {f.label || f.field}
+                      </li>
+                    ))
+                  ))
+                : null}
+
+              {/* Зворотна сумісність: roles[role] -> [fields] */}
+              {!missingRequirements.roles_detailed &&
+                Object.entries(missingRequirements.roles || {}).flatMap(([roleId, fields]) => (
+                  (fields || []).map(f => (
+                    <li key={`${roleId}-${f.key || f.field}`}>
+                      {roleId}: {f.label || f.field}
+                    </li>
+                  ))
+                ))}
             </ul>
           </div>
         )}
