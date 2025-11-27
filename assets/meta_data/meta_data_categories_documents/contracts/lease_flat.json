@@ -1,12 +1,9 @@
 {
+  "template_id": "lease_flat",
   "category_id": "lease_real_estate",
-  "templates": [
-    {
-      "id": "lease_flat",
-      "name": "Договір оренди нерухомого майна",
-      "file": "lease_real_estate.docx"
-    }
-  ],
+  "name": "Договір оренди нерухомого майна",
+  "file": "lease_real_estate.docx",
+  "keywords": ["оренда", "нерухомість", "приміщення", "квартира", "договір оренди"],
 
   "roles": {
     "lessor": {
@@ -33,7 +30,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "fop": {
       "label": "ФОП",
       "fields": [
@@ -47,7 +43,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "company": {
       "label": "Юридична особа",
       "fields": [
@@ -66,26 +61,15 @@
   "contract_fields": [
     { "field": "document_number",        "label": "Номер договору",                              "required": true  },
     { "field": "city",                   "label": "Місто",                                       "required": true  },
-    { "field": "contract_date",          "label": "Дата договору (5 серпня 2025)",             "required": true  },
-    { "field": "purpose",                "label": "Цільове призначення приміщення (надання послуг/проживання)","required": true  },
+    { "field": "contract_date",          "label": "Дата договору",                               "required": true  },
+    { "field": "purpose",                "label": "Цільове призначення приміщення",              "required": true  },
     { "field": "object_address",         "label": "Адреса приміщення",                           "required": true  },
     { "field": "start_date",             "label": "Дата початку оренди",                         "required": true  },
     { "field": "end_date",               "label": "Дата закінчення оренди",                      "required": true  },
     { "field": "total_area_sqm",         "label": "Загальна площа приміщення, м²",               "required": true  },
     { "field": "area_sqm",               "label": "Площа в оренді, м²",                          "required": true  },
-    { "field": "notice_period_days",     "label": "Заходити до приміщення самостійно, попередньо узгодивши дату й час візиту з Орендарем (не менше ніж за 1 день) ",        "required": true  },
-    { "field": "repair_notice_days",     "label": "Здійснювати капітальний ремонт, поліпшення приміщення (заборонено/за згодою сторін)",              "required": true  },
-    { "field": "improvement_consent_type","label": "Обладнувати, оформлювати й поліпшувати приміщення (заборонено/за згодою сторін)",                "required": true  },
-    { "field": "lock_change_notice",     "label": "Змінювати замки дверей приміщення та укріплювати двері (заборонено/за порядком заміни та повідомленням Орендодавця",        "required": true  },
-    { "field": "sublease_consent_type",  "label": "Здавати приміщення або його частину в суборенду (заборонено/за згодою Орендодавця)",                  "required": true  },
-    { "field": "act_signing_period",     "label": "Строк підписання акта приймання-передачі (протягом 3 календарних днів)", "required": true  },
-    { "field": "term_change_consent",    "label": "Строк найму (можна змінити за згодою Сторін/не можна змінити)",                 "required": true  },
-    { "field": "rent_price_month",       "label": "Орендна плата за користування приміщенням становить (1400 гривень)",                       "required": true  },
-    { "field": "first_payment_date",     "label": "Дата першого платежу (05.08.2025)",                        "required": true  },
-    { "field": "payment_form",           "label": "Форма оплати (на розрахунковий рахунок Орендодавця, готівка)",                                "required": true  },
-    { "field": "payment_due_day",        "label": "Орендар здійснює оплату не пізніше ніж (1-го числа) ",                      "required": true  },
-    { "field": "penalty_rate",           "label": "Пеня за прострочення (0,2%/день від суми заборгованості)",                "required": true  },
-    { "field": "payment_delay_days",     "label": "Граничний строк прострочення (5 днів)",         "required": true  },
-    { "field": "premises_return_deadline","label": "Строк передачі приміщення Орендарем після закінчення строку найму (протягом 1 дня)","required": true  }
+    { "field": "rent_price_month",       "label": "Орендна плата (грн/місяць)",                  "required": true  },
+    { "field": "payment_due_day",        "label": "День оплати",                                 "required": true  },
+    { "field": "penalty_rate",           "label": "Пеня за прострочення (%)",                    "required": true  }
   ]
 }

@@ -1,12 +1,10 @@
 {
+  "template_id": "nda_doc",
   "category_id": "nda",
-  "templates": [
-    {
-      "id": "nda_doc",
-      "name": "Договір про нерозголошення (NDA)",
-      "file": "nda_doc.docx"
-    }
-  ],
+  "name": "Договір про нерозголошення (NDA)",
+  "file": "nda_doc.docx",
+  "keywords": ["нда", "nda", "конфіденційність", "нерозголошення", "таємниця", "бізнес"],
+  "ai_only": true,
 
   "roles": {
     "discloser": {
@@ -31,7 +29,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "fop": {
       "label": "ФОП",
       "fields": [
@@ -43,7 +40,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "company": {
       "label": "Юридична особа",
       "fields": [

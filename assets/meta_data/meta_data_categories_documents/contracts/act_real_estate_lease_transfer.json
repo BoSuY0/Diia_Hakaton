@@ -1,12 +1,9 @@
 {
-  "category_id": "act_real_estate_lease_transfer",
-  "templates": [
-    {
-      "id": "act_real_estate_lease_transfer",
-      "name": "Акт приймання-передачі нерухомого майна",
-      "file": "act_real_estate_lease_transfer.docx"
-    }
-  ],
+  "template_id": "act_real_estate_lease_transfer",
+  "category_id": "lease_real_estate",
+  "name": "Акт приймання-передачі нерухомого майна",
+  "file": "act_real_estate_lease_transfer.docx",
+  "keywords": ["акт", "приймання", "передача", "нерухомість", "оренда"],
 
   "roles": {
     "lessor": {
@@ -32,7 +29,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "fop": {
       "label": "ФОП",
       "fields": [
@@ -45,7 +41,6 @@
         { "field": "email",   "label": "Email",                             "required": false }
       ]
     },
-
     "company": {
       "label": "Юридична особа",
       "fields": [
@@ -62,11 +57,11 @@
   },
 
   "contract_fields": [
-    { "field": "contract_number",  "label": "Номер договору оренди",                    "required": true  },
-    { "field": "contract_date",    "label": "Дата договору оренди",                     "required": true  },
-    { "field": "city",             "label": "Місто",                                    "required": true  },
-    { "field": "act_date",         "label": "Дата акту приймання-передачі",             "required": true  },
-    { "field": "object_address",   "label": "Адреса об'єкта оренди",                    "required": true  },
-    { "field": "total_area_sqm",   "label": "Загальна площа, м²",                       "required": true  }
+    { "field": "contract_number",  "label": "Номер договору оренди",        "required": true  },
+    { "field": "contract_date",    "label": "Дата договору оренди",         "required": true  },
+    { "field": "city",             "label": "Місто",                         "required": true  },
+    { "field": "act_date",         "label": "Дата акту приймання-передачі", "required": true  },
+    { "field": "object_address",   "label": "Адреса об'єкта оренди",        "required": true  },
+    { "field": "total_area_sqm",   "label": "Загальна площа, м²",           "required": true  }
   ]
 }
