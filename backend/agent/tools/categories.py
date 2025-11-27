@@ -117,22 +117,30 @@ class GetTemplatesForCategoryTool(BaseTool):
         logger.info("tool=get_templates_for_category category_id=%s", category_id)
         templates: List[TemplateInfo] = list_templates(category_id)
 
-        # Auto-select logic removed to prevent wrong template selection
-        # session_id = args.get("session_id")
-        # if session_id and len(templates) == 1:
-        #      try:
-        #         with transactional_session(session_id) as session:
-        #             # Only set if matches category
-        #             if session.category_id == category_id:
-        #                 from backend.domain.services.session import set_session_template
-        #                 set_session_template(session, templates[0].id)
-        #                 logger.info("Auto-selected single template: %s", templates[0].id)
-        #      except Exception:
-        #          pass
+        # Якщо є лише 1 шаблон - автоматично встановлюємо його
+        auto_selected = False
+        selected_template = None
+        session_id = context.get("session_id")
+        
+        if len(templates) == 1 and session_id:
+            selected_template = templates[0]
+            try:
+                from backend.infra.persistence.store import transactional_session
+                from backend.domain.services.session import set_session_template
+                with transactional_session(session_id) as session:
+                    if session.category_id == category_id:
+                        set_session_template(session, selected_template.id)
+                        auto_selected = True
+                        logger.info("Auto-selected single template: %s", selected_template.id)
+            except Exception as e:
+                logger.warning("Failed to auto-select template: %s", e)
 
         return {
             "category_id": category_id,
             "templates": [{"id": t.id, "name": t.name} for t in templates],
+            "auto_selected": auto_selected,
+            "selected_template_id": selected_template.id if auto_selected else None,
+            "selected_template_name": selected_template.name if auto_selected else None,
         }
 
     def format_result(self, result: Any) -> str:
