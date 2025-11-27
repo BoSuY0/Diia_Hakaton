@@ -13,10 +13,6 @@ export function ModeSelector({ onSelect }) {
                     <h3>За обидві сторони</h3>
                     <p>Я маю всі дані і заповню договір повністю.</p>
                 </div>
-                <div className="selection-card ai-card" onClick={() => onSelect('ai')}>
-                    <h3>Через AI-асистента</h3>
-                    <p>Допоможіть мені заповнити договір у режимі чату.</p>
-                </div>
             </div>
         </div>
     );

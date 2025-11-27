@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 
-export function CategorySelector({ onSelect }) {
+export function CategorySelector({ onSelect, onAiChatClick }) {
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -28,13 +28,23 @@ export function CategorySelector({ onSelect }) {
     if (error) return <div className="error-state">{error}</div>;
 
     return (
-        <div className="selection-grid">
-            {categories.map(cat => (
-                <div key={cat.id} className="selection-card" onClick={() => onSelect(cat.id)}>
-                    <h3>{cat.label}</h3>
-                    {/* <p>{cat.description}</p> */}
+        <div>
+            <div className="selection-grid">
+                {categories.map(cat => (
+                    <div key={cat.id} className="selection-card" onClick={() => onSelect(cat.id)}>
+                        <h3>{cat.label}</h3>
+                        {/* <p>{cat.description}</p> */}
+                    </div>
+                ))}
+            </div>
+            {onAiChatClick && (
+                <div className="ai-promo-banner" onClick={onAiChatClick}>
+                    <div className="ai-promo-content">
+                        <h3>🤖 AI-асистент</h3>
+                        <p>Не знаєте який договір обрати? Допоможу підібрати та заповнити!</p>
+                    </div>
                 </div>
-            ))}
+            )}
         </div>
     );
 }
