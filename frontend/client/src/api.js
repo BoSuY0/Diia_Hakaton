@@ -265,4 +265,4 @@ export const api = {
   },
 };
 
-export { getAuthToken };
+export { getAuthToken, buildAuthHeaders };

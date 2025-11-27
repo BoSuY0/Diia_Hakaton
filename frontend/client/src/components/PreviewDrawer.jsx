@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Download } from 'lucide-react';
-import { api } from '../api';
+import { api, buildAuthHeaders } from '../api';
 
 export default function PreviewDrawer({ isOpen, onClose, sessionId, userId }) {
     const [htmlContent, setHtmlContent] = useState(null);
@@ -18,8 +18,10 @@ export default function PreviewDrawer({ isOpen, onClose, sessionId, userId }) {
         setError(null);
         try {
             // Use api.API_URL to ensure correct host (e.g. when accessing from mobile via IP)
+            // Use buildAuthHeaders to include both Authorization token and X-User-ID
+            const headers = buildAuthHeaders(userId);
             const response = await fetch(`${api.API_URL}/sessions/${sessionId}/contract/preview`, {
-                headers: userId ? { 'X-User-ID': userId } : undefined,
+                headers: headers,
             });
             if (!response.ok) {
                 const errorData = await response.json();
