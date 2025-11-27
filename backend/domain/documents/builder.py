@@ -101,6 +101,8 @@ async def build_contract(
             missing_required.append(field.key)
 
     if missing_required and not partial:
+        # Збираємо labels для зрозумілого повідомлення
+        missing_labels = [f.label for f in required_fields if f.key in missing_required]
         logger.warning(
             "builder=build_contract missing_required_fields session_id=%s "
             "category_id=%s template_id=%s missing=%s",
@@ -109,7 +111,7 @@ async def build_contract(
             template_id,
             missing_required,
         )
-        raise ValueError(f"Missing required fields: {', '.join(missing_required)}")
+        raise ValueError(f"Відсутні обов'язкові поля: {', '.join(missing_labels)}")
 
     field_values: Dict[str, str] = {}
     empty_placeholder = "(                 )"

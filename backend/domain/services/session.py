@@ -261,12 +261,20 @@ def update_session_field(
     entry["source"] = ctx.get("source", "chat" if tags is not None else "api")
     all_data[key] = entry
 
+    # Get label for history display
+    field_label = field  # default fallback
+    if entity:
+        field_label = entity.label
+    elif is_party_field and party_meta is not None:
+        field_label = party_meta.label
+
     # Add global history event
     session.history.append(
         {
             "ts": datetime.now(timezone.utc).isoformat(),
             "type": "field_update",
             "key": key,
+            "label": field_label,
             "user_id": ctx.get("user_id"),
             "role": effective_role or session.role,
             "value": value,
