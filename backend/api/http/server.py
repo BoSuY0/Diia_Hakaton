@@ -2077,7 +2077,8 @@ async def sync_session(
             p_fields = list_party_fields(session.category_id, p_type)
             party_field_labels[role_id_check] = {pf.field: pf.label for pf in p_fields}
         
-        required_fields = get_required_fields(session)
+        # ВАЖЛИВО: scope="all" щоб перевірити ВСІ сторони, а не тільки поточного користувача
+        required_fields = get_required_fields(session, scope="all")
         for f in required_fields:
             if f.role:
                 role_fields = session.party_fields.get(f.role, {})

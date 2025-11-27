@@ -81,7 +81,8 @@ async def build_contract(
         )
     template = templates[template_id]
 
-    required_fields = get_required_fields(session)
+    # scope="all" - перевіряємо всі сторони для повного документа
+    required_fields = get_required_fields(session, scope="all")
     missing_required = []
 
     for field in required_fields:
