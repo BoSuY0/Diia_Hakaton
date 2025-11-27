@@ -102,14 +102,14 @@ class SetTemplateTool(BaseTool):
             if not session.category_id:
                 return {
                     "ok": False,
-                    "error": "Спочатку потрібно обрати категорію (set_category).",
+                    "error": "category_not_set",  # Internal: call set_category first
                 }
 
             templates = {t.id: t for t in list_templates(session.category_id)}
             if template_id not in templates:
                 return {
                     "ok": False,
-                    "error": "Шаблон не належить до обраної категорії.",
+                    "error": "invalid_contract_type",  # Internal: template not in category
                 }
 
             from backend.domain.services.session import set_session_template  # pylint: disable=import-outside-toplevel
