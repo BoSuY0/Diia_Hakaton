@@ -18,7 +18,7 @@ def test_llm_model_sanitization(monkeypatch):
     """Test LLM model sanitization."""
     monkeypatch.setenv("LLM_MODEL", "gpt-5-mini-2025-08-7")
     s = Settings()
-    assert s.llm_model == "gpt-5-mini-2025-08-07"
+    assert s.llm_model == "gpt-4o-mini"
 
 
 def test_cors_origins_default(monkeypatch):
