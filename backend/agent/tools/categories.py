@@ -281,8 +281,11 @@ class SetCategoryTool(BaseTool):
         # Гарантуємо, що файл сесії існує, щоб transactional_session не впав із 404
         await aget_or_create_session(session_id)
 
+        template_id = None
         async with atransactional_session(session_id) as session:
             ok = set_session_category(session, category_id)
+            # Отримуємо template_id, якщо він був автоматично обраний
+            template_id = session.template_id
 
         if not ok:
             return {
@@ -290,7 +293,12 @@ class SetCategoryTool(BaseTool):
                 "error": "Невідома категорія договорів.",
             }
 
-        return {
+        result = {
             "ok": True,
             "category_id": category_id,
         }
+        # Повертаємо template_id, якщо він був автоматично обраний
+        if template_id:
+            result["template_id"] = template_id
+            result["template_auto_selected"] = True
+        return result
