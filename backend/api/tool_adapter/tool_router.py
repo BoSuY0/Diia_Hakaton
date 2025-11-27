@@ -65,6 +65,7 @@ async def dispatch_tool_async(
     arguments_json: str,
     tags: Dict[str, str] | None = None,
     user_id: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Dispatch a tool call asynchronously."""
     args = json.loads(arguments_json or "{}")
@@ -79,6 +80,7 @@ async def dispatch_tool_async(
         "tags": tags,
         "pii_tags": tags or {},
         "user_id": user_id,
+        "session_id": session_id,
     }
 
     try:

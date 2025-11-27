@@ -965,6 +965,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                         tool_args,
                         tags=getattr(conv, "tags", None),
                         user_id=getattr(conv, "user_id", None),
+                        session_id=conv.session_id,
                     )
                     logger.info("✅ Tool %s completed successfully", tool_name)
 
