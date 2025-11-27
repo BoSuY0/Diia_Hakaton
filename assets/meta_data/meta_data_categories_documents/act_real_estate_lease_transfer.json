@@ -1,0 +1,72 @@
+{
+  "category_id": "act_real_estate_lease_transfer",
+  "templates": [
+    {
+      "id": "act_real_estate_lease_transfer",
+      "name": "Акт приймання-передачі нерухомого майна",
+      "file": "act_real_estate_lease_transfer.docx"
+    }
+  ],
+
+  "roles": {
+    "lessor": {
+      "label": "Орендодавець",
+      "allowed_person_types": ["individual", "fop", "company"]
+    },
+    "lessee": {
+      "label": "Орендар",
+      "allowed_person_types": ["individual", "fop", "company"]
+    }
+  },
+
+  "party_modules": {
+    "individual": {
+      "label": "Фізична особа",
+      "fields": [
+        { "field": "name",    "label": "ПІБ",                               "required": true  },
+        { "field": "address", "label": "Адреса проживання/реєстрації",      "required": true  },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "id_code", "label": "РНОКПП",                            "required": false },
+        { "field": "iban",    "label": "IBAN рахунку",                      "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "fop": {
+      "label": "ФОП",
+      "fields": [
+        { "field": "name",    "label": "ПІБ ФОП",                           "required": true  },
+        { "field": "address", "label": "Адреса реєстрації ФОП",             "required": true  },
+        { "field": "id_code", "label": "РНОКПП",                            "required": true  },
+        { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
+        { "field": "iban",    "label": "IBAN рахунку",                      "required": false },
+        { "field": "phone",   "label": "Телефон",                           "required": false },
+        { "field": "email",   "label": "Email",                             "required": false }
+      ]
+    },
+
+    "company": {
+      "label": "Юридична особа",
+      "fields": [
+        { "field": "name",          "label": "Повна назва юр. особи",        "required": true  },
+        { "field": "address",       "label": "Юридична адреса",              "required": true  },
+        { "field": "id_code",       "label": "Код ЄДРПОУ",                   "required": true  },
+        { "field": "representative","label": "ПІБ директора / представника","required": false },
+        { "field": "id_doc",        "label": "Документ представника",        "required": false },
+        { "field": "iban",          "label": "IBAN рахунку",                 "required": false },
+        { "field": "phone",         "label": "Телефон",                      "required": false },
+        { "field": "email",         "label": "Email",                        "required": false }
+      ]
+    }
+  },
+
+  "contract_fields": [
+    { "field": "contract_number",  "label": "Номер договору оренди",                    "required": true  },
+    { "field": "contract_date",    "label": "Дата договору оренди",                     "required": true  },
+    { "field": "city",             "label": "Місто",                                    "required": true  },
+    { "field": "act_date",         "label": "Дата акту приймання-передачі",             "required": true  },
+    { "field": "object_address",   "label": "Адреса об'єкта оренди",                    "required": true  },
+    { "field": "total_area_sqm",   "label": "Загальна площа, м²",                       "required": true  }
+  ]
+}

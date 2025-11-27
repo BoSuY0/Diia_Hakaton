@@ -7,6 +7,12 @@
       "keywords": ["оренда", "нерухомість", "приміщення"]
     },
     {
+      "id": "act_real_estate_lease_transfer",
+      "label": "Акти приймання-передачі",
+      "meta_filename": "act_real_estate_lease_transfer.json",
+      "keywords": ["акт", "приймання", "передача", "нерухомість", "оренда"]
+    },
+    {
       "id": "nda",
       "label": "Бізнес договори",
       "meta_filename": "nda.json",
