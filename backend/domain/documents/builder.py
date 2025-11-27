@@ -7,9 +7,9 @@ from typing import Dict
 from backend.domain.categories.index import (
     Category,
     list_entities,
-    list_templates,
     load_meta,
     store,
+    template_store,
 )
 from backend.shared.errors import MetaNotFoundError, SessionNotFoundError
 from backend.shared.logging import get_logger
@@ -69,7 +69,9 @@ async def build_contract(
     if not category:
         raise MetaNotFoundError(f"Unknown category_id: {session.category_id}")
 
-    templates = {t.id: t for t in list_templates(session.category_id)}
+    # Використовуємо template_store.get_by_category, щоб включити ai_only шаблони
+    all_templates = template_store.get_by_category(session.category_id)
+    templates = {t.id: t for t in all_templates}
 
     if template_id.startswith("dynamic_"):
         logger.error("builder=build_contract dynamic_templates_removed template_id=%s", template_id)
