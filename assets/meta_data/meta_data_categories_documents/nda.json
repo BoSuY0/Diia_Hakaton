@@ -25,7 +25,6 @@
       "fields": [
         { "field": "name",    "label": "ПІБ",                               "required": true  },
         { "field": "address", "label": "Адреса проживання/реєстрації",      "required": true  },
-        { "field": "representative","label": "Представник",                 "required": false },
         { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
         { "field": "id_code", "label": "РНОКПП",                            "required": false },
         { "field": "phone",   "label": "Телефон",                           "required": false },
