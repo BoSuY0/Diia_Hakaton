@@ -1356,13 +1356,17 @@ async def healthz_detailed(
 
 @app.get("/categories")
 async def list_categories() -> List[Dict[str, str]]:
-    """List all available contract categories (excludes AI-only categories)."""
+    """List all available contract categories (excludes empty and custom)."""
+    from backend.domain.categories.index import template_store
+    
     categories = []
     for category in cat_store.categories.values():
         if category.id == "custom":
             continue
-        # Приховуємо категорії, доступні лише через AI
-        if category.ai_only:
+        # Перевіряємо чи є хоча б один не-AI-only шаблон в категорії
+        templates = template_store.get_by_category(category.id)
+        has_visible_templates = any(not t.ai_only for t in templates)
+        if not has_visible_templates:
             continue
         categories.append({"id": category.id, "label": category.label})
     return categories
