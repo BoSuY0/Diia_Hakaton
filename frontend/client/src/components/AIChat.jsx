@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { api } from "../api";
 
 const SUGGESTED_QUESTIONS = [
-  "Привіт! Допоможи, будь ласка, заповнити договір оренди квартири",
   "Привіт! Допоможи, будь ласка, заповнити договір NDA",
 ];
 
