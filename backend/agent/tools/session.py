@@ -352,14 +352,14 @@ class GetPartyFieldsForSessionTool(BaseTool):
         try:
             cat = category_store.get(session.category_id)
             if cat:
-                meta = json.loads(cat.meta_path.read_text(encoding="utf-8"))
+                meta = load_meta(cat)
                 role_label = meta.get("roles", {}).get(session.role, {}).get("label")
                 person_type_label = (
                     meta.get("party_modules", {})
                     .get(current_person_type, {})
                     .get("label")
                 )
-        except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError):
             pass
 
         return {

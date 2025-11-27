@@ -2386,6 +2386,11 @@ async def _generate_chat_actions(
     except SessionNotFoundError:
         return None
     
+    logger.info(
+        "_generate_chat_actions: session_id=%s category_id=%s template_id=%s",
+        session_id, session.category_id, session.template_id
+    )
+    
     actions: List[ChatAction] = []
     
     # Якщо категорія встановлена - пропонуємо перейти до заповнення
@@ -2662,6 +2667,10 @@ async def preview_contract(
     check_session_access(session, user_id, require_participant=True, allow_owner=True)
 
     if not session.template_id:
+        logger.warning(
+            "preview_contract: Template not selected session_id=%s category_id=%s",
+            session_id, session.category_id
+        )
         raise HTTPException(status_code=400, detail="Template not selected")
 
     # Будуємо тимчасовий DOCX з плейсхолдерами (partial=True), конвертуємо у HTML
