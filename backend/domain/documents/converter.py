@@ -52,7 +52,7 @@ def convert_to_html(input_path: Path) -> str:
             }}
             p {{ margin-bottom: 1em; }}
             table {{ border-collapse: collapse; width: 100%; margin-bottom: 1em; }}
-            td, th {{ border: 1px solid #000; padding: 8px; }}
+            td, th {{ border: 1px solid #000; padding: 8px; vertical-align: top; }}
             strong {{ font-weight: bold; }}
             img {{ max-width: 100%; height: auto; }}
         </style>

@@ -765,12 +765,97 @@ async def filter_tools_for_session(
 
 
 
+async def _inject_session_context(messages: List[Dict[str, Any]], session_id: str) -> List[Dict[str, Any]]:
+    """
+    Інжектує поточний стан сесії в контекст LLM.
+    Це допомагає моделі "пам'ятати" що вже зроблено без необхідності викликати tools.
+    """
+    try:
+        session = await aload_session(session_id)
+    except SessionNotFoundError:
+        return messages
+    
+    # Формуємо короткий summary поточного стану
+    context_parts = []
+    if session.category_id:
+        context_parts.append(f"category_id={session.category_id}")
+    if session.template_id:
+        context_parts.append(f"template_id={session.template_id}")
+    if session.role:
+        context_parts.append(f"current_role={session.role}")
+    if session.person_type:
+        context_parts.append(f"person_type={session.person_type}")
+    context_parts.append(f"state={session.state.value}")
+    context_parts.append(f"can_build={session.can_build_contract}")
+    
+    # Додаємо інформацію про заповнені поля
+    filled_fields = []
+    for role, fields in session.party_fields.items():
+        for field_name, field_state in fields.items():
+            if field_state.status == "ok":
+                filled_fields.append(f"{role}.{field_name}")
+    if filled_fields:
+        context_parts.append(f"filled_fields=[{', '.join(filled_fields[:10])}]")  # Limit to 10
+    
+    if not context_parts:
+        return messages
+    
+    context_summary = f"\n\n[SESSION_CONTEXT: {'; '.join(context_parts)}]"
+    
+    # Додаємо контекст до system message
+    updated = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            content = msg.get("content", "")
+            # Видаляємо старий контекст якщо є
+            if "[SESSION_CONTEXT:" in content:
+                content = content.split("[SESSION_CONTEXT:")[0].rstrip()
+            updated.append({"role": "system", "content": content + context_summary})
+        else:
+            updated.append(msg)
+    return updated
+
+
+def _limit_context_length(messages: List[Dict[str, Any]], max_messages: int = 30) -> List[Dict[str, Any]]:
+    """
+    Обмежує кількість повідомлень в контексті.
+    Зберігає system prompt та останні N повідомлень.
+    Це запобігає перевищенню context window моделі.
+    """
+    if len(messages) <= max_messages:
+        return messages
+    
+    # Знаходимо system message
+    system_msg = None
+    other_msgs = []
+    for msg in messages:
+        if msg.get("role") == "system" and system_msg is None:
+            system_msg = msg
+        else:
+            other_msgs.append(msg)
+    
+    # Зберігаємо system + останні (max_messages - 1) повідомлень
+    kept_msgs = other_msgs[-(max_messages - 1):] if system_msg else other_msgs[-max_messages:]
+    
+    result = []
+    if system_msg:
+        result.append(system_msg)
+    result.extend(kept_msgs)
+    
+    logger.info("Context trimmed: %d -> %d messages", len(messages), len(result))
+    return result
+
+
 async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List[Dict[str, Any]]:
     """
     Tool-loop: виклик LLM, виконання тулів, захист від петель та мінімізація контексту.
     """
     max_iterations = 5
     last_tool_signature: Optional[str] = None
+    
+    # Інжектуємо поточний контекст сесії та обмежуємо довжину
+    messages = await _inject_session_context(messages, conv.session_id)
+    messages = _limit_context_length(messages)
 
     for _ in range(max_iterations):
         tools = await filter_tools_for_session(
@@ -801,7 +886,7 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
         # Дозволяємо моделі достатньо токенів, щоб повністю
         # перелічити шаблони/поля та дати пояснення.
         # Idle: коротка відповідь-вступ, інші стани — детальні пояснення.
-        max_tokens = 96 if state == "idle" else 256
+        max_tokens = 512 if state == "idle" else 1024
 
         response = await ensure_awaitable(
             chat_with_tools(
