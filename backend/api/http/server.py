@@ -292,11 +292,25 @@ class ChatRequest(BaseModel):
     reset: bool = False  # If True, clears conversation history before processing
 
 
+class ChatActionPayload(BaseModel):
+    """Action button payload."""
+    category_id: Optional[str] = None
+    template_id: Optional[str] = None
+
+
+class ChatAction(BaseModel):
+    """Action button that LLM can return in chat."""
+    type: str  # "navigate_filling_mode", "confirm_category", "select_template"
+    label: str  # Button text
+    payload: Optional[Dict[str, str]] = None
+
+
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
 
     session_id: str
     reply: str
+    actions: Optional[List[ChatAction]] = None  # Action buttons to show
 
 
 class FindCategoryRequest(BaseModel):
@@ -2261,7 +2275,66 @@ async def chat(
     # Persist conversation to Redis (if available)
     await conversation_store.asave(conv)
 
-    return ChatResponse(session_id=req.session_id, reply=reply_text)
+    # Генеруємо action кнопки на основі стану сесії
+    actions = await _generate_chat_actions(req.session_id, reply_text, conv)
+
+    return ChatResponse(session_id=req.session_id, reply=reply_text, actions=actions)
+
+
+async def _generate_chat_actions(
+    session_id: str,
+    reply_text: str,
+    conv: Conversation,
+) -> Optional[List[ChatAction]]:
+    """
+    Генерує action-кнопки для відповіді чату на основі:
+    - стану сесії (категорія/шаблон встановлені)
+    - контексту розмови (LLM знайшов категорію)
+    - тексту відповіді (підтвердження категорії)
+    """
+    try:
+        session = await aload_session(session_id)
+    except SessionNotFoundError:
+        return None
+    
+    actions: List[ChatAction] = []
+    
+    # Якщо категорія встановлена - пропонуємо перейти до заповнення
+    if session.category_id:
+        # Перевіряємо чи LLM питає підтвердження (слова: "це те", "так", "підходить", "підтвердіть")
+        reply_lower = reply_text.lower()
+        confirmation_keywords = [
+            "це те, що вам потрібно",
+            "підходить",
+            "такий договір",
+            "можемо продовжити",
+            "хочете продовжити",
+            "готові продовжити",
+            "бажаєте продовжити",
+        ]
+        
+        if any(kw in reply_lower for kw in confirmation_keywords):
+            # LLM питає підтвердження - пропонуємо кнопку навігації
+            actions.append(ChatAction(
+                type="navigate_filling_mode",
+                label="Так, створити договір",
+                payload={
+                    "category_id": session.category_id,
+                    "template_id": session.template_id or "",
+                }
+            ))
+        elif session.template_id:
+            # Категорія і шаблон встановлені - пропонуємо заповнити
+            actions.append(ChatAction(
+                type="navigate_filling_mode",
+                label="Заповнити договір",
+                payload={
+                    "category_id": session.category_id,
+                    "template_id": session.template_id,
+                }
+            ))
+    
+    return actions if actions else None
 
 
 def _compute_status_effective(session: Session) -> str:
