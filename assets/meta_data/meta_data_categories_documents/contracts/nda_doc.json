@@ -7,11 +7,11 @@
   "ai_only": true,
 
   "roles": {
-    "discloser": {
+    "party_1": {
       "label": "Сторона, що розкриває",
       "allowed_person_types": ["individual", "fop", "company"]
     },
-    "receiver": {
+    "party_2": {
       "label": "Сторона, що отримує",
       "allowed_person_types": ["individual", "fop", "company"]
     }
