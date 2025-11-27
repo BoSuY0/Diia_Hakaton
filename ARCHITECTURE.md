@@ -20,26 +20,26 @@ graph TB
         WEB[React Web App]
         CLI[CLI Interface]
     end
-    
+
     subgraph "API Layer"
         API[FastAPI Server]
         SSE[SSE Stream Manager]
         WS[WebSocket Events]
     end
-    
+
     subgraph "Business Logic"
         SM[Session Manager]
         VS[Validation Service]
         DS[Document Service]
         AI[AI Agent]
     end
-    
+
     subgraph "Storage Layer"
         REDIS[(Redis)]
         FS[(File System)]
         MEM[(Memory Store)]
     end
-    
+
     WEB <--> API
     CLI <--> API
     API <--> SM
@@ -57,6 +57,7 @@ graph TB
 ### Основні компоненти
 
 #### 1. **FastAPI Application** (`backend/api/http/server.py`)
+
 - REST API endpoints
 - CORS middleware
 - SSE (Server-Sent Events) для real-time оновлень
@@ -76,6 +77,7 @@ POST   /chat                        # AI чат інтерфейс
 #### 2. **Session Management** (`backend/domain/sessions/`)
 
 ##### Session Model (`models.py`)
+
 ```python
 @dataclass
 class Session:
@@ -109,6 +111,7 @@ class Session:
 ```
 
 ##### Session States
+
 ```python
 class SessionState(Enum):
     IDLE = "idle"
@@ -134,6 +137,7 @@ Memory Store (Always available)
 ```
 
 ##### Store Interface
+
 ```python
 # Async методи (основні)
 async def aget_or_create_session(session_id: str) -> Session
@@ -146,11 +150,12 @@ async def alist_user_sessions(user_id: str) -> List[Session]
 #### 4. **AI Agent System** (`backend/agent/`)
 
 ##### Tool Registry Pattern
+
 ```python
 @register_tool
 class UpsertFieldTool(BaseTool):
     name = "upsert_field"
-    
+
     async def execute(self, args: Dict, context: Dict) -> Any:
         # Validate field
         # Update session
@@ -159,6 +164,7 @@ class UpsertFieldTool(BaseTool):
 ```
 
 ##### Доступні інструменти:
+
 - `find_category_by_query` - пошук категорії договору
 - `set_category` - встановлення категорії
 - `set_template` - вибір шаблону
@@ -171,7 +177,7 @@ class UpsertFieldTool(BaseTool):
 
 ```python
 async def build_contract_async(
-    session_id: str, 
+    session_id: str,
     template_id: str,
     partial: bool = False
 ) -> Dict[str, str]:
@@ -185,6 +191,7 @@ async def build_contract_async(
 #### 6. **Validation System** (`backend/domain/validation/`)
 
 ##### PII Sanitizer
+
 ```python
 def sanitize_typed(text: str) -> Dict:
     # Masks sensitive data:
@@ -198,6 +205,7 @@ def sanitize_typed(text: str) -> Dict:
 ```
 
 ##### Field Validators
+
 ```python
 def validate_value(value_type: str, value: str) -> Tuple[str, Optional[str]]:
     validators = {
@@ -235,7 +243,7 @@ frontend/src/
 
 ```javascript
 // Основний стан додатку
-const [step, setStep] = useState('category');
+const [step, setStep] = useState("category");
 const [sessionId, setSessionId] = useState(null);
 const [schema, setSchema] = useState(null);
 const [formValues, setFormValues] = useState({});
@@ -243,19 +251,19 @@ const [fieldErrors, setFieldErrors] = useState({});
 
 // SSE синхронізація
 useEffect(() => {
-    const eventSource = new EventSource(
-        `/sessions/${sessionId}/stream?user_id=${userId}`
-    );
-    
-    eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'field_update') {
-            setFormValues(prev => ({
-                ...prev,
-                [data.field_key]: data.value
-            }));
-        }
-    };
+  const eventSource = new EventSource(
+    `/sessions/${sessionId}/stream?user_id=${userId}`
+  );
+
+  eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === "field_update") {
+      setFormValues((prev) => ({
+        ...prev,
+        [data.field_key]: data.value,
+      }));
+    }
+  };
 }, [sessionId]);
 ```
 
@@ -263,25 +271,27 @@ useEffect(() => {
 
 ```javascript
 const api = {
-    // Session management
-    createSession: () => axios.post('/sessions'),
-    getSession: (id) => axios.get(`/sessions/${id}`),
-    
-    // Field updates with optimistic UI
-    upsertField: async (sessionId, field, value, role) => {
-        // Immediate UI update
-        updateLocalState(field, value);
-        
-        // Background sync
-        try {
-            const res = await axios.post(`/sessions/${sessionId}/fields`, {
-                field, value, role
-            });
-            // Confirm or rollback
-        } catch (error) {
-            rollbackLocalState(field);
-        }
+  // Session management
+  createSession: () => axios.post("/sessions"),
+  getSession: (id) => axios.get(`/sessions/${id}`),
+
+  // Field updates with optimistic UI
+  upsertField: async (sessionId, field, value, role) => {
+    // Immediate UI update
+    updateLocalState(field, value);
+
+    // Background sync
+    try {
+      const res = await axios.post(`/sessions/${sessionId}/fields`, {
+        field,
+        value,
+        role,
+      });
+      // Confirm or rollback
+    } catch (error) {
+      rollbackLocalState(field);
     }
+  },
 };
 ```
 
@@ -296,26 +306,26 @@ sequenceDiagram
     participant API as API Server
     participant S as Session Store
     participant D as Document Service
-    
+
     U->>F: Обирає категорію
     F->>API: POST /sessions
     API->>S: Create session
     S-->>API: session_id
     API-->>F: session_id
-    
+
     U->>F: Обирає шаблон
     F->>API: POST /sessions/{id}/template
     API->>S: Update session
-    
+
     U->>F: Обирає роль
     F->>API: POST /sessions/{id}/party-context
     API->>S: Claim role
-    
+
     U->>F: Заповнює поля
     F->>API: POST /sessions/{id}/fields
     API->>S: Validate & save
     API-->>F: Field status
-    
+
     U->>F: Генерує документ
     F->>API: POST /sessions/{id}/build
     API->>D: Generate DOCX
@@ -331,17 +341,17 @@ sequenceDiagram
     participant B as User B (Орендодавець)
     participant API as API Server
     participant SSE as SSE Manager
-    
+
     Note over A,B: Обидва підключені через SSE
-    
+
     A->>API: Update field "name"
     API->>SSE: Broadcast update
     SSE-->>B: field_update event
-    
+
     B->>API: Update field "iban"
     API->>SSE: Broadcast update
     SSE-->>A: field_update event
-    
+
     Note over A,B: Real-time синхронізація
 ```
 
@@ -373,7 +383,7 @@ def check_session_access(
 ):
     # Check if session is full (all roles taken)
     is_full = len(session.role_owners) >= expected_roles_count
-    
+
     if is_full or require_participant:
         # Only participants can access
         if user_id not in session.role_owners.values():
@@ -400,7 +410,7 @@ def update_session_field(session, field, value):
     # Check if current user has signed
     if session.signatures.get(current_role):
         raise ValueError("Cannot edit after signing")
-    
+
     # Invalidate other signatures on change
     for role, signed in session.signatures.items():
         if signed and role != current_role:
@@ -417,14 +427,14 @@ services:
   app:
     deploy:
       replicas: 3
-      
+
   nginx:
     image: nginx
     ports:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
-      
+
   redis:
     image: redis:alpine
     deploy:
@@ -434,11 +444,13 @@ services:
 ### Оптимізації продуктивності
 
 1. **Session Caching**
+
    - Redis TTL: 24 години
    - Memory cache для активних сесій
    - Lazy loading полів
 
 2. **Document Generation**
+
    - Async processing
    - Template caching
    - Parallel field validation
@@ -466,7 +478,7 @@ async def add_metrics(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration = time.time() - start
-    
+
     metrics.histogram(
         "http_request_duration_seconds",
         duration,
@@ -481,7 +493,7 @@ graph LR
     DEV[Development] --> TEST[Testing]
     TEST --> STAGE[Staging]
     STAGE --> PROD[Production]
-    
+
     subgraph "CI/CD"
         GH[GitHub] --> CI[CI Pipeline]
         CI --> TESTS[Run Tests]
@@ -498,7 +510,7 @@ APP_HOST=0.0.0.0
 APP_PORT=8000
 REDIS_URL=redis://redis:6379/0
 SESSION_BACKEND=redis
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=pt-4.1-mini
 CORS_ORIGINS=https://app.example.com
 ```
 

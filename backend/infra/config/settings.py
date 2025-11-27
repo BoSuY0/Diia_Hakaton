@@ -74,7 +74,7 @@ class Settings:
         self.llm_api_key: str | None = (
             os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         )
-        raw_model = os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+        raw_model = os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL") or "pt-4.1-mini"
         self.llm_model: str = self._normalize_llm_model(raw_model)
         self.llm_base_url: str | None = os.getenv("LLM_BASE_URL")
         self.chat_enabled: bool = os.getenv("CHAT_ENABLED", "false").lower() == "true"

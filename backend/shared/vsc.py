@@ -94,6 +94,8 @@ def vsc_summary(res: dict) -> str:
     can_build|<0/1>
     FIELDS
     <field>|<status>|<error or ->
+    PARTY/<role>
+    <field>|<status>|<error or ->
     """
     head = block(
         "SUMMARY",
@@ -102,14 +104,37 @@ def vsc_summary(res: dict) -> str:
             ["can_build", 1 if res.get("can_build_contract") else 0],
         ],
     )
-    fields = block(
-        "FIELDS",
-        (
-            (f.get("field", ""), f.get("status", ""), (f.get("error") or "-"))
-            for f in res.get("fields", [])
-        ),
-    )
-    return head + "\n" + fields
+    
+    # Contract fields (shared fields)
+    contract_fields_data = res.get("contract_fields", {})
+    contract_rows = []
+    for field_name, field_info in contract_fields_data.items():
+        status = field_info.get("status", "empty")
+        error = field_info.get("error") or "-"
+        contract_rows.append([field_name, status, error])
+    
+    fields_block = block("FIELDS", contract_rows) if contract_rows else ""
+    
+    # Party fields (per-role fields)
+    party_fields_data = res.get("party_fields", {})
+    party_blocks = []
+    for role, fields in party_fields_data.items():
+        party_rows = []
+        for field_name, field_info in fields.items():
+            status = field_info.get("status", "empty")
+            error = field_info.get("error") or "-"
+            party_rows.append([field_name, status, error])
+        if party_rows:
+            party_blocks.append(block(f"PARTY/{role}", party_rows))
+    
+    # Combine all blocks
+    result = head
+    if fields_block:
+        result += "\n" + fields_block
+    for party_block in party_blocks:
+        result += "\n" + party_block
+    
+    return result
 
 
 def vsc_built(res: dict) -> str:
