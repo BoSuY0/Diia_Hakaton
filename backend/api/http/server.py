@@ -2400,9 +2400,24 @@ async def _generate_chat_actions(
             "хочете продовжити",
             "готові продовжити",
             "бажаєте продовжити",
+            "бажаєте використати",
         ]
         
-        if any(kw in reply_lower for kw in confirmation_keywords):
+        # Ключові слова що вказують на готовність до заповнення (а не підтвердження)
+        filling_keywords = ["кнопку нижче", "натисніть кнопку", "використовуйте кнопку", 
+                           "button below", "click the button", "для заповнення"]
+        
+        if any(kw in reply_lower for kw in filling_keywords):
+            # LLM каже про кнопку для заповнення - показуємо "Заповнити договір"
+            actions.append(ChatAction(
+                type="navigate_filling_mode",
+                label="Заповнити договір",
+                payload={
+                    "category_id": session.category_id,
+                    "template_id": session.template_id or "",
+                }
+            ))
+        elif any(kw in reply_lower for kw in confirmation_keywords):
             # LLM питає підтвердження - пропонуємо кнопку навігації
             actions.append(ChatAction(
                 type="navigate_filling_mode",
