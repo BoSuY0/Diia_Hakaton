@@ -361,6 +361,27 @@ function App() {
     setStep('template');
   };
 
+  const handleAiChatFromCategory = async () => {
+    // Створюємо сесію для AI чату якщо ще не створена
+    if (!sessionId) {
+      try {
+        setIsLoading(true);
+        const session = await api.createSession(userId);
+        setSessionId(session.session_id);
+        updateUrl(session.session_id, null, { replace: false });
+      } catch (e) {
+        console.error("Failed to create session for AI chat", e);
+        alert("Не вдалося створити сесію");
+        setIsLoading(false);
+        return;
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    setSelectedMode('ai');
+    setStep('ai_chat');
+  };
+
   const handleTemplateSelect = async (template) => {
     const templateId = typeof template === 'string' ? template : template?.id;
     const templateLabel = typeof template === 'string' ? null : template?.name;
@@ -416,10 +437,6 @@ function App() {
       }
     }
 
-    if (mode === 'ai') {
-      setStep('ai_chat');
-      return;
-    }
     setStep('role');
   };
 
@@ -852,7 +869,12 @@ function App() {
   const renderStep = () => {
     switch (step) {
       case 'category':
-        return <CategorySelector onSelect={handleCategorySelect} />;
+        return (
+          <CategorySelector
+            onSelect={handleCategorySelect}
+            onAiChatClick={handleAiChatFromCategory}
+          />
+        );
       case 'template':
         return (
           <TemplateSelector
@@ -922,7 +944,7 @@ function App() {
           <AIChat
             sessionId={sessionId}
             userId={userId}
-            onBack={() => setStep('mode')}
+            onBack={() => setStep('category')}
           />
         );
       default:

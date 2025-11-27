@@ -2254,6 +2254,9 @@ def _compute_status_effective(session: Session) -> str:
     """
     if session.is_fully_signed:
         return "completed"
+    # Якщо всі дані заповнені - готовий до підпису
+    if session.can_build_contract:
+        return "ready_to_sign"
     return session.state.value
 
 
@@ -2367,7 +2370,9 @@ async def get_contract_info(
 
     user_id = _require_user_id(x_user_id, authorization)
 
-    check_session_access(session, user_id, require_participant=True, allow_owner=True)
+    # Дозволяємо read-only доступ для нових користувачів якщо сесія не повна
+    # require_participant=False щоб нові учасники могли бачити інформацію про договір
+    check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
@@ -2791,37 +2796,52 @@ async def get_session_schema(
         response["parties"].append(party_obj)
 
     # --- 2. Contract Section ---
-    entities = list_entities(session.category_id)
-    for entity in entities:
-        # Filter by scope
-        if scope == "required" and not entity.required:
-            continue
+    # Умови договору може редагувати тільки власник main_role (перша роль в метаданих)
+    # - partial mode: ТІЛЬКИ main_role owner бачить contract_fields
+    # - full mode: всі бачать contract_fields (бо одна людина заповнює все)
+    filling_mode = session.filling_mode or "partial"
+    main_role_owner = session.role_owners.get(main_role) if main_role else None
+    
+    if filling_mode == "full":
+        # В full mode всі можуть редагувати умови договору
+        user_can_edit_contract = True
+    else:
+        # В partial mode - тільки власник main_role
+        # НЕ показуємо навіть якщо роль ще нікому не належить (інша сторона не повинна заповнювати)
+        user_can_edit_contract = (main_role_owner == user_id) if main_role_owner else False
+    
+    if user_can_edit_contract:
+        entities = list_entities(session.category_id)
+        for entity in entities:
+            # Filter by scope
+            if scope == "required" and not entity.required:
+                continue
 
-        # Determine value based on data_mode
-        val = None
-        fs = (session.contract_fields or {}).get(entity.field)
-        if data_mode != "none":
-            current_entry = session.all_data.get(entity.field) if session.all_data else None
-            raw_val = current_entry.get("current", "") if current_entry else ""
+            # Determine value based on data_mode
+            val = None
+            fs = (session.contract_fields or {}).get(entity.field)
+            if data_mode != "none":
+                current_entry = session.all_data.get(entity.field) if session.all_data else None
+                raw_val = current_entry.get("current", "") if current_entry else ""
 
-            if data_mode == "values":
-                val = raw_val if fs and fs.status == "ok" else None
-            elif data_mode == "status":
-                val = bool(fs and fs.status == "ok")
+                if data_mode == "values":
+                    val = raw_val if fs and fs.status == "ok" else None
+                elif data_mode == "status":
+                    val = bool(fs and fs.status == "ok")
 
-        status = fs.status if fs else "empty"
-        error_msg = fs.error if fs else None
+            status = fs.status if fs else "empty"
+            error_msg = fs.error if fs else None
 
-        response["contract"]["fields"].append({
-            "key": entity.field,
-            "field_name": entity.field,
-            "label": entity.label,
-            "placeholder": entity.label,
-            "required": entity.required,
-            "value": val,
-            "status": status,
-            "error": error_msg,
-        })
+            response["contract"]["fields"].append({
+                "key": entity.field,
+                "field_name": entity.field,
+                "label": entity.label,
+                "placeholder": entity.label,
+                "required": entity.required,
+                "value": val,
+                "status": status,
+                "error": error_msg,
+            })
 
     return response
 
@@ -2886,7 +2906,8 @@ async def get_session_history(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     user_id = _require_user_id(x_user_id, authorization)
-    check_session_access(session, user_id, require_participant=True, allow_owner=True)
+    # Дозволяємо read-only доступ для нових користувачів
+    check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
     return {
         "session_id": session.session_id,

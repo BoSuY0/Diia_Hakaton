@@ -38,7 +38,6 @@
       "fields": [
         { "field": "name",    "label": "ПІБ ФОП",                           "required": true  },
         { "field": "address", "label": "Адреса реєстрації ФОП",             "required": true  },
-        { "field": "representative","label": "Представник",                 "required": false },
         { "field": "id_code", "label": "РНОКПП",                            "required": true  },
         { "field": "id_doc",  "label": "Паспорт (серія/номер)",             "required": false },
         { "field": "phone",   "label": "Телефон",                           "required": false },
@@ -52,7 +51,6 @@
         { "field": "name",          "label": "Повна назва юр. особи",        "required": true  },
         { "field": "address",       "label": "Юридична адреса",              "required": true  },
         { "field": "id_code",       "label": "Код ЄДРПОУ",                   "required": true  },
-        { "field": "representative","label": "ПІБ директора / представника","required": false },
         { "field": "id_doc",        "label": "Документ представника",        "required": false },
         { "field": "phone",         "label": "Телефон",                      "required": false },
         { "field": "email",         "label": "Email",                        "required": false }

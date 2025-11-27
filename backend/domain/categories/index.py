@@ -130,13 +130,13 @@ def load_meta(category: Category, use_cache: bool = True) -> dict:
     """
     if use_cache and category.id in _meta_cache:
         return _meta_cache[category.id]
-    
+
     with category.meta_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    
+
     if use_cache:
         _meta_cache[category.id] = data
-    
+
     return data
 
 
