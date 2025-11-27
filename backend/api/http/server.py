@@ -2367,7 +2367,9 @@ async def get_contract_info(
 
     user_id = _require_user_id(x_user_id, authorization)
 
-    check_session_access(session, user_id, require_participant=True, allow_owner=True)
+    # Дозволяємо read-only доступ для нових користувачів якщо сесія не повна
+    # require_participant=False щоб нові учасники могли бачити інформацію про договір
+    check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
     document_ready = session.state in {SessionState.BUILT, SessionState.COMPLETED}
     document_url = (
@@ -2886,7 +2888,8 @@ async def get_session_history(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     user_id = _require_user_id(x_user_id, authorization)
-    check_session_access(session, user_id, require_participant=True, allow_owner=True)
+    # Дозволяємо read-only доступ для нових користувачів
+    check_session_access(session, user_id, require_participant=False, allow_owner=True)
 
     return {
         "session_id": session.session_id,
