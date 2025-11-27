@@ -45,7 +45,7 @@ def set_session_category(session: Session, category_id: str) -> bool:
             "set_session_category: required_roles=%s",
             session.required_roles,
         )
-    except (FileNotFoundError, KeyError) as e:
+    except (FileNotFoundError, KeyError, ValueError) as e:
         logger.warning("Failed to load category metadata: %s", e)
         session.required_roles = []
 
