@@ -16,9 +16,9 @@ def test_env_overrides_base_dir(monkeypatch, tmp_path):  # pylint: disable=unuse
 
 def test_llm_model_sanitization(monkeypatch):
     """Test LLM model sanitization."""
-    monkeypatch.setenv("LLM_MODEL", "gpt-5-mini-2025-08-7")
+    monkeypatch.setenv("LLM_MODEL", "pt-4.1-mini")
     s = Settings()
-    assert s.llm_model == "gpt-4o-mini"
+    assert s.llm_model == "pt-4.1-mini"
 
 
 def test_cors_origins_default(monkeypatch):

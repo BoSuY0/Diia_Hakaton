@@ -69,7 +69,11 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
 
       <div className="chat-messages">
         {messages.map((m, idx) => (
-          <div key={`${m.role}-${idx}-${typeof m.content === 'string' ? m.content.slice(0, 10) : ''}`}>
+          <div
+            key={`${m.role}-${idx}-${
+              typeof m.content === "string" ? m.content.slice(0, 10) : ""
+            }`}
+          >
             <div className={`chat-message ${m.role}`}>
               <div className="message-bubble">{m.content}</div>
             </div>
@@ -116,7 +120,7 @@ export const AIChat = ({ sessionId, userId, onBack }) => {
         />
         <button
           className="send-button"
-          onClick={handleSend}
+          onClick={() => handleSend()}
           disabled={isSending || !input.trim()}
         >
           ➤

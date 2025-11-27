@@ -496,6 +496,7 @@ ALLOWED_TOOLS_BY_STATE: Dict[str, List[str]] = {
         "route_message",
         "find_category_by_query",
         "get_templates_for_category",
+        "get_party_fields_for_session",
         "set_party_context",
         "upsert_field",
         "get_session_summary",
@@ -828,6 +829,12 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                 signature_parts.append(f"{canon_name}:{tc.function.arguments}")
             signature = "|".join(signature_parts)
             if signature and signature == last_tool_signature:
+                logger.warning(
+                    "⚠️ INFINITE LOOP DETECTED: Tool called twice with same args. "
+                    "session_id=%s signature=%s",
+                    conv.session_id,
+                    signature,
+                )
                 messages.append(
                     {
                         "role": "assistant",
@@ -847,29 +854,39 @@ async def _tool_loop(messages: List[Dict[str, Any]], conv: Conversation) -> List
                 tool_name = TOOL_CANON_BY_ALIAS.get(tool_name_alias, tool_name_alias)
                 raw_args = tool_call.function.arguments or "{}"
 
-                tool_args = inject_session_id(
-                    raw_args,
-                    conv.session_id,
-                    tool_name,
-                )
-                logger.info("Executing tool %s", tool_name)
-                tool_result = await dispatch_tool_async(
-                    tool_name,
-                    tool_args,
-                    tags=getattr(conv, "tags", None),
-                    user_id=getattr(conv, "user_id", None),
-                )
+                try:
+                    tool_args = inject_session_id(
+                        raw_args,
+                        conv.session_id,
+                        tool_name,
+                    )
+                    logger.info("🔧 Executing tool: %s with args: %s", tool_name, tool_args[:200] if len(tool_args) > 200 else tool_args)
+                    tool_result = await dispatch_tool_async(
+                        tool_name,
+                        tool_args,
+                        tags=getattr(conv, "tags", None),
+                        user_id=getattr(conv, "user_id", None),
+                    )
+                    logger.info("✅ Tool %s completed successfully", tool_name)
 
-                if tool_name == "set_category":
-                    # Після явного set_category вважаємо, що категорія зафіксована
-                    # в межах цієї розмови (для state-gating).
-                    try:
-                        conv.has_category_tool = True
-                    except AttributeError:
-                        pass
+                    if tool_name == "set_category":
+                        # Після явного set_category вважаємо, що категорія зафіксована
+                        # в межах цієї розмови (для state-gating).
+                        try:
+                            conv.has_category_tool = True
+                        except AttributeError:
+                            pass
 
-                # tool_result is now already a string (VSC or JSON)
-                compact_content = tool_result
+                    # tool_result is now already a string (VSC or JSON)
+                    compact_content = tool_result
+                except Exception as e:
+                    # CRITICAL: Always append a tool response, even on error
+                    logger.exception("Tool execution failed for %s: %s", tool_name, e)
+                    compact_content = json.dumps(
+                        {"error": f"Tool execution failed: {str(e)}"},
+                        ensure_ascii=False,
+                    )
+                
                 messages.append(
                     {
                         "role": "tool",
